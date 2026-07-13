@@ -57,6 +57,7 @@ import { defaultRuntime } from "../../runtime.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
+import { shouldBridgeCliPreambleEvents } from "../get-reply-options.types.js";
 import {
   getReplyPayloadMetadata,
   isReplyPayloadStatusNotice,
@@ -113,6 +114,7 @@ import {
   FollowupRunDeferredError,
   isFollowupRunAborted,
   refreshQueuedFollowupSession,
+  resolveFollowupAbortSignal,
   type FollowupRun,
   resolveQueueSettings,
 } from "./queue.js";
@@ -158,15 +160,6 @@ function preserveNonVisibleFollowupResult(
     // Prefer any earlier result that carries a user-facing terminal presentation.
     preserveResultPriority: -1,
   };
-}
-
-function resolveFollowupAbortSignal(
-  run: Pick<FollowupRun, "abortSignal" | "queueAbortSignal">,
-): AbortSignal | undefined {
-  const signals = [run.abortSignal, run.queueAbortSignal].filter(
-    (signal): signal is AbortSignal => signal !== undefined,
-  );
-  return signals.length > 1 ? AbortSignal.any(signals) : signals[0];
 }
 
 type FollowupAgentEvent = { stream: string; data: Record<string, unknown> };
@@ -1221,9 +1214,7 @@ export function createFollowupRunner(params: {
                     ]);
                   },
                   onCommentaryText:
-                    progressOpts?.onItemEvent &&
-                    (progressOpts.commentaryProgressEnabled === true ||
-                      progressOpts.progressPreambleEnabled === true)
+                    progressOpts?.onItemEvent && shouldBridgeCliPreambleEvents(progressOpts)
                       ? async ({ text, itemId }) => {
                           await forwardFollowupProgressEvent({
                             evt: {
