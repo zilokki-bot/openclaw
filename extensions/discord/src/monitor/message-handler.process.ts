@@ -1116,6 +1116,9 @@ async function processDiscordMessageInner(
               await draftPreview.pushNarrationProgress(payload.text);
             }
           : undefined,
+        isProgressDraftVisible: draftPreview.narrationProgressEnabled
+          ? () => draftPreview.hasProgressDraftStarted
+          : undefined,
         narrationHideCommandText: draftPreview.narrationHideCommandText ? true : undefined,
         onReasoningStream: async (payload) => {
           if (payload?.requiresReasoningProgressOptIn === true && !reasoningWindowEnabled) {

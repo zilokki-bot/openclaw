@@ -35,6 +35,7 @@ function createNarratorHarness(params?: {
   texts?: Array<string | null>;
   now?: () => number;
   hideCommandText?: boolean;
+  isProgressDraftVisible?: () => boolean;
 }) {
   const inputs: ProgressNarrationInput[] = [];
   const texts = params?.texts ?? ["Working on the request."];
@@ -51,6 +52,7 @@ function createNarratorHarness(params?: {
     generate,
     now: params?.now,
     hideCommandText: params?.hideCommandText,
+    isProgressDraftVisible: params?.isProgressDraftVisible,
   });
   return { narrator, generate, onUpdate, inputs };
 }
@@ -76,6 +78,35 @@ describe("createProgressNarrator", () => {
     await flushNarrations();
 
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("does not generate narration while the progress draft is hidden", async () => {
+    const { narrator, generate } = createNarratorHarness({
+      isProgressDraftVisible: () => false,
+    });
+
+    narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "first" } });
+    narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "second" } });
+    await flushNarrations();
+
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("generates from buffered notes after the progress draft becomes visible", async () => {
+    let visible = false;
+    const { narrator, generate, inputs } = createNarratorHarness({
+      isProgressDraftVisible: () => visible,
+    });
+
+    narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "first" } });
+    await flushNarrations();
+    visible = true;
+    narrator.noteToolStart({ name: "exec", phase: "start", args: { command: "second" } });
+    await flushNarrations();
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(inputs[0]?.activityNotes.join("\n")).toContain("first");
+    expect(inputs[0]?.activityNotes.join("\n")).toContain("second");
   });
 
   it("batches follow-up events until the event threshold", async () => {
