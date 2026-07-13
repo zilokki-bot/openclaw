@@ -66,9 +66,32 @@ type ServiceOptions = {
   now?: () => number;
 };
 
+export type WorktreeCleanupLimits = {
+  maxCount?: number;
+  maxTotalSizeBytes?: number;
+};
+
 type ManagedWorktreeGcParams = {
   isOwnerActive?: (ownerKind: ManagedWorktreeOwnerKind, ownerId: string) => boolean;
+  limits?: WorktreeCleanupLimits;
 };
+
+/**
+ * Maps `worktrees.cleanup` config into enforceable byte/count limits.
+ * 0 and unset both mean "no limit", so gc callers can pass the result verbatim.
+ */
+export function resolveWorktreeCleanupLimits(config?: {
+  cleanup?: { maxCount?: number; maxTotalSizeGb?: number };
+}): WorktreeCleanupLimits {
+  const maxCount = config?.cleanup?.maxCount;
+  const maxTotalSizeGb = config?.cleanup?.maxTotalSizeGb;
+  return {
+    ...(typeof maxCount === "number" && maxCount > 0 ? { maxCount: Math.floor(maxCount) } : {}),
+    ...(typeof maxTotalSizeGb === "number" && maxTotalSizeGb > 0
+      ? { maxTotalSizeBytes: Math.round(maxTotalSizeGb * 1024 ** 3) }
+      : {}),
+  };
+}
 
 function resultMessage(result: GitResult): string {
   return (result.stderr || result.stdout).trim().split("\n").slice(-12).join("\n");
@@ -280,6 +303,22 @@ async function runSetupScript(repoRoot: string, worktreePath: string): Promise<v
       `worktree setup failed${resultMessage(result) ? `:\n${resultMessage(result)}` : ""}`,
     );
   }
+}
+
+/** Sums file sizes without following symlinks, so a link cannot inflate or escape the worktree. */
+async function directorySizeBytes(root: string): Promise<number> {
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  let total = 0;
+  for (const entry of entries) {
+    const child = path.join(root, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      total += await directorySizeBytes(child);
+    } else {
+      const stat = await fs.lstat(child).catch(() => undefined);
+      total += stat?.size ?? 0;
+    }
+  }
+  return total;
 }
 
 async function snapshotWorktree(record: ManagedWorktreeRecord, reason: string): Promise<string> {
@@ -736,21 +775,8 @@ export class ManagedWorktreeService {
           expiresWhenIdle &&
           now - record.lastActiveAt > IDLE_GC_MS
         ) {
-          if (
-            record.ownerId !== undefined &&
-            params.isOwnerActive?.(record.ownerKind, record.ownerId) === true
-          ) {
+          if (await this.isProtectedFromAutoRemoval(record, params.isOwnerActive)) {
             continue;
-          }
-          if (hasLiveWorktreeRunLease(this.env, record.id)) {
-            continue;
-          }
-          const state = await lockState(record);
-          if (state.kind === "live" || state.kind === "foreign") {
-            continue;
-          }
-          if (state.kind === "dead") {
-            await requireGit(record.repoRoot, ["worktree", "unlock", record.path]);
           }
           await this.remove({ id: record.id, reason: "idle-gc" });
           removed.push(record.id);
@@ -759,6 +785,7 @@ export class ManagedWorktreeService {
         log.warn(`idle cleanup failed for ${record.id}: ${String(error)}`);
       }
     }
+    removed.push(...(await this.enforceCleanupLimits(params)));
     const orphansDeleted = await this.reconcileOrphans(records);
     let snapshotsPruned = 0;
     for (const record of listRegistryWorktrees(this.env)) {
@@ -776,6 +803,89 @@ export class ManagedWorktreeService {
       }
     }
     return { removed, orphansDeleted, snapshotsPruned };
+  }
+
+  /**
+   * Shared auto-removal guard for idle and limit cleanup: active owners, live run
+   * leases, and live/foreign git locks all veto removal; a dead lock is cleared.
+   */
+  private async isProtectedFromAutoRemoval(
+    record: ManagedWorktreeRecord,
+    isOwnerActive?: (ownerKind: ManagedWorktreeOwnerKind, ownerId: string) => boolean,
+  ): Promise<boolean> {
+    if (
+      record.ownerId !== undefined &&
+      isOwnerActive?.(record.ownerKind, record.ownerId) === true
+    ) {
+      return true;
+    }
+    if (hasLiveWorktreeRunLease(this.env, record.id)) {
+      return true;
+    }
+    const state = await lockState(record);
+    if (state.kind === "live" || state.kind === "foreign") {
+      return true;
+    }
+    if (state.kind === "dead") {
+      await requireGit(record.repoRoot, ["worktree", "unlock", record.path]);
+    }
+    return false;
+  }
+
+  /**
+   * Enforces configured count/size retention across all live managed worktrees.
+   * Manual worktrees count toward the totals but are never limit-evicted, so a
+   * limit can stay exceeded when only protected worktrees remain.
+   */
+  private async enforceCleanupLimits(params: ManagedWorktreeGcParams): Promise<string[]> {
+    const limits = params.limits ?? {};
+    if (limits.maxCount === undefined && limits.maxTotalSizeBytes === undefined) {
+      return [];
+    }
+    const live = listRegistryWorktrees(this.env).filter((record) => record.removedAt === undefined);
+    const sizes = new Map<string, number>();
+    let totalBytes = 0;
+    if (limits.maxTotalSizeBytes !== undefined) {
+      for (const record of live) {
+        const bytes = await directorySizeBytes(record.path);
+        sizes.set(record.id, bytes);
+        totalBytes += bytes;
+      }
+    }
+    let liveCount = live.length;
+    const overLimit = () =>
+      (limits.maxCount !== undefined && liveCount > limits.maxCount) ||
+      (limits.maxTotalSizeBytes !== undefined && totalBytes > limits.maxTotalSizeBytes);
+    if (!overLimit()) {
+      return [];
+    }
+    const removed: string[] = [];
+    const candidates = live
+      .filter((record) => record.ownerKind === "workboard" || record.ownerKind === "session")
+      .toSorted((a, b) => a.lastActiveAt - b.lastActiveAt);
+    for (const record of candidates) {
+      if (!overLimit()) {
+        break;
+      }
+      try {
+        if (await this.isProtectedFromAutoRemoval(record, params.isOwnerActive)) {
+          continue;
+        }
+        await this.remove({ id: record.id, reason: "limit-gc" });
+      } catch (error) {
+        log.warn(`cleanup limit removal failed for ${record.id}: ${String(error)}`);
+        continue;
+      }
+      removed.push(record.id);
+      liveCount -= 1;
+      totalBytes -= sizes.get(record.id) ?? 0;
+    }
+    if (overLimit()) {
+      log.warn(
+        `worktree cleanup limits still exceeded after evicting ${removed.length}; remaining worktrees are protected or manual`,
+      );
+    }
+    return removed;
   }
 
   private requireLiveRecord(id: string): ManagedWorktreeRecord {

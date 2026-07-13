@@ -11,7 +11,11 @@ import {
   validateWorktreesRestoreParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
-import { managedWorktrees, WorktreeSnapshotError } from "../../agents/worktrees/service.js";
+import {
+  managedWorktrees,
+  resolveWorktreeCleanupLimits,
+  WorktreeSnapshotError,
+} from "../../agents/worktrees/service.js";
 import type { ManagedWorktreeService } from "../../agents/worktrees/service.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -137,13 +141,14 @@ export function createWorktreesHandlers(service: WorktreeService): GatewayReques
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(error)));
       }
     },
-    "worktrees.gc": async ({ params, respond }) => {
+    "worktrees.gc": async ({ params, respond, context }) => {
       if (!validateWorktreesGcParams(params)) {
         invalidParams(respond);
         return;
       }
       try {
-        respond(true, await service.gc(), undefined);
+        const limits = resolveWorktreeCleanupLimits(context.getRuntimeConfig().worktrees);
+        respond(true, await service.gc({ limits }), undefined);
       } catch (error) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(error)));
       }

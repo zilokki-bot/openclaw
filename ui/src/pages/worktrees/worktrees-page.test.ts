@@ -16,6 +16,9 @@ type WorktreesPageTestElement = HTMLElement & {
   createName: string;
   createBaseRef: string;
   createBranches: string[];
+  cleanupLoaded: boolean;
+  cleanupMaxCount: number;
+  cleanupMaxSizeGb: number;
   updateComplete: Promise<boolean>;
   requestUpdate: () => void;
   load: () => Promise<void>;
@@ -23,6 +26,8 @@ type WorktreesPageTestElement = HTMLElement & {
   createWorktree: () => Promise<void>;
   removeWorktree: (record: WorktreeRecord) => Promise<void>;
   restore: (record: WorktreeRecord) => Promise<void>;
+  setCleanupLimit: (key: "maxCount" | "maxTotalSizeGb", value: number) => void;
+  commitCleanupLimits: () => Promise<void>;
 };
 
 function deferred<T>() {
@@ -101,6 +106,40 @@ function contextWithGateway(gateway: ApplicationContext["gateway"]): Application
     navigate: vi.fn(),
     preload: vi.fn(async () => undefined),
   } as unknown as ApplicationContext;
+}
+
+function runtimeConfigStub(cleanup?: { maxCount?: number; maxTotalSizeGb?: number }) {
+  const state = {
+    configSnapshot: { sourceConfig: cleanup ? { worktrees: { cleanup } } : {} },
+    lastError: null as string | null,
+  };
+  const listeners = new Set<(next: typeof state) => void>();
+  return {
+    state,
+    ensureLoaded: vi.fn(async () => undefined),
+    refresh: vi.fn(async () => undefined),
+    patch: vi.fn(async () => true),
+    subscribe: (listener: (next: typeof state) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    emit() {
+      for (const listener of listeners) {
+        listener(state);
+      }
+    },
+  };
+}
+
+function contextWithConfig(
+  gateway: ApplicationContext["gateway"],
+  runtimeConfig: ReturnType<typeof runtimeConfigStub>,
+): ApplicationContext {
+  const context = contextWithGateway(gateway) as ApplicationContext & {
+    runtimeConfig: unknown;
+  };
+  context.runtimeConfig = runtimeConfig;
+  return context;
 }
 
 afterEach(() => {
@@ -403,6 +442,106 @@ describe("WorktreesPage lifecycle", () => {
     );
     expect(freshInputs).toHaveLength(3);
     expect(freshInputs.every((input) => !input.disabled)).toBe(true);
+  });
+
+  it("renders cleanup limits from config and disables controls until config loads", async () => {
+    const request = vi.fn(async () => ({ worktrees: [] }));
+    const withConfig = document.createElement(
+      "openclaw-worktrees-page",
+    ) as WorktreesPageTestElement;
+    withConfig.context = contextWithConfig(
+      gatewayWithClient({ request } as unknown as GatewayBrowserClient),
+      runtimeConfigStub({ maxCount: 25, maxTotalSizeGb: 50 }),
+    );
+    document.body.append(withConfig);
+    await vi.waitFor(() => expect(withConfig.cleanupLoaded).toBe(true));
+    await withConfig.updateComplete;
+
+    expect(withConfig.cleanupMaxCount).toBe(25);
+    expect(withConfig.cleanupMaxSizeGb).toBe(50);
+    const inputs = Array.from(
+      withConfig.querySelectorAll<HTMLInputElement>(".worktrees-cleanup input"),
+    );
+    expect(inputs.map((input) => input.value)).toEqual(["25", "50"]);
+    expect(inputs.every((input) => !input.disabled)).toBe(true);
+
+    // Without a runtimeConfig capability the section stays visible but inert.
+    const withoutConfig = document.createElement(
+      "openclaw-worktrees-page",
+    ) as WorktreesPageTestElement;
+    withoutConfig.context = contextWithGateway(
+      gatewayWithClient({ request } as unknown as GatewayBrowserClient),
+    );
+    document.body.append(withoutConfig);
+    await withoutConfig.updateComplete;
+    const inertInputs = Array.from(
+      withoutConfig.querySelectorAll<HTMLInputElement>(".worktrees-cleanup input"),
+    );
+    expect(inertInputs).toHaveLength(2);
+    expect(inertInputs.every((input) => input.disabled)).toBe(true);
+  });
+
+  it("debounces stepper edits into one minimal config patch", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn(async () => ({ worktrees: [] }));
+      const runtimeConfig = runtimeConfigStub({ maxCount: 25, maxTotalSizeGb: 50 });
+      const page = document.createElement("openclaw-worktrees-page") as WorktreesPageTestElement;
+      page.context = contextWithConfig(
+        gatewayWithClient({ request } as unknown as GatewayBrowserClient),
+        runtimeConfig,
+      );
+      document.body.append(page);
+      await page.updateComplete;
+      expect(page.cleanupLoaded).toBe(true);
+
+      page.setCleanupLimit("maxCount", 26);
+      page.setCleanupLimit("maxCount", 27);
+      page.setCleanupLimit("maxTotalSizeGb", 49);
+      expect(page.cleanupMaxCount).toBe(27);
+      expect(page.cleanupMaxSizeGb).toBe(49);
+      expect(runtimeConfig.patch).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(700);
+
+      expect(runtimeConfig.patch).toHaveBeenCalledOnce();
+      expect(runtimeConfig.patch).toHaveBeenCalledWith({
+        raw: { worktrees: { cleanup: { maxCount: 27, maxTotalSizeGb: 49 } } },
+        note: "worktrees: update cleanup limits",
+      });
+      expect(runtimeConfig.refresh).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clamps cleanup edits to non-negative integers and surfaces patch failures", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn(async () => ({ worktrees: [] }));
+      const runtimeConfig = runtimeConfigStub({ maxCount: 1 });
+      runtimeConfig.patch = vi.fn(async () => false);
+      runtimeConfig.state.lastError = "config hash mismatch";
+      const page = document.createElement("openclaw-worktrees-page") as WorktreesPageTestElement;
+      page.context = contextWithConfig(
+        gatewayWithClient({ request } as unknown as GatewayBrowserClient),
+        runtimeConfig,
+      );
+      document.body.append(page);
+      await page.updateComplete;
+
+      page.setCleanupLimit("maxCount", -5);
+      expect(page.cleanupMaxCount).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(700);
+      expect(runtimeConfig.patch).toHaveBeenCalledWith({
+        raw: { worktrees: { cleanup: { maxCount: 0 } } },
+        note: "worktrees: update cleanup limits",
+      });
+      expect(page.error).toBe("config hash mismatch");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses the current branch when a repository has no remote default", async () => {

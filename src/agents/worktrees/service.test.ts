@@ -6,7 +6,12 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { getRegistryWorktree } from "./registry.js";
-import { IDLE_GC_MS, ManagedWorktreeService, SNAPSHOT_RETENTION_MS } from "./service.js";
+import {
+  IDLE_GC_MS,
+  ManagedWorktreeService,
+  resolveWorktreeCleanupLimits,
+  SNAPSHOT_RETENTION_MS,
+} from "./service.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -677,6 +682,114 @@ describe("ManagedWorktreeService", () => {
     await expect(fs.stat(debris)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await fs.stat(foreign)).toBeTruthy();
     await git(repo, "worktree", "remove", "--force", foreign);
+  });
+
+  it("evicts the least recently active run-owned worktrees over the count limit", async () => {
+    const manual = await service.create({ repoRoot: repo, name: "manual-kept" });
+    const oldest = await service.create({
+      repoRoot: repo,
+      name: "count-oldest",
+      ownerKind: "session",
+      ownerId: "agent:main:oldest",
+    });
+    now += 1;
+    const middle = await service.create({
+      repoRoot: repo,
+      name: "count-middle",
+      ownerKind: "workboard",
+      ownerId: "card-middle",
+    });
+    now += 1;
+    const newest = await service.create({
+      repoRoot: repo,
+      name: "count-newest",
+      ownerKind: "session",
+      ownerId: "agent:main:newest",
+    });
+
+    const result = await service.gc({ limits: { maxCount: 2 } });
+
+    expect(result.removed).toEqual([oldest.id, middle.id]);
+    expect(getRegistryWorktree(env, manual.id)?.removedAt).toBeUndefined();
+    expect(getRegistryWorktree(env, newest.id)?.removedAt).toBeUndefined();
+    expect(getRegistryWorktree(env, oldest.id)?.snapshotRef).toBeTruthy();
+    await expect(fs.stat(oldest.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("skips active owners during count-limit eviction", async () => {
+    const activeOldest = await service.create({
+      repoRoot: repo,
+      name: "limit-active",
+      ownerKind: "session",
+      ownerId: "agent:main:active",
+    });
+    now += 1;
+    const idle = await service.create({
+      repoRoot: repo,
+      name: "limit-idle",
+      ownerKind: "session",
+      ownerId: "agent:main:idle",
+    });
+    const isOwnerActive = vi.fn(
+      (_ownerKind: string, ownerId: string) => ownerId === "agent:main:active",
+    );
+
+    const result = await service.gc({ limits: { maxCount: 1 }, isOwnerActive });
+
+    expect(result.removed).toEqual([idle.id]);
+    expect(getRegistryWorktree(env, activeOldest.id)?.removedAt).toBeUndefined();
+  });
+
+  it("evicts oldest worktrees until total size fits the size limit", async () => {
+    const oldest = await service.create({
+      repoRoot: repo,
+      name: "size-oldest",
+      ownerKind: "session",
+      ownerId: "agent:main:size-old",
+    });
+    await fs.writeFile(path.join(oldest.path, "blob.bin"), Buffer.alloc(10_000));
+    now += 1;
+    const newest = await service.create({
+      repoRoot: repo,
+      name: "size-newest",
+      ownerKind: "session",
+      ownerId: "agent:main:size-new",
+    });
+
+    const result = await service.gc({ limits: { maxTotalSizeBytes: 6_000 } });
+
+    expect(result.removed).toEqual([oldest.id]);
+    expect(getRegistryWorktree(env, newest.id)?.removedAt).toBeUndefined();
+    expect(getRegistryWorktree(env, oldest.id)?.snapshotRef).toBeTruthy();
+  });
+
+  it("leaves everything in place when limits are not exceeded", async () => {
+    const created = await service.create({
+      repoRoot: repo,
+      name: "under-limit",
+      ownerKind: "session",
+      ownerId: "agent:main:under",
+    });
+
+    const result = await service.gc({
+      limits: { maxCount: 5, maxTotalSizeBytes: 1024 ** 3 },
+    });
+
+    expect(result.removed).toEqual([]);
+    expect(getRegistryWorktree(env, created.id)?.removedAt).toBeUndefined();
+  });
+
+  it("maps cleanup config onto limits with 0 and unset disabling each bound", () => {
+    expect(resolveWorktreeCleanupLimits(undefined)).toEqual({});
+    expect(resolveWorktreeCleanupLimits({ cleanup: { maxCount: 0, maxTotalSizeGb: 0 } })).toEqual(
+      {},
+    );
+    expect(resolveWorktreeCleanupLimits({ cleanup: { maxCount: 25, maxTotalSizeGb: 50 } })).toEqual(
+      { maxCount: 25, maxTotalSizeBytes: 50 * 1024 ** 3 },
+    );
+    expect(resolveWorktreeCleanupLimits({ cleanup: { maxTotalSizeGb: 0.5 } })).toEqual({
+      maxTotalSizeBytes: 512 * 1024 ** 2,
+    });
   });
 
   it("prunes expired snapshot refs and registry rows", async () => {

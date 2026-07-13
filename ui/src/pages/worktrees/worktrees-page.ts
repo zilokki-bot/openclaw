@@ -8,6 +8,7 @@ import { pathForRoute } from "../../app-route-paths.ts";
 import { applicationContext, type ApplicationContext } from "../../app/context.ts";
 import { renderSettingsWorkspace } from "../../components/settings-workspace.ts";
 import { t } from "../../i18n/index.ts";
+import { resolveEditableSnapshotConfig } from "../../lib/config/index.ts";
 import { formatRelativeTimestamp } from "../../lib/format.ts";
 import { searchForSession } from "../../lib/sessions/index.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
@@ -31,6 +32,24 @@ function repoName(repoRoot: string): string {
   return repoRoot.split(/[\\/]/).findLast(Boolean) ?? repoRoot;
 }
 
+type CleanupLimitKey = "maxCount" | "maxTotalSizeGb";
+
+const CLEANUP_COMMIT_DELAY_MS = 600;
+
+function cleanupLimitFromConfig(
+  config: Record<string, unknown> | null,
+  key: CleanupLimitKey,
+): number {
+  const worktrees = config?.worktrees;
+  const cleanup =
+    worktrees && typeof worktrees === "object"
+      ? (worktrees as { cleanup?: unknown }).cleanup
+      : undefined;
+  const value =
+    cleanup && typeof cleanup === "object" ? (cleanup as Record<string, unknown>)[key] : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
 class WorktreesPage extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
   private context!: ApplicationContext;
@@ -45,6 +64,13 @@ class WorktreesPage extends OpenClawLightDomElement {
   @state() private createBaseRef = "";
   @state() private createBranches: string[] = [];
   @state() private creating = false;
+  @state() private cleanupLoaded = false;
+  @state() private cleanupMaxCount = 0;
+  @state() private cleanupMaxSizeGb = 0;
+
+  // Debounced stepper commits: rapid clicks fold into one rate-limited config.patch.
+  private cleanupCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingCleanupPatch: Partial<Record<CleanupLimitKey, number>> = {};
 
   private client: GatewayBrowserClient | null = null;
   private gatewayConnected = false;
@@ -53,29 +79,106 @@ class WorktreesPage extends OpenClawLightDomElement {
   private loadGeneration = 0;
   private branchesGeneration = 0;
   private operationEpoch = 0;
-  private readonly subscriptions = new SubscriptionsController(this).effect(
-    () => this.context?.gateway,
-    (gateway) => {
-      const sourceChanged = this.hasBoundGateway && this.gatewaySource !== gateway;
-      this.gatewaySource = gateway;
-      this.hasBoundGateway = true;
-      this.applyGatewaySnapshot(gateway.snapshot, sourceChanged);
-      return gateway.subscribe((snapshot) => {
-        if (this.gatewaySource === gateway && this.context.gateway === gateway) {
-          this.applyGatewaySnapshot(snapshot);
-        }
-      });
-    },
-  );
+  private readonly subscriptions = new SubscriptionsController(this)
+    .effect(
+      () => this.context?.gateway,
+      (gateway) => {
+        const sourceChanged = this.hasBoundGateway && this.gatewaySource !== gateway;
+        this.gatewaySource = gateway;
+        this.hasBoundGateway = true;
+        this.applyGatewaySnapshot(gateway.snapshot, sourceChanged);
+        return gateway.subscribe((snapshot) => {
+          if (this.gatewaySource === gateway && this.context.gateway === gateway) {
+            this.applyGatewaySnapshot(snapshot);
+          }
+        });
+      },
+    )
+    .effect(
+      () => this.context?.runtimeConfig,
+      (runtimeConfig) => {
+        void runtimeConfig.ensureLoaded();
+        this.syncCleanupFromConfig();
+        return runtimeConfig.subscribe(() => this.syncCleanupFromConfig());
+      },
+    );
 
   override disconnectedCallback() {
     this.subscriptions.clear();
     this.invalidateLoad();
     this.invalidateOperations();
+    if (this.cleanupCommitTimer) {
+      clearTimeout(this.cleanupCommitTimer);
+      this.cleanupCommitTimer = null;
+      // Flush a pending edit so navigating away does not drop it.
+      void this.commitCleanupLimits();
+    }
     this.gatewaySource = undefined;
     this.client = null;
     this.gatewayConnected = false;
     super.disconnectedCallback();
+  }
+
+  private syncCleanupFromConfig() {
+    // A pending local edit owns the draft values until its patch settles.
+    if (this.cleanupCommitTimer || Object.keys(this.pendingCleanupPatch).length > 0) {
+      return;
+    }
+    const runtimeConfig = this.context?.runtimeConfig;
+    if (!runtimeConfig) {
+      return;
+    }
+    const config = resolveEditableSnapshotConfig(runtimeConfig.state.configSnapshot);
+    if (!config) {
+      return;
+    }
+    this.cleanupLoaded = true;
+    this.cleanupMaxCount = cleanupLimitFromConfig(config, "maxCount");
+    this.cleanupMaxSizeGb = cleanupLimitFromConfig(config, "maxTotalSizeGb");
+  }
+
+  private setCleanupLimit(key: CleanupLimitKey, rawValue: number) {
+    const value = Number.isFinite(rawValue) ? Math.max(0, Math.floor(rawValue)) : 0;
+    if (key === "maxCount") {
+      this.cleanupMaxCount = value;
+    } else {
+      this.cleanupMaxSizeGb = value;
+    }
+    this.pendingCleanupPatch[key] = value;
+    if (this.cleanupCommitTimer) {
+      clearTimeout(this.cleanupCommitTimer);
+    }
+    this.cleanupCommitTimer = setTimeout(() => {
+      this.cleanupCommitTimer = null;
+      void this.commitCleanupLimits();
+    }, CLEANUP_COMMIT_DELAY_MS);
+  }
+
+  private async commitCleanupLimits() {
+    const patch = this.pendingCleanupPatch;
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    this.pendingCleanupPatch = {};
+    const runtimeConfig = this.context?.runtimeConfig;
+    if (!runtimeConfig) {
+      return;
+    }
+    try {
+      await runtimeConfig.ensureLoaded();
+      const patched = await runtimeConfig.patch({
+        raw: { worktrees: { cleanup: patch } },
+        note: "worktrees: update cleanup limits",
+      });
+      if (!patched) {
+        this.error = runtimeConfig.state.lastError ?? t("worktrees.cleanupSaveFailed");
+        return;
+      }
+      await runtimeConfig.refresh();
+      this.syncCleanupFromConfig();
+    } catch (error) {
+      this.error = String(error);
+    }
   }
 
   private applyGatewaySnapshot(
@@ -398,8 +501,74 @@ class WorktreesPage extends OpenClawLightDomElement {
     `;
   }
 
+  private renderCleanupRow(key: CleanupLimitKey, label: string, help: string, value: number) {
+    const disabled = !this.cleanupLoaded || !this.gatewayConnected;
+    return html`
+      <div class="worktrees-cleanup__row">
+        <div>
+          <div class="worktrees-cleanup__label">${label}</div>
+          <div class="worktrees-cleanup__help">${help}</div>
+        </div>
+        <div class="cfg-number">
+          <button
+            type="button"
+            class="cfg-number__btn"
+            aria-label=${t("worktrees.cleanupDecrease", { label })}
+            ?disabled=${disabled || value <= 0}
+            @click=${() => this.setCleanupLimit(key, value - 1)}
+          >
+            −
+          </button>
+          <input
+            type="number"
+            class="cfg-number__input"
+            min="0"
+            .value=${String(value)}
+            ?disabled=${disabled}
+            @change=${(event: Event) => {
+              this.setCleanupLimit(key, Number((event.target as HTMLInputElement).value));
+            }}
+          />
+          <button
+            type="button"
+            class="cfg-number__btn"
+            aria-label=${t("worktrees.cleanupIncrease", { label })}
+            ?disabled=${disabled}
+            @click=${() => this.setCleanupLimit(key, value + 1)}
+          >
+            +
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderCleanupCard() {
+    return html`
+      <section class="card">
+        <div class="card-title">${t("worktrees.cleanupTitle")}</div>
+        <div class="card-sub">${t("worktrees.cleanupSubtitle")}</div>
+        <div class="worktrees-cleanup">
+          ${this.renderCleanupRow(
+            "maxCount",
+            t("worktrees.cleanupMaxCount"),
+            t("worktrees.cleanupMaxCountHelp"),
+            this.cleanupMaxCount,
+          )}
+          ${this.renderCleanupRow(
+            "maxTotalSizeGb",
+            t("worktrees.cleanupMaxSize"),
+            t("worktrees.cleanupMaxSizeHelp"),
+            this.cleanupMaxSizeGb,
+          )}
+        </div>
+      </section>
+    `;
+  }
+
   override render() {
     const body = html`
+      ${this.renderCleanupCard()}
       <section class="card">
         <div class="row" style="justify-content: space-between;">
           <div>
