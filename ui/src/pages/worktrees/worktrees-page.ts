@@ -36,6 +36,16 @@ type CleanupLimitKey = "maxCount" | "maxTotalSizeGb";
 
 const CLEANUP_COMMIT_DELAY_MS = 600;
 
+// The count is an integer, but the size limit accepts fractions (0.5 GB), so
+// only maxCount gets floored; flooring the size would display 0.5 as the
+// documented "disabled" value 0.
+function normalizeCleanupLimit(key: CleanupLimitKey, value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return key === "maxCount" ? Math.floor(value) : value;
+}
+
 function cleanupLimitFromConfig(
   config: Record<string, unknown> | null,
   key: CleanupLimitKey,
@@ -47,7 +57,7 @@ function cleanupLimitFromConfig(
       : undefined;
   const value =
     cleanup && typeof cleanup === "object" ? (cleanup as Record<string, unknown>)[key] : undefined;
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  return typeof value === "number" ? normalizeCleanupLimit(key, value) : 0;
 }
 
 class WorktreesPage extends OpenClawLightDomElement {
@@ -138,7 +148,7 @@ class WorktreesPage extends OpenClawLightDomElement {
   }
 
   private setCleanupLimit(key: CleanupLimitKey, rawValue: number) {
-    const value = Number.isFinite(rawValue) ? Math.max(0, Math.floor(rawValue)) : 0;
+    const value = normalizeCleanupLimit(key, rawValue);
     if (key === "maxCount") {
       this.cleanupMaxCount = value;
     } else {
@@ -523,6 +533,7 @@ class WorktreesPage extends OpenClawLightDomElement {
             type="number"
             class="cfg-number__input"
             min="0"
+            step=${key === "maxCount" ? "1" : "any"}
             .value=${String(value)}
             ?disabled=${disabled}
             @change=${(event: Event) => {

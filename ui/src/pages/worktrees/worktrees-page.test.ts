@@ -532,12 +532,16 @@ describe("WorktreesPage lifecycle", () => {
       document.body.append(page);
       await page.updateComplete;
 
+      page.setCleanupLimit("maxTotalSizeGb", 0.5);
+      expect(page.cleanupMaxSizeGb).toBe(0.5);
+      page.setCleanupLimit("maxCount", 5.7);
+      expect(page.cleanupMaxCount).toBe(5);
       page.setCleanupLimit("maxCount", -5);
       expect(page.cleanupMaxCount).toBe(0);
 
       await vi.advanceTimersByTimeAsync(700);
       expect(runtimeConfig.patch).toHaveBeenCalledWith({
-        raw: { worktrees: { cleanup: { maxCount: 0 } } },
+        raw: { worktrees: { cleanup: { maxCount: 0, maxTotalSizeGb: 0.5 } } },
         note: "worktrees: update cleanup limits",
       });
       expect(page.error).toBe("config hash mismatch");

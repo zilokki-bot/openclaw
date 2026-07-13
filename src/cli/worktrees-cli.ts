@@ -3,6 +3,7 @@ import { getTerminalTableWidth, renderTable } from "../../packages/terminal-core
 import { managedWorktrees, resolveWorktreeCleanupLimits } from "../agents/worktrees/service.js";
 import type { ManagedWorktreeRecord } from "../agents/worktrees/types.js";
 import { getRuntimeConfig } from "../config/config.js";
+import { isManagedWorktreeOwnerActive } from "../gateway/worktree-owner-activity.js";
 import { defaultRuntime } from "../runtime.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
 
@@ -117,7 +118,10 @@ export function registerWorktreesCli(program: Command): void {
     .option("--json", "Output JSON", false)
     .action(async (opts: JsonOption) => {
       const limits = resolveWorktreeCleanupLimits(getRuntimeConfig().worktrees);
-      const result = await managedWorktrees.gc({ limits });
+      const result = await managedWorktrees.gc({
+        limits,
+        isOwnerActive: isManagedWorktreeOwnerActive,
+      });
       if (opts.json) {
         printJson(result);
       } else {

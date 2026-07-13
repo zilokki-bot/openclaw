@@ -18,6 +18,7 @@ import {
 } from "../../agents/worktrees/service.js";
 import type { ManagedWorktreeService } from "../../agents/worktrees/service.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
+import { isManagedWorktreeOwnerActive } from "../worktree-owner-activity.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 type WorktreeService = Pick<
@@ -148,7 +149,11 @@ export function createWorktreesHandlers(service: WorktreeService): GatewayReques
       }
       try {
         const limits = resolveWorktreeCleanupLimits(context.getRuntimeConfig().worktrees);
-        respond(true, await service.gc({ limits }), undefined);
+        respond(
+          true,
+          await service.gc({ limits, isOwnerActive: isManagedWorktreeOwnerActive }),
+          undefined,
+        );
       } catch (error) {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(error)));
       }

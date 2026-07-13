@@ -873,6 +873,15 @@ export class ManagedWorktreeService {
         }
         await this.remove({ id: record.id, reason: "limit-gc" });
       } catch (error) {
+        const current = getRegistryWorktree(this.env, record.id);
+        if (!current || current.removedAt !== undefined) {
+          // A concurrent cleanup removed this record between our listing and the
+          // failed claim. Count that removal here, or this pass would evict an
+          // extra worktree against a stale total.
+          liveCount -= 1;
+          totalBytes -= sizes.get(record.id) ?? 0;
+          continue;
+        }
         log.warn(`cleanup limit removal failed for ${record.id}: ${String(error)}`);
         continue;
       }

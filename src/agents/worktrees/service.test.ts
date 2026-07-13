@@ -763,6 +763,47 @@ describe("ManagedWorktreeService", () => {
     expect(getRegistryWorktree(env, oldest.id)?.snapshotRef).toBeTruthy();
   });
 
+  it("counts a competing removal instead of evicting an extra worktree", async () => {
+    const oldest = await service.create({
+      repoRoot: repo,
+      name: "race-oldest",
+      ownerKind: "session",
+      ownerId: "agent:main:race-old",
+    });
+    now += 1;
+    const middle = await service.create({
+      repoRoot: repo,
+      name: "race-middle",
+      ownerKind: "session",
+      ownerId: "agent:main:race-mid",
+    });
+    now += 1;
+    const newest = await service.create({
+      repoRoot: repo,
+      name: "race-newest",
+      ownerKind: "session",
+      ownerId: "agent:main:race-new",
+    });
+    const realRemove = service.remove.bind(service);
+    const removeSpy = vi
+      .spyOn(service, "remove")
+      .mockImplementationOnce(async (params: Parameters<typeof realRemove>[0]) => {
+        // Simulate a concurrent cleanup winning the removal claim first.
+        await realRemove({ ...params, reason: "concurrent-gc" });
+        throw new Error("removal already claimed");
+      });
+
+    const result = await service.gc({ limits: { maxCount: 2 } });
+
+    // The stale-count correction stops the pass at two live worktrees instead
+    // of evicting middle as well.
+    expect(result.removed).toEqual([]);
+    expect(getRegistryWorktree(env, oldest.id)?.removedAt).toBeDefined();
+    expect(getRegistryWorktree(env, middle.id)?.removedAt).toBeUndefined();
+    expect(getRegistryWorktree(env, newest.id)?.removedAt).toBeUndefined();
+    removeSpy.mockRestore();
+  });
+
   it("leaves everything in place when limits are not exceeded", async () => {
     const created = await service.create({
       repoRoot: repo,
