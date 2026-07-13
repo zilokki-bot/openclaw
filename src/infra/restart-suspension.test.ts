@@ -9,6 +9,7 @@ import type { GatewayActiveWorkInspectors } from "./gateway-active-work.js";
 import {
   getGatewaySuspendStatus,
   prepareGatewaySuspend,
+  resetGatewaySuspendCoordinatorForLifecycleRestart,
   resumeGatewaySuspend,
 } from "./gateway-suspend-coordinator.js";
 import {
@@ -42,11 +43,16 @@ function countSigusr1Emits(calls: readonly unknown[][]): number {
   return calls.filter((args) => args[0] === "SIGUSR1").length;
 }
 
+function resetGatewayLifecycleState(): void {
+  resetGatewaySuspendCoordinatorForLifecycleRestart();
+  resetGatewayRestartStateForInProcessRestart();
+}
+
 describe("scheduled restart during gateway suspension", () => {
   const sigusr1Handler = () => {};
 
   beforeEach(() => {
-    resetGatewayRestartStateForInProcessRestart();
+    resetGatewayLifecycleState();
     setGatewaySigusr1RestartPolicy({ allowExternal: false });
     setPreRestartDeferralCheck(() => 0);
     resetGatewayWorkAdmission();
@@ -56,7 +62,7 @@ describe("scheduled restart during gateway suspension", () => {
 
   afterEach(() => {
     process.removeListener("SIGUSR1", sigusr1Handler);
-    resetGatewayRestartStateForInProcessRestart();
+    resetGatewayLifecycleState();
     setGatewaySigusr1RestartPolicy({ allowExternal: false });
     setPreRestartDeferralCheck(() => 0);
     resetGatewayWorkAdmission();
@@ -149,7 +155,7 @@ describe("scheduled restart during gateway suspension", () => {
     });
     expect(prepared).toMatchObject({ status: "ready" });
 
-    resetGatewayRestartStateForInProcessRestart();
+    resetGatewayLifecycleState();
 
     expect(resumeScheduling).toHaveBeenCalledOnce();
     expect(getGatewaySuspendStatus("suspension-lifecycle-reset")).toEqual({ status: "running" });
@@ -168,7 +174,7 @@ describe("scheduled restart during gateway suspension", () => {
     expect(preRestartCheck).toHaveBeenCalledTimes(2);
     expect(isGatewayWorkAdmissionClosed()).toBe(true);
 
-    resetGatewayRestartStateForInProcessRestart();
+    resetGatewayLifecycleState();
     expect(isGatewayWorkAdmissionClosed()).toBe(false);
     expect(isGatewaySigusr1RestartExternallyAllowed()).toBe(true);
 

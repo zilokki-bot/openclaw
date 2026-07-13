@@ -31,6 +31,7 @@ import {
   getPairedDevice,
   requestDevicePairing,
 } from "../infra/device-pairing.js";
+import { resetGatewaySuspendCoordinatorForLifecycleRestart } from "../infra/gateway-suspend-coordinator.js";
 import {
   resetGatewayRestartStateForInProcessRestart,
   setGatewaySigusr1RestartPolicy,
@@ -297,6 +298,7 @@ function applyGatewaySkipEnv() {
 function resetGatewayLifecycleTestState(options: { preserveRuntimeBindings: boolean }): void {
   // Resume held scheduling and cancel pending restart work before clearing
   // admission. Live suite servers keep their policy and active-work binding.
+  resetGatewaySuspendCoordinatorForLifecycleRestart();
   resetGatewayRestartStateForInProcessRestart();
   if (!options.preserveRuntimeBindings) {
     setGatewaySigusr1RestartPolicy({ allowExternal: false });

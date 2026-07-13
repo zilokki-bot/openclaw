@@ -22,7 +22,6 @@ import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../state/openclaw-state-db.js";
-import { resetGatewaySuspendCoordinatorForLifecycleRestart } from "./gateway-suspend-coordinator.js";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -137,7 +136,6 @@ function clearActiveDeferralPolls(): void {
 }
 
 export function resetGatewayRestartStateForInProcessRestart(): void {
-  resetGatewaySuspendCoordinatorForLifecycleRestart();
   restartTransientGeneration += 1;
   sigusr1AuthorizedCount = 0;
   sigusr1AuthorizedUntil = 0;

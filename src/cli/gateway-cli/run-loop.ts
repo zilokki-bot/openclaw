@@ -907,6 +907,7 @@ export async function runGatewayLoop(params: {
         resetCronActiveJobs,
         resetAllLanes,
         resetGatewayRestartStateForInProcessRestart,
+        resetGatewaySuspendCoordinatorForLifecycleRestart,
         rotateAgentEventLifecycleGeneration,
         waitForActiveCronJobs,
         waitForActiveCronTaskRuns,
@@ -926,6 +927,7 @@ export async function runGatewayLoop(params: {
       resetCronActiveJobs();
       resetAllLanes();
       clearRuntimeConfigSnapshot();
+      resetGatewaySuspendCoordinatorForLifecycleRestart();
       resetGatewayRestartStateForInProcessRestart();
       reloadTaskRuntimeStateFromStore();
       markGatewayRestartTrace("restart.next-start");

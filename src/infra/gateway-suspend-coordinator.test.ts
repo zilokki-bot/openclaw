@@ -10,6 +10,7 @@ import type { GatewayActiveWorkInspectors } from "./gateway-active-work.js";
 import {
   getGatewaySuspendStatus,
   prepareGatewaySuspend,
+  resetGatewaySuspendCoordinatorForLifecycleRestart,
   resumeGatewaySuspend,
 } from "./gateway-suspend-coordinator.js";
 
@@ -37,15 +38,37 @@ function inspectors(
 
 beforeEach(() => {
   resetProcessRegistryForTests();
+  resetGatewaySuspendCoordinatorForLifecycleRestart();
   resetGatewayWorkAdmission();
 });
 
 afterEach(() => {
   resetProcessRegistryForTests();
+  resetGatewaySuspendCoordinatorForLifecycleRestart();
   resetGatewayWorkAdmission();
 });
 
 describe("gateway suspend coordinator", () => {
+  it("lifecycle reset resumes a held scheduler before admission is cleared", () => {
+    const resumeScheduling = vi.fn(() => {
+      expect(isGatewayWorkAdmissionClosed()).toBe(true);
+    });
+    expect(
+      prepareGatewaySuspend({
+        requestId: "request-lifecycle-reset",
+        pauseScheduling: vi.fn(),
+        resumeScheduling,
+        inspect: inspectors(),
+      }),
+    ).toMatchObject({ status: "ready" });
+
+    resetGatewaySuspendCoordinatorForLifecycleRestart();
+    resetGatewayWorkAdmission();
+
+    expect(resumeScheduling).toHaveBeenCalledOnce();
+    expect(isGatewayWorkAdmissionClosed()).toBe(false);
+  });
+
   it("reopens admission in the same turn when active work refuses preparation", () => {
     const events: string[] = [];
     const result = prepareGatewaySuspend({
