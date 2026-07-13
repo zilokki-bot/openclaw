@@ -400,6 +400,7 @@ export const it: TranslationMap = {
     working: "In elaborazione…",
     ready: "Pronto per chattare",
     whatCanAgentDo: "Cosa può fare {name}?",
+    help: "Aiuto",
     getHelp: "Ottieni assistenza",
     discord: "Community Discord",
     viewChangelog: "Visualizza il registro delle modifiche",

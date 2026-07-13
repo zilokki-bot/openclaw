@@ -399,6 +399,7 @@ export const ru: TranslationMap = {
     working: "Выполняется…",
     ready: "Готово к чату",
     whatCanAgentDo: "Что умеет {name}?",
+    help: "Справка",
     getHelp: "Получить помощь",
     discord: "Сообщество Discord",
     viewChangelog: "Посмотреть журнал изменений",

@@ -419,9 +419,9 @@ describe("AppSidebar agent chip", () => {
     expect(menu?.querySelector("openclaw-theme-mode-toggle")).not.toBeNull();
     // External help links fold into the Help flyout; they only render open.
     expect(menu?.querySelector('a[role="menuitem"]')).toBeNull();
-    const helpRow = [...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])].find(
-      (row) => row.textContent?.includes("Help"),
-    );
+    const helpRow = [
+      ...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []),
+    ].find((row) => row.textContent?.includes("Help"));
     expect(helpRow?.getAttribute("aria-haspopup")).toBe("menu");
     helpRow?.click();
     await sidebar.updateComplete;
