@@ -33,7 +33,10 @@ vi.mock("./outbound/deliver.js", () => ({
 type SessionMaintenanceWarningModule = typeof import("./session-maintenance-warning.js");
 
 let deliverSessionMaintenanceWarning: SessionMaintenanceWarningModule["deliverSessionMaintenanceWarning"];
-let resetSessionMaintenanceWarningForTests: SessionMaintenanceWarningModule["testing"]["resetSessionMaintenanceWarningForTests"];
+
+beforeAll(async () => {
+  ({ deliverSessionMaintenanceWarning } = await import("./session-maintenance-warning.js"));
+});
 
 function createParams(
   overrides: Partial<Parameters<typeof deliverSessionMaintenanceWarning>[0]> = {},
@@ -75,35 +78,11 @@ describe("deliverSessionMaintenanceWarning", () => {
   let prevVitest: string | undefined;
   let prevNodeEnv: string | undefined;
 
-  beforeAll(async () => {
-    vi.doMock("../agents/agent-scope.js", () => ({
-      resolveSessionAgentId: mocks.resolveSessionAgentId,
-    }));
-    vi.doMock("../utils/message-channel.js", () => ({
-      normalizeMessageChannel: mocks.normalizeMessageChannel,
-      isDeliverableMessageChannel: mocks.isDeliverableMessageChannel,
-    }));
-    vi.doMock("../utils/delivery-context.shared.js", () => ({
-      deliveryContextFromSession: mocks.deliveryContextFromSession,
-    }));
-    vi.doMock("./outbound/deliver-runtime.js", () => ({
-      deliverOutboundPayloads: mocks.deliverOutboundPayloads,
-    }));
-    vi.doMock("./system-events.js", () => ({
-      enqueueSystemEvent: mocks.enqueueSystemEvent,
-    }));
-    ({
-      deliverSessionMaintenanceWarning,
-      testing: { resetSessionMaintenanceWarningForTests },
-    } = await import("./session-maintenance-warning.js"));
-  });
-
   beforeEach(() => {
     prevVitest = process.env.VITEST;
     prevNodeEnv = process.env.NODE_ENV;
     delete process.env.VITEST;
     process.env.NODE_ENV = "development";
-    resetSessionMaintenanceWarningForTests();
     mocks.resolveSessionAgentId.mockClear();
     mocks.deliveryContextFromSession.mockReset();
     mocks.deliveryContextFromSession.mockReturnValue({
