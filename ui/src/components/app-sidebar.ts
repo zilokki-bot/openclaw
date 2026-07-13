@@ -2052,11 +2052,17 @@ class AppSidebar extends OpenClawLightDomContentsElement {
           </button>
           <div
             class="sidebar-customize-menu__submenu-host"
-            @pointerenter=${() => {
-              this.agentMenuHelpOpen = true;
+            @pointerenter=${(event: PointerEvent) => {
+              // Hover open/close is mouse-only: on touch/pen taps the
+              // enter/leave pair would race the click toggle below.
+              if (event.pointerType === "mouse") {
+                this.agentMenuHelpOpen = true;
+              }
             }}
-            @pointerleave=${() => {
-              this.agentMenuHelpOpen = false;
+            @pointerleave=${(event: PointerEvent) => {
+              if (event.pointerType === "mouse") {
+                this.agentMenuHelpOpen = false;
+              }
             }}
           >
             <button
@@ -2098,15 +2104,18 @@ class AppSidebar extends OpenClawLightDomContentsElement {
   }
 
   private renderAgentMenuHelpSubmenu() {
-    // Same flip rule as the session menu: fly out left when a right-side
-    // flyout would run past the viewport edge (narrow windows/overlay mode).
+    // Prefer a right flyout, flip left when the right edge is tight, and on
+    // viewports too narrow for two side-by-side menus overlay the parent
+    // instead — a flipped submenu would land offscreen there.
     const menuWidth = 240;
     const x = this.agentMenuPosition?.x ?? 0;
-    const flipLeft = x + menuWidth * 2 + 4 > window.innerWidth - 8;
+    const fitsRight = x + menuWidth * 2 + 4 <= window.innerWidth - 8;
+    const fitsLeft = x >= menuWidth + 4 + 8;
+    const placement = fitsRight ? "" : fitsLeft ? "--left" : "--overlay";
     return html`
       <div
-        class="sidebar-customize-menu sidebar-customize-menu__submenu ${flipLeft
-          ? "sidebar-customize-menu__submenu--left"
+        class="sidebar-customize-menu sidebar-customize-menu__submenu ${placement
+          ? `sidebar-customize-menu__submenu${placement}`
           : ""}"
         role="menu"
         aria-label=${t("agentChip.help")}

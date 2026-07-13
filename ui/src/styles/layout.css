@@ -2088,13 +2088,18 @@ openclaw-session-menu[popover] {
 }
 
 /* The help flyout must escape the menu box, so the root stays
-   overflow-visible and scrolling moves to the agents list instead. */
+   overflow-visible; the viewport bound moves to a flex column where only
+   the agents list shrinks and scrolls (the action rows always fit). */
 .sidebar-agent-menu {
+  display: flex;
+  flex-direction: column;
   overflow: visible;
-  max-height: none;
+  max-height: calc(100vh - 16px);
 }
 
 .sidebar-agent-menu__agents {
+  flex: 0 1 auto;
+  min-height: 30px;
   max-height: 240px;
   overflow-y: auto;
 }
@@ -2103,18 +2108,45 @@ openclaw-session-menu[popover] {
   position: relative;
 }
 
-/* Bottom-aligned like the parent menu: both grow upward from the footer. */
+/* Bottom-aligned like the parent menu: both grow upward from the footer.
+   Fixed link list, no scrolling: overflow stays visible so the ::before
+   hover bridge below is not clipped away. */
 .sidebar-agent-menu .sidebar-customize-menu__submenu {
   position: absolute;
   bottom: -6px;
   left: calc(100% + 4px);
-  max-height: min(360px, calc(100vh - 24px));
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .sidebar-agent-menu .sidebar-customize-menu__submenu--left {
   right: calc(100% + 4px);
   left: auto;
+}
+
+/* Viewports too narrow for side-by-side menus: cover the parent instead. */
+.sidebar-agent-menu .sidebar-customize-menu__submenu--overlay {
+  right: -6px;
+  left: -6px;
+}
+
+/* Invisible bridge over the 4px visual gap so a slow pointer crossing it
+   never leaves the submenu host (which would close the flyout mid-travel). */
+.sidebar-agent-menu .sidebar-customize-menu__submenu::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  width: 8px;
+}
+
+.sidebar-agent-menu .sidebar-customize-menu__submenu--left::before {
+  right: -8px;
+  left: auto;
+}
+
+.sidebar-agent-menu .sidebar-customize-menu__submenu--overlay::before {
+  content: none;
 }
 
 .sidebar-customize-menu__chevron {
