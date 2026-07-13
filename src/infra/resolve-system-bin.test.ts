@@ -18,7 +18,9 @@ vi.mock("node:fs", async () => {
       accessSync: (candidate: import("node:fs").PathLike) => {
         const candidatePath = String(candidate);
         if (!executables.has(path.resolve(candidatePath))) {
-          throw Object.assign(new Error(`missing executable: ${candidate}`), { code: "ENOENT" });
+          throw Object.assign(new Error(`missing executable: ${candidatePath}`), {
+            code: "ENOENT",
+          });
         }
       },
     },

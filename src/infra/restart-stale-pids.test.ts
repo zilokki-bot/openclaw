@@ -1253,7 +1253,7 @@ describe.skipIf(isWindows)("restart-stale-pids", () => {
           return true;
         });
         vi.mocked(Atomics.wait).mockImplementation((_array, _index, _value, timeout) => {
-          fakeNow += Number(timeout ?? 0);
+          fakeNow += timeout ?? 0;
           return "timed-out";
         });
 

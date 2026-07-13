@@ -1,6 +1,6 @@
 // Core runtime types define system, config, and task helper contracts for plugins.
 
-import type { ConfigMutationBase } from "../../config/mutate.js";
+import type { ConfigMutationBase } from "../../config/mutation-types.js";
 import type { SessionPluginJsonValue } from "../../config/sessions/types.js";
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import type { LogLevel } from "../../logging/levels.js";

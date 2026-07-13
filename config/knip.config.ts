@@ -256,6 +256,7 @@ const config = {
         "src/engine-storage.ts!",
         "src/engine-embeddings.ts!",
         "src/engine-qmd.ts!",
+        "src/host/embeddings-worker-child.ts!",
         "src/multimodal.ts!",
         "src/query.ts!",
         "src/secret.ts!",

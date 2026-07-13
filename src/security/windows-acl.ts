@@ -1,7 +1,6 @@
-/** Windows ACL remediation facade backed by fs-safe defaults. */
+/** Windows ACL remediation facade backed by shared infra permission policy. */
 export {
   createIcaclsResetCommand,
   formatIcaclsResetCommand,
-  type PermissionExec as ExecFn,
-} from "@openclaw/fs-safe/advanced";
-import "../infra/fs-safe-defaults.js";
+  type ExecFn,
+} from "../infra/permissions.js";
