@@ -231,6 +231,16 @@ export const uk: TranslationMap = {
       title: "OpenClaw mobile",
       subtitle: "Відскануйте цей QR-код у мобільному застосунку, щоб підключити новий телефон.",
       generating: "Створення безпечного коду налаштування…",
+      accessTitle: "Мобільний доступ",
+      fullAccess: "Повний доступ (рекомендовано)",
+      fullAccessHint:
+        "Вузол плюс повне керування Gateway, включно з налаштуваннями та оновленнями.",
+      limitedAccess: "Обмежений доступ",
+      limitedAccessHint: "Вузол, чат і підтвердження без адміністративного керування.",
+      generateCode: "Створити код налаштування",
+      transportLimitedTitle: "Обмежено задля безпеки мережі",
+      transportLimitedHint:
+        "Ця URL-адреса Gateway використовує незашифрований ws://. Скористайтеся wss:// або Tailscale Serve, а потім створіть новий код для повного доступу.",
       failed: "Не вдалося створити код налаштування.",
       qrAlt: "QR-код сполучення OpenClaw mobile",
       qrUnavailable: "QR-код недоступний. Натомість скопіюйте код налаштування.",

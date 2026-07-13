@@ -233,6 +233,15 @@ export const ja_JP: TranslationMap = {
       subtitle:
         "新しいスマートフォンを接続するには、モバイルアプリでこのQRコードをスキャンしてください。",
       generating: "安全なセットアップコードを作成しています…",
+      accessTitle: "モバイルアクセス",
+      fullAccess: "フルアクセス（推奨）",
+      fullAccessHint: "ノードに加えて、設定やアップグレードを含む完全な Gateway コントロール。",
+      limitedAccess: "制限付きアクセス",
+      limitedAccessHint: "管理コントロールなしのノード、チャット、承認。",
+      generateCode: "セットアップコードを作成",
+      transportLimitedTitle: "ネットワークの安全性のため制限中",
+      transportLimitedHint:
+        "この Gateway URL はプレーンテキストの ws:// を使用しています。wss:// または Tailscale Serve を使用してから、フルアクセス用の新しいコードを作成してください。",
       failed: "セットアップコードを作成できませんでした。",
       qrAlt: "OpenClaw mobile ペアリングQRコード",
       qrUnavailable: "QRを利用できません。代わりにセットアップコードをコピーしてください。",

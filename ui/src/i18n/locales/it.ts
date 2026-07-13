@@ -232,6 +232,16 @@ export const it: TranslationMap = {
       title: "OpenClaw mobile",
       subtitle: "Scansiona questo codice QR nell'app mobile per connettere un nuovo telefono.",
       generating: "Creazione di un codice di configurazione sicuro…",
+      accessTitle: "Accesso mobile",
+      fullAccess: "Accesso completo (consigliato)",
+      fullAccessHint:
+        "Node più controlli completi del Gateway, incluse impostazioni e aggiornamenti.",
+      limitedAccess: "Accesso limitato",
+      limitedAccessHint: "Node, chat e approvazioni senza controlli amministrativi.",
+      generateCode: "Crea codice di configurazione",
+      transportLimitedTitle: "Limitato per sicurezza di rete",
+      transportLimitedHint:
+        "Questo URL del Gateway utilizza ws:// in chiaro. Usa wss:// o Tailscale Serve, quindi crea un nuovo codice per l'accesso completo.",
       failed: "Impossibile creare un codice di configurazione.",
       qrAlt: "Codice QR di associazione di OpenClaw mobile",
       qrUnavailable: "QR non disponibile. Copia invece il codice di configurazione.",
