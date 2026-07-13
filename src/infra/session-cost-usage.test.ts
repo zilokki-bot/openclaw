@@ -31,12 +31,6 @@ describe("session cost usage", () => {
       JSON.stringify(entry),
       "",
     ].join("\n");
-  const waitFor = async (predicate: () => Promise<boolean>, timeoutMs = 2_000): Promise<void> => {
-    await vi.waitFor(async () => expect(await predicate()).toBe(true), {
-      interval: 1,
-      timeout: timeoutMs,
-    });
-  };
   const requireValue = <T>(value: T | null | undefined, message: string): T => {
     if (value == null) {
       throw new Error(message);
@@ -829,13 +823,17 @@ describe("session cost usage", () => {
       });
 
       expect(summary.totals.totalTokens).toBe(30);
-      const cachePath = path.join(sessionsDir, ".usage-cost-cache.json");
-      await waitFor(async () => {
-        const cache = JSON.parse(await fs.readFile(cachePath, "utf-8")) as {
-          files: Record<string, unknown>;
-        };
-        return Boolean(cache.files[oldSessionFile]);
-      });
+      await vi.waitFor(
+        async () => {
+          const refreshed = await loadCostUsageSummaryFromCache({
+            startMs: Date.UTC(2026, 1, 5),
+            endMs: Date.UTC(2026, 1, 5) + 24 * 60 * 60 * 1000 - 1,
+            requestRefresh: false,
+          });
+          expect(refreshed.totals.totalTokens).toBe(230);
+        },
+        { interval: 1, timeout: 2_000 },
+      );
     });
   });
 

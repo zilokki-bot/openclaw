@@ -3,9 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withMockedWindowsPlatform } from "../test-utils/vitest-spies.js";
 
-const childProcessMocks = vi.hoisted(() => ({
-  execFileSync: vi.fn(),
-}));
+const execFileSyncMock = vi.hoisted(() => vi.fn());
 
 const fsMocks = vi.hoisted(() => ({
   access: vi.fn(),
@@ -29,12 +27,19 @@ vi.mock("node:fs/promises", async () => {
   };
 });
 
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return { ...actual, execFileSync: execFileSyncMock };
+});
+
 import { resolveGatewayProgramArguments, resolveNodeProgramArguments } from "./program-args.js";
 
 const originalArgv = [...process.argv];
+const originalExecPath = process.execPath;
 
 afterEach(() => {
   process.argv = [...originalArgv];
+  process.execPath = originalExecPath;
   vi.resetAllMocks();
   vi.unstubAllEnvs();
 });
@@ -175,31 +180,35 @@ describe("resolveGatewayProgramArguments", () => {
     expect(result.workingDirectory).toBe(path.resolve("/repo"));
   });
 
-  it("uses trusted Windows where.exe when resolving dev runtime binaries", async () => {
+  it("uses trusted Windows where.exe when resolving the Node runtime", async () => {
     const repoIndexPath = path.resolve("/repo/src/index.ts");
     const repoEntryPath = path.resolve("/repo/src/entry.ts");
-    process.argv = [String.raw`D:\nodejs\node.exe`, repoIndexPath];
+    const launcherPath = String.raw`D:\OpenClaw\openclaw.exe`;
+    process.argv = [launcherPath, repoIndexPath];
+    process.execPath = launcherPath;
     vi.stubEnv("SystemRoot", String.raw`D:\Windows`);
     fsMocks.realpath.mockResolvedValue(repoIndexPath);
     fsMocks.access.mockResolvedValue(undefined);
-    childProcessMocks.execFileSync.mockReturnValue(String.raw`D:\Tools\bun.exe` + "\r\n");
+    execFileSyncMock.mockReturnValue(String.raw`D:\Tools\node.exe` + "\r\n");
 
     let result: Awaited<ReturnType<typeof resolveGatewayProgramArguments>> | undefined;
     await withMockedWindowsPlatform(async () => {
       result = await resolveGatewayProgramArguments({
         dev: true,
         port: 18789,
-        runtime: "bun",
+        runtime: "node",
       });
     });
 
-    expect(childProcessMocks.execFileSync).toHaveBeenCalledWith(
+    expect(execFileSyncMock).toHaveBeenCalledWith(
       path.win32.join(String.raw`D:\Windows`, "System32", "where.exe"),
-      ["bun"],
+      ["node"],
       { encoding: "utf8" },
     );
     expect(result?.programArguments).toEqual([
-      String.raw`D:\Tools\bun.exe`,
+      String.raw`D:\Tools\node.exe`,
+      "--import",
+      "tsx",
       repoEntryPath,
       "gateway",
       "--port",
