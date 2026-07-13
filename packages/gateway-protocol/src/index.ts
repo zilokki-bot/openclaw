@@ -541,6 +541,8 @@ import {
   NodePresenceActivityPayloadSchema,
   type NodeInvokeParams,
   NodeInvokeParamsSchema,
+  type NodeInvokeProgressParams,
+  NodeInvokeProgressParamsSchema,
   type NodeInvokeResultParams,
   NodeInvokeResultParamsSchema,
   type NodeListParams,
@@ -1134,6 +1136,9 @@ export const validateNodePendingAckParams = lazyCompile<NodePendingAckParams>(
 );
 export const validateNodeDescribeParams = lazyCompile<NodeDescribeParams>(NodeDescribeParamsSchema);
 export const validateNodeInvokeParams = lazyCompile<NodeInvokeParams>(NodeInvokeParamsSchema);
+export const validateNodeInvokeProgressParams = lazyCompile<NodeInvokeProgressParams>(
+  NodeInvokeProgressParamsSchema,
+);
 export const validateNodeInvokeResultParams = lazyCompile<NodeInvokeResultParams>(
   NodeInvokeResultParamsSchema,
 );
@@ -1712,6 +1717,7 @@ export {
   NodeSkillsUpdateParamsSchema,
   NodePendingAckParamsSchema,
   NodeInvokeParamsSchema,
+  NodeInvokeProgressParamsSchema,
   NodeEventResultSchema,
   NodePresenceAlivePayloadSchema,
   NodePresenceAliveReasonSchema,
@@ -2281,6 +2287,7 @@ export type {
   NodeSkillDescriptor,
   NodeSkillsUpdateParams,
   NodeInvokeParams,
+  NodeInvokeProgressParams,
   NodeInvokeResultParams,
   NodeEventParams,
   NodeEventResult,
