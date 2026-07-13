@@ -2,7 +2,6 @@
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withMockedWindowsPlatform } from "../test-utils/vitest-spies.js";
-import { resetWindowsInstallRootsForTests } from "./windows-install-roots.js";
 
 const runCommandWithTimeoutMock = vi.hoisted(() => vi.fn());
 
@@ -16,13 +15,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   runCommandWithTimeoutMock.mockReset();
-  resetWindowsInstallRootsForTests();
 });
 
 describe("detectBinary", () => {
   it("uses the trusted Windows where.exe when probing PATH", async () => {
     vi.stubEnv("SystemRoot", "D:\\Windows");
-    resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
     runCommandWithTimeoutMock.mockResolvedValue({
       code: 0,
       stdout: "D:\\Tools\\openclaw.exe\n",

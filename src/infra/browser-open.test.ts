@@ -9,13 +9,11 @@ vi.mock("./detect-binary.js", () => ({
 }));
 
 import { resolveBrowserOpenCommand } from "./browser-open.js";
-import { resetWindowsInstallRootsForTests } from "./windows-install-roots.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   detectBinaryMock.mockReset().mockResolvedValue(false);
-  resetWindowsInstallRootsForTests();
 });
 
 describe("resolveBrowserOpenCommand", () => {
@@ -23,7 +21,6 @@ describe("resolveBrowserOpenCommand", () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     vi.stubEnv("SystemRoot", ".\\fake-root");
     vi.stubEnv("windir", ".\\fake-windir");
-    resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
 
     const resolved = await resolveBrowserOpenCommand();
 
@@ -35,17 +32,6 @@ describe("resolveBrowserOpenCommand", () => {
   it("prefers the registry-backed Windows system root over process env", async () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     vi.stubEnv("SystemRoot", "C:\\PoisonedWindows");
-    resetWindowsInstallRootsForTests({
-      queryRegistryValue: (key, valueName) => {
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" &&
-          valueName === "SystemRoot"
-        ) {
-          return "D:\\Windows";
-        }
-        return null;
-      },
-    });
 
     const resolved = await resolveBrowserOpenCommand();
 

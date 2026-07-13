@@ -13,8 +13,8 @@ import {
   type GatewayActiveWorkSnapshot,
 } from "./gateway-active-work.js";
 
-export const GATEWAY_SUSPEND_TTL_MS = 2 * 60_000;
-export const GATEWAY_SUSPEND_RETRY_AFTER_MS = 20_000;
+const GATEWAY_SUSPEND_TTL_MS = 2 * 60_000;
+const GATEWAY_SUSPEND_RETRY_AFTER_MS = 20_000;
 const GATEWAY_SCHEDULER_RECOVERY_RETRY_MS = 1_000;
 
 type GatewaySchedulerRecoveryResult = {
@@ -23,17 +23,17 @@ type GatewaySchedulerRecoveryResult = {
   retryAfterMs: number;
 };
 
-export type GatewaySuspendPrepareResult =
+type GatewaySuspendPrepareResult =
   | GatewaySuspendPrepareWireResult
   | { status: "conflict"; expiresAtMs: number }
   | GatewaySchedulerRecoveryResult;
 
-export type GatewaySuspendStatusResult =
+type GatewaySuspendStatusResult =
   | GatewaySuspendStatusWireResult
   | { status: "conflict"; expiresAtMs: number }
   | GatewaySchedulerRecoveryResult;
 
-export type GatewaySuspendResumeResult =
+type GatewaySuspendResumeResult =
   | GatewaySuspendResumeWireResult
   | { ok: false; reason: "suspension-mismatch" }
   | { ok: false; reason: "scheduler-resume-failed"; retryAfterMs: number };
@@ -398,18 +398,4 @@ export function resumeGatewaySuspend(suspensionId: string): GatewaySuspendResume
     status: "running",
     resumed: true,
   };
-}
-
-export function resetGatewaySuspendCoordinatorForTest(): void {
-  const current = COORDINATOR_STATE.current;
-  if (current) {
-    clearEntryTimer(current);
-    try {
-      current.resumeScheduling();
-    } catch (err) {
-      current.warn?.(`gateway scheduler resume failed during test reset: ${String(err)}`);
-    }
-    current.reopenAdmission();
-    COORDINATOR_STATE.current = null;
-  }
 }

