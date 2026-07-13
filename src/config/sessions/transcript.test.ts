@@ -29,7 +29,6 @@ import {
 } from "./transcript-append.test-support.js";
 import { selectSessionTranscriptLeafControlledPath } from "./transcript-tree.js";
 import {
-  bindOwnedSessionTranscriptWrites,
   runWithOwnedSessionTranscriptWriteLock,
   withOwnedSessionTranscriptWrites,
 } from "./transcript-write-context.js";
@@ -457,36 +456,6 @@ describe("appendAssistantMessageToSessionTranscript", () => {
 
     expect(result).toBe("ok");
     expect(events).toEqual(["write"]);
-  });
-
-  it("keeps matching owned transcript appends locked from bound callbacks", async () => {
-    const sessionFile = resolveSessionTranscriptPathInDir(sessionId, fixture.sessionsDir());
-    const events: string[] = [];
-    const callback = bindOwnedSessionTranscriptWrites(
-      {
-        sessionFile,
-        sessionKey,
-        withSessionWriteLock: async (run) => {
-          events.push("lock");
-          return await run();
-        },
-      },
-      async () =>
-        await appendSessionTranscriptMessage({
-          transcriptPath: sessionFile,
-          message: {
-            role: "assistant",
-            content: "Hello from bound delivery",
-            timestamp: Date.now(),
-            stopReason: "stop",
-          },
-        }),
-    );
-
-    const result = await callback();
-
-    expect(result.messageId).toBeTruthy();
-    expect(events).toEqual(["lock"]);
   });
 
   it("appends to legacy lowercase Signal group session entries", async () => {

@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { setActiveNodeContext } from "../infra/active-node-context.js";
 import { buildSystemPromptParams } from "./system-prompt-params.js";
@@ -32,6 +32,8 @@ function buildParams(params: { config?: OpenClawConfig; workspaceDir?: string; c
 }
 
 describe("buildSystemPromptParams", () => {
+  afterEach(() => setActiveNodeContext(null));
+
   it("projects only the stable active-node identity", () => {
     setActiveNodeContext({ nodeId: "mac-123" });
 

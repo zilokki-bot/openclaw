@@ -1,8 +1,21 @@
 // Covers native approval route reporting behavior.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApprovalNativeRouteReporter } from "./approval-native-route-coordinator.js";
+import { createApprovalNativeRouteReporter as createApprovalNativeRouteReporterRaw } from "./approval-native-route-coordinator.js";
 
-afterEach(() => {});
+const approvalRouteReporters: Array<ReturnType<typeof createApprovalNativeRouteReporterRaw>> = [];
+
+function createApprovalNativeRouteReporter(
+  params: Parameters<typeof createApprovalNativeRouteReporterRaw>[0],
+) {
+  const reporter = createApprovalNativeRouteReporterRaw(params);
+  approvalRouteReporters.push(reporter);
+  return reporter;
+}
+
+afterEach(async () => {
+  await Promise.all(approvalRouteReporters.splice(0).map((reporter) => reporter.stop()));
+  vi.useRealTimers();
+});
 
 function createGatewayRequestMock() {
   return vi.fn(async (_method: string, _params: Record<string, unknown>) => ({

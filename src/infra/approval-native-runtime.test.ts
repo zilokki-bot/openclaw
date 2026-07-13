@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChannelApprovalNativeAdapter } from "../channels/plugins/types.adapters.js";
 import {
-  createChannelNativeApprovalRuntime,
+  createChannelNativeApprovalRuntime as createChannelNativeApprovalRuntimeRaw,
   deliverApprovalRequestViaChannelNativePlan,
 } from "./approval-native-runtime.js";
 
@@ -44,7 +44,18 @@ const execRequest = {
   expiresAtMs: 120_000,
 };
 
-afterEach(() => {
+const approvalRuntimes: Array<ReturnType<typeof createChannelNativeApprovalRuntimeRaw>> = [];
+
+function createChannelNativeApprovalRuntime(
+  params: Parameters<typeof createChannelNativeApprovalRuntimeRaw>[0],
+) {
+  const runtime = createChannelNativeApprovalRuntimeRaw(params);
+  approvalRuntimes.push(runtime);
+  return runtime;
+}
+
+afterEach(async () => {
+  await Promise.all(approvalRuntimes.splice(0).map((runtime) => runtime.stop()));
   hoisted.callGatewayLeastPrivilege.mockClear();
   hoisted.createOperatorApprovalsGatewayClient.mockClear();
   hoisted.startGatewayClientWhenEventLoopReady.mockClear();

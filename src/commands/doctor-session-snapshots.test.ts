@@ -124,6 +124,10 @@ describe("doctor session snapshot stale runtime metadata", () => {
     await fs.writeFile(path.join(bundledSkillsDir, "doctor", "SKILL.md"), "# Doctor\n");
   });
 
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
   it("flags cached bundled skill locations from inactive and temp-backed runtime roots", () => {
     const stalePath = path.join(
       root,

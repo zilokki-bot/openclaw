@@ -193,7 +193,7 @@ describe("plugin runtime command execution", () => {
       status: "skipped" as const,
       reason: "disabled",
     }));
-    setHeartbeatWakeHandler(handler);
+    const dispose = setHeartbeatWakeHandler(handler);
     try {
       createPluginRuntime().system.requestHeartbeatNow({
         reason: "legacy-plugin",
@@ -207,6 +207,7 @@ describe("plugin runtime command execution", () => {
       expect(request?.intent).toBe("immediate");
       expect(request?.reason).toBe("legacy-plugin");
     } finally {
+      dispose();
       vi.useRealTimers();
     }
   });

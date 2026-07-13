@@ -9,6 +9,16 @@ import {
   validateSafeBinArgv,
 } from "./exec-safe-bin-policy.js";
 
+function buildDeniedFlagArgvVariants(flag: string): string[][] {
+  if (flag.startsWith("--")) {
+    return [[`${flag}=blocked`], [flag, "blocked"], [flag]];
+  }
+  if (flag.startsWith("-")) {
+    return [[`${flag}blocked`], [flag, "blocked"], [flag]];
+  }
+  return [[flag]];
+}
+
 describe("exec safe bin policy grep", () => {
   const grepProfile = expectDefined(
     SAFE_BIN_PROFILES.grep,
@@ -271,4 +281,16 @@ describe("exec safe bin policy long-option metadata", () => {
     expect(validateSafeBinArgv(["--compress-prog=sh"], withoutMetadata)).toBe(false);
     expect(validateSafeBinArgv(["--totally-unknown=1"], withoutMetadata)).toBe(false);
   });
+});
+
+describe("exec safe bin policy denied-flag matrix", () => {
+  for (const [binName, profile] of Object.entries(SAFE_BIN_PROFILES)) {
+    for (const deniedFlag of profile.deniedFlags ?? []) {
+      for (const variant of buildDeniedFlagArgvVariants(deniedFlag)) {
+        it(`${binName} denies ${deniedFlag} (${variant.join(" ")})`, () => {
+          expect(validateSafeBinArgv(variant, profile, { binName })).toBe(false);
+        });
+      }
+    }
+  }
 });

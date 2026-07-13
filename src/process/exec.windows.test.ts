@@ -3,11 +3,7 @@ import type { execFile as execFileType } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getWindowsInstallRoots,
-  getWindowsSystem32ExePath,
-} from "../infra/windows-install-roots.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withMockedWindowsPlatform, withRestoredMocks } from "../test-utils/vitest-spies.js";
 
 const { spawnMock, spawnSyncMock, execFileMock, execFilePromisifyMock } = vi.hoisted(() => {
@@ -38,6 +34,8 @@ vi.mock("node:child_process", async () => {
 
 let runCommandWithTimeout: typeof import("./exec.js").runCommandWithTimeout;
 let runExec: typeof import("./exec.js").runExec;
+let getWindowsInstallRoots: typeof import("../infra/windows-install-roots.js").getWindowsInstallRoots;
+let getWindowsSystem32ExePath: typeof import("../infra/windows-install-roots.js").getWindowsSystem32ExePath;
 
 type MockChild = EventEmitter & {
   exitCode?: number | null;
@@ -142,11 +140,18 @@ async function expectShimmedWindowsCommandWithoutExitCodeSucceeds(params?: { kil
 }
 
 describe("windows command wrapper behavior", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    const accessSync = fs.accessSync.bind(fs);
+    vi.spyOn(fs, "accessSync").mockImplementation((filePath, mode) => {
+      if (String(filePath).toLowerCase() === "c:\\windows\\system32\\reg.exe") {
+        throw new Error("registry lookup disabled for test");
+      }
+      return accessSync(filePath, mode);
+    });
+    ({ getWindowsInstallRoots, getWindowsSystem32ExePath } =
+      await import("../infra/windows-install-roots.js"));
     ({ runCommandWithTimeout, runExec } = await import("./exec.js"));
-  });
-
-  beforeEach(() => {
     spawnMock.mockReset();
     spawnSyncMock.mockReset();
     spawnSyncMock.mockReturnValue({ stdout: "Active code page: 936", stderr: "" });

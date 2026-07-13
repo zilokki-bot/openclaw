@@ -2,16 +2,30 @@
 import fs from "node:fs";
 import os from "node:os";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
-import { describe, expect, it, vi } from "vitest";
-import {
-  clearShellEnvAppliedKeys,
-  getShellEnvAppliedKeys,
-  getShellPathFromLoginShell,
-  loadShellEnvFallback,
-  resolveShellEnvFallbackTimeoutMs,
-  shouldDeferShellEnvFallback,
-  shouldEnableShellEnvFallback,
-} from "./shell-env.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+type ShellEnvModule = typeof import("./shell-env.js");
+
+let clearShellEnvAppliedKeys: ShellEnvModule["clearShellEnvAppliedKeys"];
+let getShellEnvAppliedKeys: ShellEnvModule["getShellEnvAppliedKeys"];
+let getShellPathFromLoginShell: ShellEnvModule["getShellPathFromLoginShell"];
+let loadShellEnvFallback: ShellEnvModule["loadShellEnvFallback"];
+let resolveShellEnvFallbackTimeoutMs: ShellEnvModule["resolveShellEnvFallbackTimeoutMs"];
+let shouldDeferShellEnvFallback: ShellEnvModule["shouldDeferShellEnvFallback"];
+let shouldEnableShellEnvFallback: ShellEnvModule["shouldEnableShellEnvFallback"];
+
+beforeEach(async () => {
+  vi.resetModules();
+  ({
+    clearShellEnvAppliedKeys,
+    getShellEnvAppliedKeys,
+    getShellPathFromLoginShell,
+    loadShellEnvFallback,
+    resolveShellEnvFallbackTimeoutMs,
+    shouldDeferShellEnvFallback,
+    shouldEnableShellEnvFallback,
+  } = await import("./shell-env.js"));
+});
 
 describe("shell env fallback", () => {
   function getShellPathTwice(params: {

@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { resolveSandboxScript } from "./doctor-sandbox.js";
 
 describe("resolveSandboxScript", () => {
   const created: string[] = [];
+
+  afterEach(() => {
+    for (const dir of created.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   function mkTmp(prefix: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));

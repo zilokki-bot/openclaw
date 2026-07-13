@@ -296,6 +296,55 @@ describe("extractEnvAssignmentKeysFromDispatchWrappers", () => {
 });
 
 describe("extractShellWrapperCommand", () => {
+  test.each([
+    {
+      argv: ["bash", "-lc", "echo hi"],
+      expected: { isWrapper: true, command: null },
+    },
+    {
+      argv: ["busybox", "sh", "-lc", "echo hi"],
+      expected: { isWrapper: true, command: null },
+    },
+    {
+      argv: ["env", "--", "pwsh", "-Command", "Get-Date"],
+      expected: { isWrapper: true, command: "Get-Date" },
+    },
+    {
+      argv: ["cmd.exe", "-c", "echo", "hi"],
+      expected: { isWrapper: true, command: "echo hi" },
+    },
+    {
+      argv: ["pwsh", "/NoProfile", "/ec", "ZQBjAGgAbwA="],
+      expected: { isWrapper: true, command: "ZQBjAGgAbwA=" },
+    },
+    {
+      argv: ["pwsh", "-WorkingDir", "/tmp/project", "/ec", "ZQBjAGgAbwA="],
+      expected: { isWrapper: true, command: "ZQBjAGgAbwA=" },
+    },
+    {
+      argv: ["pwsh", "-ea", "stop", "-Command", "Get-Date"],
+      expected: { isWrapper: true, command: "Get-Date" },
+    },
+    {
+      argv: ["pwsh", "-File", "script.ps1", "-ExtraArg"],
+      expected: { isWrapper: true, command: "script.ps1" },
+    },
+    {
+      argv: ["pwsh", "-CommandWithArgs", "allowed.exe", ";", "unlisted.exe"],
+      expected: { isWrapper: true, command: "allowed.exe ; unlisted.exe" },
+    },
+    {
+      argv: ["pwsh", "script.ps1", "-en", "VwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIABoAGkA"],
+      expected: { isWrapper: false, command: null },
+    },
+    {
+      argv: ["bash", "script.sh"],
+      expected: { isWrapper: false, command: null },
+    },
+  ])("extracts wrapper command for $argv", ({ argv, expected }) => {
+    expect(extractShellWrapperCommand(argv)).toEqual(expected);
+  });
+
   test("prefers an explicit raw command override when provided", () => {
     expect(extractShellWrapperCommand(["bash", "-c", "echo hi"], "  run this instead  ")).toEqual({
       isWrapper: true,

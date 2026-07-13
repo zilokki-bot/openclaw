@@ -1,5 +1,13 @@
 // Covers Windows install-root normalization and discovery.
-import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const execFileSyncMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return { ...actual, execFileSync: execFileSyncMock };
+});
 import {
   getWindowsCmdExePath,
   getWindowsInstallRoots,
@@ -9,10 +17,25 @@ import {
   getWindowsWmicExePath,
 } from "./windows-install-roots.js";
 
-afterEach(() => {});
+afterEach(() => {
+  vi.restoreAllMocks();
+  execFileSyncMock.mockReset();
+});
 
 describe("getWindowsInstallRoots", () => {
   it("prefers HKLM registry roots over process environment values", () => {
+    vi.spyOn(fs, "accessSync").mockImplementation(() => undefined);
+    execFileSyncMock.mockImplementation((_file, args: string[]) => {
+      const valueName = args[3];
+      const values: Record<string, string> = {
+        SystemRoot: "D:\\Windows",
+        ProgramFilesDir: "E:\\Programs",
+        "ProgramFilesDir (x86)": "F:\\Programs (x86)",
+        ProgramW6432Dir: "E:\\Programs",
+      };
+      const value = valueName ? values[valueName] : undefined;
+      return value ? `${valueName}    REG_SZ    ${value}\r\n` : "";
+    });
     const originalEnv = process.env;
     let roots;
     try {

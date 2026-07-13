@@ -716,12 +716,14 @@ export function onAgentAuditEvent(listener: (evt: AgentEventPayload) => void) {
   return registerListener(getAgentEventState().auditListeners, listener);
 }
 
-/** Clears all agent event state, including listeners; test-only helper. */
-export function resetAgentEventsForTest() {
+/** Clears agent event state; test suites with a live Gateway can preserve its listeners. */
+export function resetAgentEventsForTest(options?: { preserveListeners?: boolean }) {
   const state = getAgentEventState();
   state.seqByRun.clear();
-  state.listeners.clear();
-  state.auditListeners.clear();
+  if (!options?.preserveListeners) {
+    state.listeners.clear();
+    state.auditListeners.clear();
+  }
   state.runContextById.clear();
   getAgentRunContextOwners(state).clear();
 }

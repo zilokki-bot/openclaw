@@ -16,6 +16,7 @@ import { createRunningTaskRun } from "../tasks/detached-task-runtime.js";
 import { resetTaskFlowRegistryForTests } from "../tasks/task-flow-registry.js";
 import { findTaskByRunId, resetTaskRegistryForTests } from "../tasks/task-registry.js";
 import { captureEnv } from "../test-utils/env.js";
+import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
 import { recoverOrphanedSubagentSessions } from "./subagent-orphan-recovery.js";
 import {
   addSubagentRunForTests,
@@ -76,6 +77,7 @@ describe("subagent orphan recovery — faithful restart path", () => {
   afterEach(async () => {
     testing.setDepsForTest();
     resetSubagentRegistryForTests({ persist: false });
+    await cleanupSessionStateForTest();
     resetTaskRegistryForTests({ persist: false });
     resetTaskFlowRegistryForTests({ persist: false });
     if (tempStateDir) {

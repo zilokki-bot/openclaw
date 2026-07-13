@@ -20,7 +20,6 @@ import {
   streamSessionTranscriptLinesReverse,
 } from "./transcript-stream.js";
 import { isCanonicalSessionTranscriptEntry } from "./transcript-tree.js";
-import { resolveOwnedSessionTranscriptWriteLockRunner } from "./transcript-write-context.js";
 import { CURRENT_SESSION_VERSION } from "./version.js";
 
 const SESSION_MANAGER_APPEND_MAX_BYTES = 8 * 1024 * 1024;
@@ -470,34 +469,6 @@ export async function appendSessionTranscriptMessage<TMessage>(
 export async function appendSessionTranscriptMessage<TMessage>(
   params: AppendSessionTranscriptMessageParams<TMessage>,
 ): Promise<AppendSessionTranscriptMessageResult<TMessage> | undefined> {
-  const activeLockRunner = resolveOwnedSessionTranscriptWriteLockRunner({
-    sessionFile: params.transcriptPath,
-  });
-  if (activeLockRunner) {
-    // Active prompt-stream writes must acquire the session lock before joining
-    // the append FIFO; otherwise a hook that owns the lock can deadlock behind itself.
-    let publishedHeader: string | undefined;
-    return await activeLockRunner(
-      () =>
-        withSessionTranscriptAppendQueue(params.transcriptPath, () =>
-          appendSessionTranscriptMessageLocked({
-            ...params,
-            onHeaderCreated: (header) => {
-              publishedHeader = header;
-            },
-          }),
-        ),
-      {
-        publishOwnedWrite: true,
-        resolvePublishedEntries: (result) => [
-          ...(publishedHeader ? [{ kind: "header" as const, serialized: publishedHeader }] : []),
-          ...(result?.appended === true ? [{ kind: "id" as const, id: result.messageId }] : []),
-        ],
-        resolvePublishedEntriesAfterFailure: () =>
-          publishedHeader ? [{ kind: "header", serialized: publishedHeader }] : [],
-      },
-    );
-  }
   return await withSessionTranscriptAppendQueue(params.transcriptPath, () =>
     withSessionTranscriptWriteLock(params, () => appendSessionTranscriptMessageLocked(params)),
   );
@@ -513,24 +484,6 @@ type AppendSessionTranscriptEventParams = {
 export async function appendSessionTranscriptEvent(
   params: AppendSessionTranscriptEventParams,
 ): Promise<void> {
-  const activeLockRunner = resolveOwnedSessionTranscriptWriteLockRunner({
-    sessionFile: params.transcriptPath,
-  });
-  if (activeLockRunner) {
-    await activeLockRunner(
-      () =>
-        withSessionTranscriptAppendQueue(params.transcriptPath, () =>
-          appendSessionTranscriptEventLocked(params),
-        ),
-      {
-        publishOwnedWrite: true,
-        resolvePublishedEntries: (result) => [
-          { kind: "serialized", serialized: result.serializedEntry },
-        ],
-      },
-    );
-    return;
-  }
   await withSessionTranscriptAppendQueue(params.transcriptPath, () =>
     withSessionTranscriptWriteLock(params, () => appendSessionTranscriptEventLocked(params)),
   );

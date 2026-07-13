@@ -87,17 +87,6 @@ export async function runWithOwnedSessionTranscriptWriteLock<T>(
   return await runWithOwnedSessionTranscriptWriteContext(params, run);
 }
 
-export function resolveOwnedSessionTranscriptWriteLockRunner(params: {
-  sessionFile?: string;
-  sessionKey?: string;
-}): OwnedSessionTranscriptWriteContext["withSessionWriteLock"] | undefined {
-  const context = ownedTranscriptWriteContext.getStore();
-  if (!context || !contextMatches({ context, ...params })) {
-    return undefined;
-  }
-  return context.withSessionWriteLock;
-}
-
 export function canAdvanceOwnedSessionEntryCache(params: {
   sessionFile?: string;
   sessionKey?: string;

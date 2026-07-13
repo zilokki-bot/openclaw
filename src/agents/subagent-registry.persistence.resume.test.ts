@@ -3,9 +3,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "./subagent-registry.mocks.shared.js";
 import { withEnvAsync } from "../test-utils/env.js";
+import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
 import {
   createSubagentRegistryTestDeps,
   writeSubagentSessionEntry,
@@ -118,6 +119,19 @@ describe("subagent registry persistence resume", () => {
     mod.resetSubagentRegistryForTests({ persist: false });
     vi.mocked(agentEventsModule.onAgentEvent).mockReset();
     vi.mocked(agentEventsModule.onAgentEvent).mockReturnValue(() => undefined);
+  });
+
+  afterEach(async () => {
+    announceSpy.mockClear();
+    mod.testing.setDepsForTest();
+    mod.resetSubagentRegistryForTests({ persist: false });
+    await cleanupSessionStateForTest();
+    if (tempStateDir) {
+      await fs.rm(tempStateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      tempStateDir = null;
+    }
+    hoisted.registryPath = undefined;
+    hoisted.allowedRunIds = undefined;
   });
 
   it("persists runs to disk and resumes after restart", async () => {
