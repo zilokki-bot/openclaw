@@ -44,7 +44,10 @@ describe("talk realtime gateway relay", () => {
       try {
         stopTalkRealtimeRelaySessionRaw({ relaySessionId, connId });
       } catch (error) {
-        if (!(error instanceof Error) || !error.message.includes("Unknown realtime relay session")) {
+        if (
+          !(error instanceof Error) ||
+          !error.message.includes("Unknown realtime relay session")
+        ) {
           throw error;
         }
       }
