@@ -2054,8 +2054,10 @@ class AppSidebar extends OpenClawLightDomContentsElement {
             class="sidebar-customize-menu__submenu-host"
             @pointerenter=${(event: PointerEvent) => {
               // Hover open/close is mouse-only: on touch/pen taps the
-              // enter/leave pair would race the click toggle below.
-              if (event.pointerType === "mouse") {
+              // enter/leave pair would race the click toggle below. Overlay
+              // placement covers this trigger row, so hover-opening there
+              // would land the pending click on a flyout link instead.
+              if (event.pointerType === "mouse" && this.agentMenuHelpPlacement() !== "--overlay") {
                 this.agentMenuHelpOpen = true;
               }
             }}
@@ -2103,15 +2105,24 @@ class AppSidebar extends OpenClawLightDomContentsElement {
     `;
   }
 
-  private renderAgentMenuHelpSubmenu() {
-    // Prefer a right flyout, flip left when the right edge is tight, and on
-    // viewports too narrow for two side-by-side menus overlay the parent
-    // instead — a flipped submenu would land offscreen there.
-    const menuWidth = 240;
+  // Prefer a right flyout, flip left when the right edge is tight, and on
+  // viewports too narrow for two side-by-side menus overlay the parent
+  // instead — a flipped submenu would land offscreen there. Menus are
+  // shrink-to-fit (224-264px, localized labels vary), so measure the open
+  // parent and budget the flyout at its max width; underestimating picks a
+  // side placement whose flyout clips past the viewport.
+  private agentMenuHelpPlacement(): "" | "--left" | "--overlay" {
+    const flyoutMaxWidth = 264;
     const x = this.agentMenuPosition?.x ?? 0;
-    const fitsRight = x + menuWidth * 2 + 4 <= window.innerWidth - 8;
-    const fitsLeft = x >= menuWidth + 4 + 8;
-    const placement = fitsRight ? "" : fitsLeft ? "--left" : "--overlay";
+    const parentWidth =
+      this.querySelector(".sidebar-agent-menu")?.getBoundingClientRect().width ?? flyoutMaxWidth;
+    const fitsRight = x + parentWidth + 4 + flyoutMaxWidth <= window.innerWidth - 8;
+    const fitsLeft = x >= flyoutMaxWidth + 4 + 8;
+    return fitsRight ? "" : fitsLeft ? "--left" : "--overlay";
+  }
+
+  private renderAgentMenuHelpSubmenu() {
+    const placement = this.agentMenuHelpPlacement();
     return html`
       <div
         class="sidebar-customize-menu sidebar-customize-menu__submenu ${placement
