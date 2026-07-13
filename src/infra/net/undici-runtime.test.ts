@@ -1,6 +1,6 @@
 // Undici runtime tests cover managed proxy TLS, IP-SNI stripping, and proxy
 // client factory installation.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   registerActiveManagedProxyUrl,
   stopActiveManagedProxyRegistration,
@@ -12,6 +12,14 @@ const poolCtor = vi.fn();
 const proxyAgentCtor = vi.fn();
 const proxyConnect = vi.fn();
 const TEST_UNDICI_RUNTIME_DEPS_KEY = "__OPENCLAW_TEST_UNDICI_RUNTIME_DEPS__";
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis as object, TEST_UNDICI_RUNTIME_DEPS_KEY);
+  envHttpProxyAgentCtor.mockReset();
+  poolCtor.mockReset();
+  proxyAgentCtor.mockReset();
+  proxyConnect.mockReset();
+});
 
 class MockAgent {
   readonly __testStub = true;

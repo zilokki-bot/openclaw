@@ -1,6 +1,6 @@
 // Tests session maintenance warning formatting and suppression.
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type DeliveryCall = {
   channel?: string;
@@ -29,14 +29,26 @@ vi.mock("./outbound/deliver.js", () => ({
   deliverOutboundPayloads: mocks.deliverOutboundPayloads,
   deliverOutboundPayloadsInternal: mocks.deliverOutboundPayloads,
 }));
+vi.mock("../agents/agent-scope.js", () => ({
+  resolveSessionAgentId: mocks.resolveSessionAgentId,
+}));
+vi.mock("../utils/message-channel.js", () => ({
+  normalizeMessageChannel: mocks.normalizeMessageChannel,
+  isDeliverableMessageChannel: mocks.isDeliverableMessageChannel,
+}));
+vi.mock("../utils/delivery-context.shared.js", () => ({
+  deliveryContextFromSession: mocks.deliveryContextFromSession,
+}));
+vi.mock("./outbound/deliver-runtime.js", () => ({
+  deliverOutboundPayloads: mocks.deliverOutboundPayloads,
+}));
+vi.mock("./system-events.js", () => ({
+  enqueueSystemEvent: mocks.enqueueSystemEvent,
+}));
 
 type SessionMaintenanceWarningModule = typeof import("./session-maintenance-warning.js");
 
 let deliverSessionMaintenanceWarning: SessionMaintenanceWarningModule["deliverSessionMaintenanceWarning"];
-
-beforeAll(async () => {
-  ({ deliverSessionMaintenanceWarning } = await import("./session-maintenance-warning.js"));
-});
 
 function createParams(
   overrides: Partial<Parameters<typeof deliverSessionMaintenanceWarning>[0]> = {},
@@ -78,7 +90,9 @@ describe("deliverSessionMaintenanceWarning", () => {
   let prevVitest: string | undefined;
   let prevNodeEnv: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ deliverSessionMaintenanceWarning } = await import("./session-maintenance-warning.js"));
     prevVitest = process.env.VITEST;
     prevNodeEnv = process.env.NODE_ENV;
     delete process.env.VITEST;
