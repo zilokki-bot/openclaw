@@ -245,6 +245,33 @@ const config = {
       project: ["**/*.ts!"],
       ignoreDependencies: ["openclaw"],
     },
+    "packages/memory-host-sdk": {
+      entry: [
+        "src/runtime.ts!",
+        "src/runtime-core.ts!",
+        "src/runtime-cli.ts!",
+        "src/runtime-files.ts!",
+        "src/engine.ts!",
+        "src/engine-foundation.ts!",
+        "src/engine-storage.ts!",
+        "src/engine-embeddings.ts!",
+        "src/engine-qmd.ts!",
+        "src/multimodal.ts!",
+        "src/query.ts!",
+        "src/secret.ts!",
+        "src/status.ts!",
+      ],
+      project: ["src/**/*.ts!"],
+      // This workspace was outside the root ratchet. Keep its pre-existing
+      // internal export debt out while modeling its imports into core.
+      ignore: [
+        "src/host/backend-config.ts",
+        "src/host/embeddings.ts",
+        "src/host/embeddings.types.ts",
+        "src/host/local-embedding-runtime-facts.ts",
+        "src/host/types.ts",
+      ],
+    },
     "packages/*": {
       entry: ["index.js!", "scripts/postinstall.js!"],
       project: ["index.js!", "scripts/**/*.js!"],
