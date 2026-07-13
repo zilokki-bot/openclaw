@@ -436,6 +436,15 @@ describe("AppSidebar agent chip", () => {
       "https://docs.openclaw.ai/releases",
     ]);
 
+    // Real mouse flow fires pointerenter before the click; the click must not
+    // invert the hover-opened state back to closed.
+    const helpHost = menu?.querySelector(".sidebar-customize-menu__submenu-host");
+    helpHost?.dispatchEvent(Object.assign(new Event("pointerenter"), { pointerType: "mouse" }));
+    await sidebar.updateComplete;
+    helpRow?.click();
+    await sidebar.updateComplete;
+    expect(menu?.querySelector(".sidebar-customize-menu__submenu")).not.toBeNull();
+
     const agentRows = [...(menu?.querySelectorAll('[role="menuitemradio"]') ?? [])];
     expect(agentRows).toHaveLength(2);
     const researchRow = agentRows.find((row) => row.textContent?.includes("research"));

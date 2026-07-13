@@ -2075,7 +2075,10 @@ class AppSidebar extends OpenClawLightDomContentsElement {
               aria-haspopup="menu"
               aria-expanded=${String(this.agentMenuHelpOpen)}
               @click=${() => {
-                this.agentMenuHelpOpen = !this.agentMenuHelpOpen;
+                // Open-only: with hover-open, a toggle would close the flyout
+                // on the very click that follows the opening pointerenter.
+                // Closing happens by leaving the host or closing the menu.
+                this.agentMenuHelpOpen = true;
               }}
             >
               <span class="nav-item__icon" aria-hidden="true">${icons.circleQuestionMark}</span>
