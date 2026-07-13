@@ -11,11 +11,11 @@ import { normalizeAgentId } from "../lib/sessions/session-key.ts";
 import { icons } from "./icons.ts";
 
 /** Above this roster size the chip menu switches to pinned agents + filter. */
-export const QUICK_SWITCH_AGENT_LIMIT = 10;
+const QUICK_SWITCH_AGENT_LIMIT = 10;
 
 type AgentMenuAgent = { id: string; name?: string; identity?: { name?: string; emoji?: string } };
 
-export type SidebarAgentMenuParams = {
+type SidebarAgentMenuParams = {
   position: { x: number; bottom: number } | null;
   activeId: string;
   activeName: string;
@@ -39,7 +39,7 @@ export type SidebarAgentMenuParams = {
 /** Rows for the chip switcher. Small rosters list everything; past
     QUICK_SWITCH_AGENT_LIMIT the menu shows pinned agents (plus the active
     one) and the filter searches the full roster. */
-export function sidebarAgentMenuRows(params: {
+function sidebarAgentMenuRows(params: {
   agents: readonly AgentMenuAgent[];
   activeId: string;
   filter: string;
