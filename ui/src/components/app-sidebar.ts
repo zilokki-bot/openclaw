@@ -27,6 +27,7 @@ import {
 import { beginNativeWindowDragFromTopInset } from "../app/native-window-drag.ts";
 import { controlUiPublicAssetPath } from "../app/public-assets.ts";
 import type { ThemeMode } from "../app/theme.ts";
+import { t } from "../i18n/index.ts";
 import "./menu-surface.ts";
 import "./session-menu.ts";
 import "./sidebar-agent-chip.ts";
@@ -35,11 +36,9 @@ import "./sidebar-build-chip.ts";
 import "./sidebar-update-card.ts";
 import "./theme-mode-toggle.ts";
 import "./tooltip.ts";
-import { t } from "../i18n/index.ts";
 import { normalizeAgentLabel, resolveAgentTextAvatar } from "../lib/agents/display.ts";
 import { resolveAgentAvatarUrl } from "../lib/avatar.ts";
 import { editorOpenUrl } from "../lib/editor-links.ts";
-import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../lib/external-link.ts";
 import { formatRelativeTimestamp } from "../lib/format.ts";
 import { isGatewayMethodAdvertised } from "../lib/gateway-methods.ts";
 import { startHoverMarquee, stopHoverMarquee } from "../lib/hover-marquee.ts";
@@ -83,6 +82,7 @@ import { normalizeOptionalString } from "../lib/string-coerce.ts";
 import { OpenClawLightDomContentsElement } from "../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../lit/subscriptions-controller.ts";
 import { getSafeLocalStorage } from "../local-storage.ts";
+import { renderSidebarAgentMenu } from "./app-sidebar-agent-menu.ts";
 import {
   isSidebarRouteActive,
   renderSidebarCustomizeMenu,
@@ -151,8 +151,6 @@ type SidebarSessionGroupDropTarget = {
 const SIDEBAR_SESSION_GROUPING_STORAGE_KEY = "openclaw:sidebar:sessions:grouping";
 const SIDEBAR_AGENT_SESSION_LIST_LIMIT = 60;
 const SIDEBAR_SESSION_PAGE_SIZE = 10;
-/** Above this roster size the chip menu switches to pinned agents + filter. */
-const QUICK_SWITCH_AGENT_LIMIT = 10;
 const SIDEBAR_SESSION_SEE_LESS_THRESHOLD = 30;
 const SIDEBAR_SESSION_COLLAPSED_SECTIONS_STORAGE_KEY =
   "openclaw:sidebar:sessions:collapsed-sections";
@@ -1917,208 +1915,30 @@ class AppSidebar extends OpenClawLightDomContentsElement {
     });
   }
 
-  private renderAgentMenuAgentRow(
-    agent: { id: string; name?: string; identity?: { name?: string; emoji?: string } },
-    activeId: string,
-  ) {
-    const agentId = normalizeAgentId(agent.id);
-    const label = normalizeAgentLabel(agent);
-    const active = agentId === activeId;
-    const unread = active ? 0 : this.agentUnreadCount(agentId);
-    const initial = resolveAgentTextAvatar(agent) ?? (label || agent.id).slice(0, 1).toUpperCase();
-    return html`
-      <button
-        type="button"
-        class="sidebar-customize-menu__item"
-        role="menuitemradio"
-        tabindex="-1"
-        aria-checked=${String(active)}
-        @click=${() => this.switchChipAgent(agentId)}
-      >
-        <span class="sidebar-agent-section__avatar" aria-hidden="true">${initial}</span>
-        <span class="sidebar-customize-menu__text">${label}</span>
-        ${unread > 0
-          ? html`<span
-              class="session-unread-dot"
-              role="img"
-              aria-label=${t("sessionsView.unread")}
-            ></span>`
-          : nothing}
-        <span class="sidebar-customize-menu__check" aria-hidden="true">
-          ${active ? icons.check : nothing}
-        </span>
-      </button>
-    `;
-  }
-
-  /** Rows for the chip switcher. Small rosters list everything; past
-      QUICK_SWITCH_AGENT_LIMIT the menu shows pinned agents (plus the active
-      one) and the filter searches the full roster. */
-  private agentMenuRows(
-    agents: readonly { id: string; name?: string; identity?: { name?: string; emoji?: string } }[],
-    activeId: string,
-  ) {
-    const pinnedIds = new Set(this.pinnedAgentIds.map((agentId) => normalizeAgentId(agentId)));
-    const sorted = agents.toSorted((a, b) => {
-      const aPinned = pinnedIds.has(normalizeAgentId(a.id)) ? 0 : 1;
-      const bPinned = pinnedIds.has(normalizeAgentId(b.id)) ? 0 : 1;
-      return aPinned - bPinned;
-    });
-    if (agents.length <= QUICK_SWITCH_AGENT_LIMIT) {
-      return { rows: sorted, showFilter: false };
-    }
-    const query = this.agentMenuFilter.trim().toLowerCase();
-    if (query) {
-      const rows = sorted.filter((entry) => {
-        const agentId = normalizeAgentId(entry.id);
-        return (
-          agentId.toLowerCase().includes(query) ||
-          normalizeAgentLabel(entry).toLowerCase().includes(query)
-        );
-      });
-      return { rows, showFilter: true };
-    }
-    const rows =
-      pinnedIds.size > 0
-        ? sorted.filter((entry) => {
-            const agentId = normalizeAgentId(entry.id);
-            return pinnedIds.has(agentId) || agentId === activeId;
-          })
-        : sorted.slice(0, QUICK_SWITCH_AGENT_LIMIT);
-    return { rows, showFilter: true };
-  }
-
   private renderAgentMenu() {
-    const position = this.agentMenuPosition;
-    if (!position) {
-      return nothing;
-    }
     const { activeId, agent, agents } = this.activeChipAgent();
-    const activeName = agent ? normalizeAgentLabel(agent) : activeId;
-    const { rows, showFilter } = this.agentMenuRows(agents, activeId);
-    return html`
-      <openclaw-menu-surface>
-        <div
-          class="sidebar-customize-menu sidebar-agent-menu"
-          role="menu"
-          aria-label=${t("agentChip.menuLabel")}
-          style="left: ${position.x}px; bottom: ${position.bottom}px;"
-        >
-          ${agents.length > 1
-            ? html`
-                <div class="sidebar-customize-menu__title">${t("agentChip.agents")}</div>
-                ${showFilter
-                  ? html`
-                      <div class="sidebar-agent-menu__filter">
-                        <input
-                          type="text"
-                          .value=${this.agentMenuFilter}
-                          placeholder=${t("agentChip.filterAgents")}
-                          aria-label=${t("agentChip.filterAgents")}
-                          @input=${(event: Event) => {
-                            this.agentMenuFilter = (event.target as HTMLInputElement).value;
-                          }}
-                        />
-                      </div>
-                    `
-                  : nothing}
-                <div class="sidebar-agent-menu__list">
-                  ${rows.map((entry) => this.renderAgentMenuAgentRow(entry, activeId))}
-                  ${rows.length === 0
-                    ? html`<div class="sidebar-agent-menu__empty">
-                        ${t("agentChip.noAgentMatches")}
-                      </div>`
-                    : nothing}
-                </div>
-                <div class="sidebar-customize-menu__separator" role="separator"></div>
-              `
-            : nothing}
-          <button
-            type="button"
-            class="sidebar-customize-menu__item"
-            role="menuitem"
-            tabindex="-1"
-            ?disabled=${!this.connected}
-            @click=${() => this.askAgentCapabilities(activeId)}
-          >
-            <span class="nav-item__icon" aria-hidden="true">${icons.bot}</span>
-            <span class="sidebar-customize-menu__text">
-              ${t("agentChip.whatCanAgentDo", { name: activeName })}
-            </span>
-          </button>
-          <button
-            type="button"
-            class="sidebar-customize-menu__item"
-            role="menuitem"
-            tabindex="-1"
-            @click=${() => {
-              this.closeAgentMenu();
-              this.onNavigate?.("agents", {
-                search: `?agent=${encodeURIComponent(activeId)}`,
-              });
-            }}
-          >
-            <span class="nav-item__icon" aria-hidden="true">${icons.users}</span>
-            <span class="sidebar-customize-menu__text">${t("agentChip.agentSettings")}</span>
-          </button>
-          <div class="sidebar-customize-menu__separator" role="separator"></div>
-          <button
-            type="button"
-            class="sidebar-customize-menu__item"
-            role="menuitem"
-            tabindex="-1"
-            @click=${() => {
-              this.closeAgentMenu();
-              this.onNavigate?.("config");
-            }}
-          >
-            <span class="nav-item__icon" aria-hidden="true">${icons.settings}</span>
-            <span class="sidebar-customize-menu__text">${titleForRoute("config")}</span>
-          </button>
-          <button
-            type="button"
-            class="sidebar-customize-menu__item sidebar-pair-mobile"
-            role="menuitem"
-            tabindex="-1"
-            ?disabled=${!this.canPairDevice}
-            title=${this.canPairDevice ? nothing : t("nodes.pairing.adminRequired")}
-            @click=${() => {
-              this.closeAgentMenu();
-              this.onPairMobile?.();
-            }}
-          >
-            <span class="nav-item__icon" aria-hidden="true">${icons.smartphone}</span>
-            <span class="sidebar-customize-menu__text">${t("nodes.pairing.button")}</span>
-          </button>
-          <a
-            class="sidebar-customize-menu__item"
-            role="menuitem"
-            tabindex="-1"
-            href="https://docs.openclaw.ai"
-            target=${EXTERNAL_LINK_TARGET}
-            rel=${buildExternalLinkRel()}
-            @click=${() => this.closeAgentMenu()}
-          >
-            <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
-            <span class="sidebar-customize-menu__text">${t("common.docs")}</span>
-          </a>
-          <div class="sidebar-customize-menu__separator" role="separator"></div>
-          <div class="sidebar-agent-menu__footer">
-            <openclaw-sidebar-build-chip
-              .basePath=${this.basePath}
-              .gatewayVersion=${this.gatewayVersion}
-              .onNavigate=${(routeId: "about") => {
-                this.closeAgentMenu();
-                this.onNavigate?.(routeId);
-              }}
-            ></openclaw-sidebar-build-chip>
-            <span class="sidebar-mode-switch">
-              <openclaw-theme-mode-toggle .mode=${this.themeMode}></openclaw-theme-mode-toggle>
-            </span>
-          </div>
-        </div>
-      </openclaw-menu-surface>
-    `;
+    return renderSidebarAgentMenu({
+      position: this.agentMenuPosition,
+      activeId,
+      activeName: agent ? normalizeAgentLabel(agent) : activeId,
+      agents,
+      filter: this.agentMenuFilter,
+      pinnedAgentIds: this.pinnedAgentIds,
+      connected: this.connected,
+      canPairDevice: this.canPairDevice,
+      basePath: this.basePath,
+      gatewayVersion: this.gatewayVersion,
+      themeMode: this.themeMode,
+      agentUnreadCount: (agentId) => this.agentUnreadCount(agentId),
+      onFilterChange: (next) => {
+        this.agentMenuFilter = next;
+      },
+      onSwitchAgent: (agentId) => this.switchChipAgent(agentId),
+      onAskCapabilities: (agentId) => this.askAgentCapabilities(agentId),
+      onClose: () => this.closeAgentMenu(),
+      onNavigate: (routeId, options) => this.onNavigate?.(routeId, options),
+      onPairMobile: () => this.onPairMobile?.(),
+    });
   }
 
   private renderSessionMenu() {

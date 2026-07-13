@@ -7,10 +7,10 @@ import {
   loadSettings,
   persistSessionToken,
   resolvePageGatewaySettings,
-  resolveApplicationStartupSettings,
   saveSettings,
   type UiSettings,
 } from "./settings.ts";
+import { resolveApplicationStartupSettings } from "./startup-settings.ts";
 
 function setTestLocation(params: { protocol: string; host: string; pathname: string }) {
   vi.stubGlobal("location", {
