@@ -21,6 +21,7 @@
 @import "./styles/workspace.css";
 @import "./styles/workboard.css";
 @import "./styles/plugins.css";
+@import "./styles/channels.css";
 @import "./styles/skill-workshop.css";
 @import "@create-markdown/preview/themes/system.css";
 
