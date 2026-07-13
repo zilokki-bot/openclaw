@@ -14,6 +14,7 @@ import {
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
 import {
   listLivePromotionEntries,
+  markPromotionSlugsNotified,
   maybeRefreshPromotionsFeed,
   readPromotionClaims,
   recordPromotionClaim,
@@ -62,15 +63,23 @@ describe("promotions feed state", () => {
     await testState.cleanup();
   });
 
-  it("skips the network while the last check is fresh", async () => {
-    mockHttp.intercept({ url: FEED_URL, reply: { json: feedPayload() } });
+  it("round-trips a fetched snapshot while the last check is fresh", async () => {
+    mockHttp.intercept({
+      url: FEED_URL,
+      reply: { json: feedPayload(), headers: { etag: '"v4"' } },
+    });
     await maybeRefreshPromotionsFeed({ nowMs: NOW, fetchImpl: globalThis.fetch });
     const second = await maybeRefreshPromotionsFeed({
       nowMs: NOW + 60_000,
       fetchImpl: globalThis.fetch,
     });
     expect(mockHttp.requests()).toHaveLength(1);
-    expect(second.entries).toHaveLength(1);
+    expect(second.sequence).toBe(4);
+    expect(second.etag).toBe('"v4"');
+    expect(second.expiresAtMs).toBe(Date.parse("2026-07-06T00:00:00.000Z"));
+    expect(second.entries[0]?.slug).toBe("example-models-launch");
+    expect(listLivePromotionEntries(second, NOW)).toHaveLength(1);
+    expect(listLivePromotionEntries(second, NOW + 3 * 86_400_000)).toHaveLength(0);
   });
 
   it("refreshes at feed expiry and keeps an expired 304 snapshot hidden without retrying", async () => {
@@ -79,7 +88,11 @@ describe("promotions feed state", () => {
       url: FEED_URL,
       reply: { json: feedPayload({ expiresAt }), headers: { etag: '"v4"' } },
     });
-    mockHttp.intercept({ url: FEED_URL, reply: { status: 304 } });
+    mockHttp.intercept({
+      url: FEED_URL,
+      requestHeaders: { "if-none-match": '"v4"' },
+      reply: { status: 304 },
+    });
     await maybeRefreshPromotionsFeed({ nowMs: NOW, fetchImpl: globalThis.fetch });
 
     const expired = await maybeRefreshPromotionsFeed({
@@ -94,6 +107,7 @@ describe("promotions feed state", () => {
       fetchImpl: globalThis.fetch,
     });
     expect(mockHttp.requests()).toHaveLength(2);
+    expect(cached.lastCheckedAtMs).toBe(NOW + 60_000);
     expect(listLivePromotionEntries(cached, NOW + 61_000)).toHaveLength(0);
   });
 
@@ -204,6 +218,16 @@ describe("promotions feed state", () => {
     // The failed attempt still stamps the check time so offline runs do not
     // retry on every command.
     expect(state.lastCheckedAtMs).toBe(NOW + 60_000);
+  });
+
+  it("persists and deduplicates notified promotion slugs", async () => {
+    markPromotionSlugsNotified(["example-models-launch", "second-offer"]);
+    markPromotionSlugsNotified(["example-models-launch"]);
+    mockHttp.intercept({ url: FEED_URL, reply: { json: feedPayload() } });
+
+    const state = await maybeRefreshPromotionsFeed({ nowMs: NOW, fetchImpl: globalThis.fetch });
+
+    expect([...state.notifiedSlugs].toSorted()).toEqual(["example-models-launch", "second-offer"]);
   });
 
   it("round-trips claim provenance and upserts by slug", () => {
