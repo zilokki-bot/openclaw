@@ -7,10 +7,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { drainFormattedSystemEvents } from "../auto-reply/reply/session-system-events.js";
 import type { OpenClawConfig } from "../config/config.js";
-import {
-  resetHeartbeatWakeStateForTests,
-  setHeartbeatWakeHandler,
-} from "../infra/heartbeat-wake.js";
+import { setHeartbeatWakeHandler } from "../infra/heartbeat-wake.js";
 import { applyPathPrepend, findPathKey } from "../infra/path-prepend.js";
 import {
   peekSystemEventEntries,
@@ -821,13 +818,9 @@ describe("exec exit codes", () => {
 describe("exec notifyOnExit", () => {
   useCapturedEnv([...SHELL_ENV_KEYS], applyDefaultShellEnv);
 
-  beforeEach(() => {
-    resetHeartbeatWakeStateForTests();
-  });
+  beforeEach(() => {});
 
-  afterEach(() => {
-    resetHeartbeatWakeStateForTests();
-  });
+  afterEach(() => {});
 
   it("enqueues a system event when a backgrounded exec exits", async () => {
     const tool = createNotifyOnExitExecTool();
