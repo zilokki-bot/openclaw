@@ -1705,7 +1705,6 @@ export const nl: TranslationMap = {
     filterAll: "Alle",
     filterIssues: "Problemen",
     filterLabel: "Geïnstalleerde plugins filteren",
-    pulseLabel: "{enabled} ingeschakeld, {disabled} uitgeschakeld, {issues} met problemen",
     categoryChannels: "Kanalen",
     categoryProviders: "Modelproviders",
     categoryMemory: "Geheugen",

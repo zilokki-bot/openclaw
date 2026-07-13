@@ -1715,7 +1715,6 @@ export const ru: TranslationMap = {
     filterAll: "Все",
     filterIssues: "Проблемы",
     filterLabel: "Фильтр установленных плагинов",
-    pulseLabel: "{enabled} включено, {disabled} отключено, {issues} с проблемами",
     categoryChannels: "Каналы",
     categoryProviders: "Поставщики моделей",
     categoryMemory: "Память",

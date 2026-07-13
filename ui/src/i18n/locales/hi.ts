@@ -1687,7 +1687,6 @@ export const hi: TranslationMap = {
     filterAll: "सभी",
     filterIssues: "समस्याएँ",
     filterLabel: "इंस्टॉल किए गए प्लगइन्स फ़िल्टर करें",
-    pulseLabel: "{enabled} सक्षम, {disabled} अक्षम, {issues} में समस्याएँ",
     categoryChannels: "चैनल",
     categoryProviders: "मॉडल प्रदाता",
     categoryMemory: "मेमोरी",
