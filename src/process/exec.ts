@@ -105,7 +105,7 @@ function resolveCommand(command: string): string {
   });
 }
 
-function resolveChildProcessInvocation(params: {
+export function resolveChildProcessInvocation(params: {
   argv: string[];
   windowsVerbatimArguments?: boolean;
 }): {
