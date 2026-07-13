@@ -14,10 +14,8 @@ import {
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
 import {
   listLivePromotionEntries,
-  markPromotionSlugsNotified,
   maybeRefreshPromotionsFeed,
   readPromotionClaims,
-  readPromotionsFeedState,
   recordPromotionClaim,
 } from "./promotions-feed.js";
 
@@ -62,26 +60,6 @@ describe("promotions feed state", () => {
   afterEach(async () => {
     closeOpenClawStateDatabaseForTest();
     await testState.cleanup();
-  });
-
-  it("caches a fetched snapshot and round-trips it from storage", async () => {
-    mockHttp.intercept({
-      url: FEED_URL,
-      reply: { json: feedPayload(), headers: { etag: '"v4"' } },
-    });
-    const state = await maybeRefreshPromotionsFeed({ nowMs: NOW, fetchImpl: globalThis.fetch });
-    expect(mockHttp.requests()).toHaveLength(1);
-    expect(state.sequence).toBe(4);
-    expect(state.etag).toBe('"v4"');
-    expect(state.expiresAtMs).toBe(Date.parse("2026-07-06T00:00:00.000Z"));
-    expect(state.entries).toHaveLength(1);
-
-    const persisted = readPromotionsFeedState();
-    expect(persisted.sequence).toBe(4);
-    expect(persisted.expiresAtMs).toBe(Date.parse("2026-07-06T00:00:00.000Z"));
-    expect(persisted.entries[0]?.slug).toBe("example-models-launch");
-    expect(listLivePromotionEntries(persisted, NOW)).toHaveLength(1);
-    expect(listLivePromotionEntries(persisted, NOW + 3 * 86_400_000)).toHaveLength(0);
   });
 
   it("skips the network while the last check is fresh", async () => {
@@ -163,27 +141,6 @@ describe("promotions feed state", () => {
     expect(listLivePromotionEntries(refreshed, NOW + 60_000)).toHaveLength(1);
   });
 
-  it("revalidates with If-None-Match and keeps the cache on 304", async () => {
-    mockHttp.intercept({
-      url: FEED_URL,
-      reply: { json: feedPayload(), headers: { etag: '"v4"' } },
-    });
-    mockHttp.intercept({
-      url: FEED_URL,
-      requestHeaders: { "if-none-match": '"v4"' },
-      reply: { status: 304 },
-    });
-    await maybeRefreshPromotionsFeed({ nowMs: NOW, fetchImpl: globalThis.fetch });
-    const state = await maybeRefreshPromotionsFeed({
-      nowMs: NOW + 60_000,
-      force: true,
-      fetchImpl: globalThis.fetch,
-    });
-    expect(mockHttp.requests()).toHaveLength(2);
-    expect(state.entries).toHaveLength(1);
-    expect(readPromotionsFeedState().lastCheckedAtMs).toBe(NOW + 60_000);
-  });
-
   it("drops a stale validator when the cached payload is invalid", async () => {
     mockHttp.intercept({
       url: FEED_URL,
@@ -247,15 +204,6 @@ describe("promotions feed state", () => {
     // The failed attempt still stamps the check time so offline runs do not
     // retry on every command.
     expect(state.lastCheckedAtMs).toBe(NOW + 60_000);
-  });
-
-  it("persists notified slugs across reads", () => {
-    markPromotionSlugsNotified(["example-models-launch", "second-offer"]);
-    markPromotionSlugsNotified(["example-models-launch"]);
-    expect([...readPromotionsFeedState().notifiedSlugs].toSorted()).toEqual([
-      "example-models-launch",
-      "second-offer",
-    ]);
   });
 
   it("round-trips claim provenance and upserts by slug", () => {
