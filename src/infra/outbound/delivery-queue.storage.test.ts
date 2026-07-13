@@ -2,22 +2,27 @@
 // recovery-state markers, and failed-entry moves.
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  installDeliveryQueueTmpDirHooks,
+  readQueuedEntry,
+} from "../../../test/helpers/infra/outbound/delivery-queue.js";
 import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
+import {
+  failPendingDelivery,
+  loadPendingDelivery,
+  loadPendingDeliveries,
+  moveToFailed,
+} from "./delivery-queue-storage.js";
 import {
   ackDelivery,
   enqueueDelivery,
   failDelivery,
   failDeliveryAfterPlatformSend,
   failDeliveryBeforePlatformSend,
-  failPendingDelivery,
-  loadPendingDelivery,
-  loadPendingDeliveries,
   markDeliveryPlatformOutcomeUnknown,
   markDeliveryPlatformSendDispatched,
   markDeliveryPlatformSendAttemptStarted,
-  moveToFailed,
 } from "./delivery-queue.js";
-import { installDeliveryQueueTmpDirHooks, readQueuedEntry } from "./delivery-queue.test-helpers.js";
 
 describe("delivery-queue storage", () => {
   const { tmpDir } = installDeliveryQueueTmpDirHooks();

@@ -8,29 +8,30 @@ import {
   type TrustedMessageAuditEvent,
 } from "../../audit/message-audit-events.js";
 import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
-import { RECOVERY_REPLAY_SPACING_MS } from "../delivery-recovery.shared.js";
-import {
-  OutboundDeliveryError,
-  PlatformMessageNotDispatchedError,
-  type OutboundPayloadDeliveryOutcome,
-} from "./deliver-types.js";
-import { attachOutboundDeliveryCommitHook } from "./delivery-commit-hooks.js";
-import {
-  ackDelivery,
-  enqueueDelivery,
-  loadPendingDeliveries,
-  markDeliveryPlatformOutcomeUnknown,
-  markDeliveryPlatformSendAttemptStarted,
-  MAX_RETRIES,
-  recoverPendingDeliveries,
-} from "./delivery-queue.js";
+const RECOVERY_REPLAY_SPACING_MS = 250;
 import {
   asDeliverFn,
   createRecoveryLog,
   installDeliveryQueueTmpDirHooks,
   readQueuedEntry,
   setQueuedEntryState,
-} from "./delivery-queue.test-helpers.js";
+} from "../../../test/helpers/infra/outbound/delivery-queue.js";
+import {
+  OutboundDeliveryError,
+  PlatformMessageNotDispatchedError,
+  type OutboundPayloadDeliveryOutcome,
+} from "./deliver-types.js";
+import { attachOutboundDeliveryCommitHook } from "./delivery-commit-hooks.js";
+import { loadPendingDeliveries } from "./delivery-queue-storage.js";
+import {
+  ackDelivery,
+  enqueueDelivery,
+  markDeliveryPlatformOutcomeUnknown,
+  markDeliveryPlatformSendAttemptStarted,
+  recoverPendingDeliveries,
+} from "./delivery-queue.js";
+
+const MAX_RETRIES = 5;
 
 const resolveOutboundChannelMessageAdapterMock = vi.hoisted(() => vi.fn());
 

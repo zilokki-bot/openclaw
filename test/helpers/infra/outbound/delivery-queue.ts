@@ -3,9 +3,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, vi } from "vitest";
-import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
-import { resolvePreferredOpenClawTmpDir } from "../tmp-openclaw-dir.js";
-import type { DeliverFn, RecoveryLogger } from "./delivery-queue.js";
+import type { DeliverFn } from "../../../../src/infra/outbound/delivery-queue.js";
+import { resolvePreferredOpenClawTmpDir } from "../../../../src/infra/tmp-openclaw-dir.js";
+import { openOpenClawStateDatabase } from "../../../../src/state/openclaw-state-db.js";
+
+export type RecoveryLogger = {
+  info(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+};
 
 /** Installs Vitest hooks that provide a fresh delivery-queue state dir per case. */
 export function installDeliveryQueueTmpDirHooks(): { readonly tmpDir: () => string } {
