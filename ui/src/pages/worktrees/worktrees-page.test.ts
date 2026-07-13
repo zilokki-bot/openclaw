@@ -135,10 +135,8 @@ function contextWithConfig(
   gateway: ApplicationContext["gateway"],
   runtimeConfig: ReturnType<typeof runtimeConfigStub>,
 ): ApplicationContext {
-  const context = contextWithGateway(gateway) as ApplicationContext & {
-    runtimeConfig: unknown;
-  };
-  context.runtimeConfig = runtimeConfig;
+  const context = contextWithGateway(gateway);
+  context.runtimeConfig = runtimeConfig as unknown as ApplicationContext["runtimeConfig"];
   return context;
 }
 
