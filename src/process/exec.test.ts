@@ -4,8 +4,9 @@ import { EventEmitter } from "node:events";
 import process from "node:process";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OPENCLAW_CLI_ENV_VALUE } from "../infra/openclaw-exec-env.js";
 import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
+
+const OPENCLAW_CLI_ENV_VALUE = "1";
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const execFileMock = vi.hoisted(() => vi.fn());

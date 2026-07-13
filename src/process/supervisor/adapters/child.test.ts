@@ -6,10 +6,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../../test/helpers/temp-dir.js";
-import {
-  getWindowsInstallRoots,
-  resetWindowsInstallRootsForTests,
-} from "../../../infra/windows-install-roots.js";
+import { getWindowsInstallRoots } from "../../../infra/windows-install-roots.js";
 import {
   expectRealExitWinsOverSigkillFallback,
   expectWaitStaysPendingUntilSigkillFallback,
@@ -137,7 +134,6 @@ describe("createChildAdapter", () => {
   });
 
   beforeEach(() => {
-    resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
     spawnWithFallbackMock.mockClear();
     signalProcessTreeMock.mockClear();
     createWindowsOutputDecoderMock.mockClear();

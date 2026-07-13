@@ -5,6 +5,13 @@
  * inside the owning plugin package instead of hanging off core runtime slots
  * keyed by plugin id.
  */
+import type { ResolveMarkdownTableMode } from "../../config/markdown-tables.types.js";
+import type {
+  ReadSessionUpdatedAt,
+  RecordSessionMetaFromInbound,
+  UpdateLastRoute,
+} from "../../config/sessions/runtime-types.js";
+
 type DispatchReplyWithBufferedBlockDispatcher =
   import("../../auto-reply/reply/provider-dispatcher.types.js").DispatchReplyWithBufferedBlockDispatcher;
 type CreateReplyDispatcherWithTyping =
@@ -24,10 +31,6 @@ type MatchesMentionPatterns =
   import("../../auto-reply/reply/mentions.types.js").MatchesMentionPatterns;
 type MatchesMentionWithExplicit =
   import("../../auto-reply/reply/mentions.types.js").MatchesMentionWithExplicit;
-type ReadSessionUpdatedAt = import("../../config/sessions/runtime-types.js").ReadSessionUpdatedAt;
-type RecordSessionMetaFromInbound =
-  import("../../config/sessions/runtime-types.js").RecordSessionMetaFromInbound;
-type UpdateLastRoute = import("../../config/sessions/runtime-types.js").UpdateLastRoute;
 type RecordInboundSession = import("../../channels/session.types.js").RecordInboundSession;
 
 export type RuntimeThreadBindingLifecycleRecord =
@@ -82,7 +85,7 @@ export type PluginRuntimeChannel = {
     resolveChunkMode: typeof import("../../auto-reply/chunk.js").resolveChunkMode;
     resolveTextChunkLimit: typeof import("../../auto-reply/chunk.js").resolveTextChunkLimit;
     hasControlCommand: typeof import("../../auto-reply/command-detection.js").hasControlCommand;
-    resolveMarkdownTableMode: import("../../config/markdown-tables.types.js").ResolveMarkdownTableMode;
+    resolveMarkdownTableMode: ResolveMarkdownTableMode;
     convertMarkdownTables: typeof import("../../../packages/markdown-core/src/tables.js").convertMarkdownTables;
   };
   reply: {

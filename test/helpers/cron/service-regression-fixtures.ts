@@ -12,7 +12,7 @@ import {
 } from "../../../src/cron/service.test-harness.js";
 import type { CronServiceDeps } from "../../../src/cron/service/state.js";
 import type { CronJob, CronJobState } from "../../../src/cron/types.js";
-import { resetAgentRunContextForTest } from "../../../src/infra/agent-events.js";
+import { resetAgentEventsForTest } from "../../../src/infra/agent-events.js";
 import {
   resetCommandQueueStateForTest,
   waitForActiveTasks,
@@ -49,7 +49,7 @@ export function setupCronRegressionFixtures(options?: { prefix?: string; baseTim
     await waitForActiveTasks(250);
     resetCommandQueueStateForTest();
     clearSessionStoreCacheForTest();
-    resetAgentRunContextForTest();
+    resetAgentEventsForTest();
     clearAllBootstrapSnapshots();
   });
 

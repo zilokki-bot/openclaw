@@ -7,11 +7,7 @@ import {
   type OpenClawConfig,
 } from "../../config/config.js";
 import { onAgentEvent } from "../../infra/agent-events.js";
-import {
-  requestHeartbeat,
-  resetHeartbeatWakeStateForTests,
-  setHeartbeatWakeHandler,
-} from "../../infra/heartbeat-wake.js";
+import { requestHeartbeat, setHeartbeatWakeHandler } from "../../infra/heartbeat-wake.js";
 import * as execModule from "../../process/exec.js";
 import { onSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import { VERSION } from "../../version.js";
@@ -193,7 +189,6 @@ describe("plugin runtime command execution", () => {
 
   it("maps deprecated runtime.system.requestHeartbeatNow to an immediate compatibility wake", async () => {
     vi.useFakeTimers();
-    resetHeartbeatWakeStateForTests();
     const handler = vi.fn(async (_request: Parameters<typeof requestHeartbeat>[0]) => ({
       status: "skipped" as const,
       reason: "disabled",
@@ -212,7 +207,6 @@ describe("plugin runtime command execution", () => {
       expect(request?.intent).toBe("immediate");
       expect(request?.reason).toBe("legacy-plugin");
     } finally {
-      resetHeartbeatWakeStateForTests();
       vi.useRealTimers();
     }
   });
