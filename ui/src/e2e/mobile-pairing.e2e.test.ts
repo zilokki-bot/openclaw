@@ -131,7 +131,7 @@ describeControlUiE2e("Control UI mobile pairing mocked Gateway E2E", () => {
         .toBe(setupRequestsBeforeQuickSettings + 2);
 
       await page.getByRole("button", { name: "Manage devices" }).click();
-      await expect.poll(() => new URL(page.url()).pathname).toBe("/nodes");
+      await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/devices");
       expect(pageErrors).toEqual([]);
     } finally {
       await context.close();
