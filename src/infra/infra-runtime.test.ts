@@ -115,7 +115,6 @@ describe("infra runtime", () => {
       findGatewayPidsOnPortSyncMock.mockReset();
       findGatewayPidsOnPortSyncMock.mockReturnValue([]);
       setGatewaySigusr1RestartPolicy({ allowExternal: false });
-      setPreRestartDeferralCheck(() => 0);
       vi.useFakeTimers();
       vi.spyOn(process, "kill").mockImplementation(() => true);
     });
@@ -308,7 +307,11 @@ describe("infra runtime", () => {
       const beforeEmit = vi.fn(async () => {
         await preparationBlocked;
       });
-      const handler = () => {};
+      let resolveSignal: () => void = () => {};
+      const signalEmitted = new Promise<void>((resolve) => {
+        resolveSignal = resolve;
+      });
+      const handler = () => resolveSignal();
       process.on("SIGUSR1", handler);
       try {
         scheduleGatewaySigusr1Restart({
@@ -328,8 +331,7 @@ describe("infra runtime", () => {
         expect(update.coalesced).toBe(true);
 
         releasePreparation();
-        await Promise.resolve();
-        await Promise.resolve();
+        await signalEmitted;
 
         expect(peekGatewaySigusr1RestartReason()).toBe("update.auto");
       } finally {

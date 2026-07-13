@@ -10,7 +10,7 @@ export type RuntimeConfigSnapshotRefreshOptions = {
   includeAuthStoreRefs?: boolean;
 };
 
-type RuntimeConfigSnapshotRefreshParams = RuntimeConfigSnapshotRefreshOptions & {
+export type RuntimeConfigSnapshotRefreshParams = RuntimeConfigSnapshotRefreshOptions & {
   sourceConfig: OpenClawConfig;
   preflightResult?: unknown;
 };

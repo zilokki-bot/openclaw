@@ -567,7 +567,7 @@ export type GatewayRestartEmitter = (
   intent?: GatewayRestartIntent,
 ) => GatewayRestartEmitResult;
 
-export type GatewayRestartEmitResult =
+type GatewayRestartEmitResult =
   | { status: "emitted" }
   | { status: "coalesced" }
   | { status: "failed" };

@@ -529,10 +529,10 @@ describe("Session Store Cache", () => {
     const untouched = before["session:2"];
     const deliveryContext = { channel: "telegram", to: "chat-1" };
 
-    await applySessionStoreEntryPatch({
+    await updateSessionStoreEntry({
       storePath,
       sessionKey: "session:1",
-      patch: { deliveryContext },
+      update: async () => ({ deliveryContext }),
     });
     deliveryContext.to = "mutated-after-persist";
 
