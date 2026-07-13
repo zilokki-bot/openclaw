@@ -19,16 +19,16 @@
 
 import type { WidgetManifestView } from "./types.ts";
 
-export const BRIDGE_ENVELOPE_VERSION = 1;
+const BRIDGE_ENVELOPE_VERSION = 1;
 
 /** child→parent message types. */
-export type WidgetInboundType =
+type WidgetInboundType =
   | "workspace:ready"
   | "workspace:getData"
   | "workspace:getTheme"
   | "workspace:sendPrompt";
 
-export type WidgetErrorCode =
+type WidgetErrorCode =
   | "binding_denied"
   | "capability_denied"
   | "rate_limited"
@@ -44,7 +44,7 @@ export type WidgetOutboundMessage =
   | { v: 1; type: "workspace:error"; requestId?: string; code: WidgetErrorCode; message: string };
 
 /** Injected side effects — real implementations live in the browser host. */
-export type WidgetBridgeDeps = {
+type WidgetBridgeDeps = {
   manifest: WidgetManifestView;
   /** Resolve a manifest-declared binding by id. */
   resolveBinding: (bindingId: string) => Promise<unknown>;
@@ -104,9 +104,6 @@ function getPromptRateState(widgetName: string): PromptRateState {
 }
 
 /** Test-only: reset all persisted rate-limit budgets. */
-export function resetPromptRateStatesForTest(): void {
-  promptRateStates.clear();
-}
 
 const INBOUND_TYPES = new Set<WidgetInboundType>([
   "workspace:ready",
@@ -124,7 +121,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * a known `type`. Anything else is dropped silently (counted for tests). This runs
  * after the host has moved traffic onto the approved document's MessagePort.
  */
-export function isWellFormedInbound(
+function isWellFormedInbound(
   data: unknown,
 ): data is { v: 1; type: WidgetInboundType } & Record<string, unknown> {
   return (

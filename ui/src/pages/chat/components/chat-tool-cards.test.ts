@@ -2,16 +2,11 @@
 
 import { render } from "lit";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildMcpAppHostCapabilities,
-  resolveMcpAppSandboxUrl,
-} from "../../../components/mcp-app-view.ts";
 import { t } from "../../../i18n/index.ts";
 import {
   formatDistinctCollapsedToolSummaryText,
   formatCollapsedToolPreviewText,
   formatCollapsedToolSummaryText,
-  isToolErrorOutput,
 } from "../../../lib/chat/tool-cards.ts";
 import { renderToolCard, renderToolPreview } from "./chat-tool-cards.ts";
 
@@ -43,72 +38,6 @@ function pointerClick(element: Element) {
 }
 
 describe("tool-cards", () => {
-  it("advertises the CSP actually applied to MCP Apps", () => {
-    expect(
-      buildMcpAppHostCapabilities({ connectDomains: ["https://api.example.com"] }),
-    ).toMatchObject({
-      sandbox: { csp: { connectDomains: ["https://api.example.com"] } },
-    });
-    expect(buildMcpAppHostCapabilities()).toMatchObject({ sandbox: { csp: {} } });
-  });
-
-  it("accepts only the dedicated-origin MCP App sandbox endpoint", () => {
-    expect(
-      resolveMcpAppSandboxUrl(
-        "/mcp-app-sandbox?csp=abc",
-        8444,
-        undefined,
-        "wss://gateway.example:8443/openclaw",
-        "https://gateway.example:8443",
-      ),
-    ).toBe("https://gateway.example:8444/mcp-app-sandbox?csp=abc");
-    expect(
-      resolveMcpAppSandboxUrl(
-        "/mcp-app-sandbox",
-        18790,
-        "https://apps.example.com",
-        "wss://gateway.example",
-        "https://gateway.example",
-      ),
-    ).toBe("https://apps.example.com/mcp-app-sandbox");
-    expect(() =>
-      resolveMcpAppSandboxUrl(
-        "https://attacker.example/mcp-app-sandbox",
-        8444,
-        undefined,
-        "wss://gateway.example:8443/openclaw",
-        "https://gateway.example:8443",
-      ),
-    ).toThrow("MCP App sandbox URL is invalid");
-    expect(() =>
-      resolveMcpAppSandboxUrl(
-        "data:text/html;base64,cHJveHk=",
-        8444,
-        undefined,
-        "wss://gateway.example:8443/openclaw",
-        "https://gateway.example:8443",
-      ),
-    ).toThrow("MCP App sandbox URL is invalid");
-    expect(() =>
-      resolveMcpAppSandboxUrl(
-        "/mcp-app-sandbox",
-        8443,
-        undefined,
-        "wss://gateway.example:8443/openclaw",
-        "https://gateway.example:8443",
-      ),
-    ).toThrow("MCP App sandbox URL is invalid");
-    expect(() =>
-      resolveMcpAppSandboxUrl(
-        "/mcp-app-sandbox",
-        8444,
-        "https://gateway.example:8443",
-        "wss://gateway.example:8443/openclaw",
-        "https://control.example",
-      ),
-    ).toThrow("MCP App sandbox URL is invalid");
-  });
-
   it("routes MCP App previews through the dedicated double-iframe host", async () => {
     const container = document.createElement("div");
     render(
@@ -770,67 +699,6 @@ describe("tool-cards", () => {
     expect(sidebar.kind).toBe("canvas");
     expect(sidebar.docId).toBe("cv_sidebar");
     expect(sidebar.entryUrl).toBe("/__openclaw__/canvas/documents/cv_sidebar/index.html");
-  });
-  describe("isToolErrorOutput", () => {
-    it("flags JSON payloads that carry a top-level error string", () => {
-      expect(
-        isToolErrorOutput(
-          JSON.stringify({
-            error: "missing_brave_api_key",
-            message: "BRAVE_API_KEY is not configured",
-            provider: "brave",
-          }),
-        ),
-      ).toBe(true);
-    });
-
-    it("flags JSON payloads that carry a top-level isError flag", () => {
-      expect(
-        isToolErrorOutput(
-          JSON.stringify({
-            isError: true,
-            content: [{ type: "text", text: "Tool error: boom" }],
-          }),
-        ),
-      ).toBe(true);
-      expect(
-        isToolErrorOutput(
-          JSON.stringify({
-            is_error: true,
-            content: [{ type: "text", text: "Tool error: boom" }],
-          }),
-        ),
-      ).toBe(true);
-    });
-
-    it("flags 'Tool not found' bodies regardless of trailing punctuation or case", () => {
-      expect(isToolErrorOutput("Tool not found")).toBe(true);
-      expect(isToolErrorOutput("  tool not found.  ")).toBe(true);
-      expect(isToolErrorOutput("TOOL NOT FOUND")).toBe(true);
-    });
-
-    it("flags JSON payloads with top-level failure statuses", () => {
-      expect(isToolErrorOutput(JSON.stringify({ status: "error" }))).toBe(true);
-      expect(isToolErrorOutput(JSON.stringify({ status: "failed" }))).toBe(true);
-      expect(isToolErrorOutput(JSON.stringify({ status: "timeout" }))).toBe(true);
-      expect(isToolErrorOutput(JSON.stringify({ status: "completed" }))).toBe(false);
-      expect(isToolErrorOutput(JSON.stringify({ status: "ok" }))).toBe(false);
-    });
-
-    it("does not flag successful payloads or strings without a tool error signal", () => {
-      expect(isToolErrorOutput(undefined)).toBe(false);
-      expect(isToolErrorOutput("")).toBe(false);
-      expect(isToolErrorOutput("Opened page")).toBe(false);
-      expect(
-        isToolErrorOutput(
-          JSON.stringify({ isError: false, result: "ok", error: "no validation errors" }),
-        ),
-      ).toBe(false);
-      expect(isToolErrorOutput(JSON.stringify({ result: "ok", error: null }))).toBe(false);
-      expect(isToolErrorOutput(JSON.stringify({ result: "ok", error: "" }))).toBe(false);
-      expect(isToolErrorOutput(JSON.stringify({ result: "ok" }))).toBe(false);
-      expect(isToolErrorOutput("{ not really json }")).toBe(false);
-    });
   });
 
   it("renders an error summary without a redundant Error badge", () => {

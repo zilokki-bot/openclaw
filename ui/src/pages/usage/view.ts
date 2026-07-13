@@ -28,15 +28,7 @@ import {
   removeQueryToken,
   setQueryTokensForKey,
 } from "./query.ts";
-import type {
-  SessionLogEntry,
-  SessionLogRole,
-  UsageColumnId,
-  UsageFilterState,
-  UsageProps,
-  UsageSessionEntry,
-  UsageTotals,
-} from "./types.ts";
+import type { UsageFilterState, UsageProps, UsageSessionEntry, UsageTotals } from "./types.ts";
 import { renderSessionDetailPanel } from "./view-details.ts";
 import {
   renderCostBreakdownCompact,
@@ -46,8 +38,6 @@ import {
   renderSessionsCard,
   renderUsageInsights,
 } from "./view-overview.ts";
-
-export type { UsageColumnId, SessionLogEntry, SessionLogRole };
 
 function createEmptyUsageTotals(): UsageTotals {
   return {

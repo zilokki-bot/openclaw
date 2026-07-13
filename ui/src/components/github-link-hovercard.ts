@@ -66,7 +66,7 @@ function decodePathSegment(value: string): string | null {
   }
 }
 
-export function parseGitHubIssueOrPullRequestLink(href: string): GitHubLinkTarget | null {
+function parseGitHubIssueOrPullRequestLink(href: string): GitHubLinkTarget | null {
   let url: URL;
   try {
     url = new URL(href, globalThis.location?.href ?? "http://localhost/");
@@ -575,8 +575,4 @@ export class GitHubLinkHovercardProvider extends HTMLElement {
     card.style.left = `${Math.min(Math.max(VIEWPORT_PADDING, anchorRect.left), maxLeft)}px`;
     card.style.top = `${Math.min(Math.max(VIEWPORT_PADDING, top), maxTop)}px`;
   }
-}
-
-if (!customElements.get("openclaw-github-link-hovercard-provider")) {
-  customElements.define("openclaw-github-link-hovercard-provider", GitHubLinkHovercardProvider);
 }

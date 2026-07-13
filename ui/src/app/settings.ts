@@ -3,7 +3,7 @@ const SETTINGS_KEY_PREFIX = "openclaw.control.settings.v1:";
 const LEGACY_SETTINGS_KEY = "openclaw.control.settings.v1";
 export const NAV_WIDTH_MIN = 240;
 export const NAV_WIDTH_MAX = 400;
-export const NAV_WIDTH_DEFAULT = 258;
+const NAV_WIDTH_DEFAULT = 258;
 const CURRENT_GATEWAY_SELECTION_KEY_PREFIX = "openclaw.control.currentGateway.v1:";
 const LOCAL_USER_IDENTITY_KEY = "openclaw.control.user.v1";
 const LEGACY_TOKEN_SESSION_KEY = "openclaw.control.token.v1";
@@ -308,7 +308,7 @@ export function resolveApplicationStartupSettings(
   };
 }
 
-export function isViteDevPage(): boolean {
+function isViteDevPage(): boolean {
   if (typeof document === "undefined") {
     return false;
   }
@@ -493,10 +493,6 @@ export function persistSessionToken(gatewayUrl: string, token: string) {
 // errors). Without it a setting picked on one page silently reverts when
 // another page re-reads storage in the same tab.
 let unpersistedSettings: UiSettings | null = null;
-
-export function resetUnpersistedSettingsForTest() {
-  unpersistedSettings = null;
-}
 
 export function loadSettings(): UiSettings {
   const cached = unpersistedSettings;

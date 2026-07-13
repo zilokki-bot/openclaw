@@ -6,7 +6,6 @@ import {
   loadLocalUserIdentity,
   loadSettings,
   persistSessionToken,
-  resetUnpersistedSettingsForTest,
   resolvePageGatewaySettings,
   resolveApplicationStartupSettings,
   saveSettings,
@@ -106,7 +105,6 @@ describe("resolveApplicationStartupSettings", () => {
 
 describe("loadSettings default gateway URL derivation", () => {
   beforeEach(() => {
-    resetUnpersistedSettingsForTest();
     vi.stubGlobal("localStorage", createStorageMock());
     vi.stubGlobal("sessionStorage", createStorageMock());
     vi.stubGlobal("navigator", { language: "en-US" } as Navigator);
@@ -116,7 +114,6 @@ describe("loadSettings default gateway URL derivation", () => {
   });
 
   afterEach(() => {
-    resetUnpersistedSettingsForTest();
     vi.restoreAllMocks();
     setControlUiBasePath(undefined);
     vi.unstubAllGlobals();

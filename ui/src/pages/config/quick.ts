@@ -56,7 +56,7 @@ export type QuickSettingsSecurity = {
   toolProfile: string;
 };
 
-export type QuickSettingsProps = {
+type QuickSettingsProps = {
   // General
   locale: Locale;
   onLocaleChange: (locale: Locale) => void;

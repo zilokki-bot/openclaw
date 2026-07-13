@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CronJob, ModelAuthStatusResult } from "../api/types.ts";
-import { buildSidebarAttentionItems } from "./sidebar-attention.ts";
+import { buildSidebarAttentionItems } from "./sidebar-attention-items.ts";
 
 const NOW = 1_750_000_000_000;
 

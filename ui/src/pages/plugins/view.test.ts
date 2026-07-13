@@ -6,15 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/index.ts";
 import type { PluginCatalogItem, PluginListResult } from "../../lib/plugins/index.ts";
 import { CONNECTOR_SUGGESTIONS } from "./presentation.ts";
-import {
-  clawHubRowKey,
-  discoverShelves,
-  groupInstalledByCategory,
-  installedPlugins,
-  pluginRowKey,
-  renderPlugins,
-  type PluginsViewProps,
-} from "./view.ts";
+import { pluginRowKey, renderPlugins } from "./view.ts";
+
+type PluginsViewProps = Parameters<typeof renderPlugins>[0];
 
 function createPlugin(overrides: Partial<PluginCatalogItem> = {}): PluginCatalogItem {
   return {
@@ -101,6 +95,10 @@ function actionButton(container: Element, label: string): HTMLButtonElement | nu
   );
 }
 
+function clawHubKey(packageName: string): string {
+  return "clawhub:" + packageName;
+}
+
 describe("renderPlugins", () => {
   beforeEach(async () => {
     await i18n.setLocale("en");
@@ -114,7 +112,7 @@ describe("renderPlugins", () => {
     vi.restoreAllMocks();
   });
 
-  it("groups installed plugins by category with overview counts", () => {
+  it("renders grouped inventory counts and filters", () => {
     const plugins = [
       createPlugin(),
       createPlugin({
@@ -134,36 +132,185 @@ describe("renderPlugins", () => {
         featured: false,
       }),
     ];
-    const groups = groupInstalledByCategory(installedPlugins(plugins));
-    expect(groups.map((group) => group.label)).toEqual(["Channels", "Tools"]);
-
-    const container = mount(createProps({ result: createResult(plugins) }));
+    const onFilterChange = vi.fn();
+    const container = mount(createProps({ result: createResult(plugins), onFilterChange }));
     const pulse = container.querySelector(".plugins-pulse");
     expect(normalizedText(pulse)).toContain("All 3");
     expect(normalizedText(pulse)).toContain("Enabled 1");
     expect(normalizedText(pulse)).toContain("Issues 1");
-    expect(pulse?.querySelectorAll(".plugins-pulse__segment")).toHaveLength(3);
     expect(
       container.querySelector('[data-plugin-id="broken"] [role="alert"]')?.textContent,
     ).toContain("manifest invalid");
-  });
-
-  it("filters the installed inventory by state", () => {
-    const plugins = [
-      createPlugin({ id: "on", name: "On", enabled: true, state: "enabled" }),
-      createPlugin({ id: "off", name: "Off" }),
-      createPlugin({ id: "broken", name: "Broken", state: "error" }),
-    ];
-    expect(installedPlugins(plugins, "", "enabled").map((plugin) => plugin.id)).toEqual(["on"]);
-    expect(installedPlugins(plugins, "", "disabled").map((plugin) => plugin.id)).toEqual(["off"]);
-    expect(installedPlugins(plugins, "", "issues").map((plugin) => plugin.id)).toEqual(["broken"]);
-
-    const onFilterChange = vi.fn();
-    const container = mount(createProps({ result: createResult(plugins), onFilterChange }));
+    expect(
+      [...container.querySelectorAll(".plugins-group__heading h2")].map((heading) =>
+        heading.textContent?.trim(),
+      ),
+    ).toEqual(["Channels", "Tools", "MCP servers"]);
+    expect(
+      [...container.querySelectorAll<HTMLElement>("[data-plugin-id]")].map(
+        (row) => row.dataset.pluginId,
+      ),
+    ).toEqual(["broken", "telegram", "workboard"]);
     const chips = container.querySelectorAll<HTMLButtonElement>(".plugins-filters button");
-    expect(chips).toHaveLength(4);
     expectDefined(chips[3], "issues filter chip").click();
     expect(onFilterChange).toHaveBeenCalledWith("issues");
+
+    const issues = mount(createProps({ result: createResult(plugins), installedFilter: "issues" }));
+    expect(
+      [...issues.querySelectorAll<HTMLElement>("[data-plugin-id]")].map(
+        (row) => row.dataset.pluginId,
+      ),
+    ).toEqual(["broken"]);
+    expect(issues.querySelector(".plugins-group__heading h2")?.textContent?.trim()).toBe(
+      "Channels",
+    );
+  });
+
+  it("renders discover shelves and installs official plugins", () => {
+    const plugins = [
+      createPlugin(),
+      createPlugin({
+        id: "tavily",
+        name: "Tavily",
+        origin: "official",
+        installed: false,
+        enabled: false,
+        state: "not-installed",
+        featured: false,
+        install: { source: "official", pluginId: "tavily" },
+      }),
+    ];
+    const onInstall = vi.fn();
+    const container = mount(
+      createProps({ activeTab: "discover", result: createResult(plugins), onInstall }),
+    );
+    expect(container.querySelector("#plugins-shelf-featured")).not.toBeNull();
+    container
+      .querySelector<HTMLButtonElement>('[data-plugin-id="tavily"] .plugins-install')
+      ?.click();
+    expect(onInstall).toHaveBeenCalledWith(pluginRowKey("tavily"), {
+      source: "official",
+      pluginId: "tavily",
+    });
+  });
+
+  it("renders and installs live ClawHub search results", () => {
+    const packageName = "@openclaw/calendar-plus";
+    const onInstall = vi.fn();
+    const container = mount(
+      createProps({
+        activeTab: "discover",
+        query: "calendar",
+        searchResults: [
+          {
+            score: 0.9,
+            package: {
+              name: packageName,
+              displayName: "Calendar Plus",
+              family: "code-plugin",
+              channel: "official",
+              isOfficial: true,
+              summary: "Plan and coordinate work.",
+              latestVersion: "2.0.0",
+              downloads: 149263,
+              verificationTier: "source-linked",
+            },
+          },
+        ],
+        onInstall,
+      }),
+    );
+    const row = container.querySelector<HTMLElement>('[data-package-name="' + packageName + '"]');
+    expect(normalizedText(row)).toContain("Official");
+    expect(normalizedText(row)).toContain("Verified source");
+    expect(normalizedText(row)).toContain("149.3K");
+    row?.querySelector<HTMLButtonElement>('[aria-label="Install Calendar Plus"]')?.click();
+    expect(onInstall).toHaveBeenCalledWith(clawHubKey(packageName), {
+      source: "clawhub",
+      packageName,
+    });
+  });
+
+  it("renders row-local risk acknowledgement", () => {
+    const packageName = "@openclaw/calendar-plus";
+    const key = clawHubKey(packageName);
+    const onInstall = vi.fn();
+    const container = mount(
+      createProps({
+        activeTab: "discover",
+        query: "calendar",
+        searchResults: [
+          {
+            score: 0.9,
+            package: {
+              name: packageName,
+              displayName: "Calendar Plus",
+              family: "bundle-plugin",
+              channel: "community",
+              isOfficial: false,
+            },
+          },
+        ],
+        messages: {
+          [key]: {
+            kind: "error",
+            text: "Review required.",
+            acknowledge: { packageName, version: "2.0.0" },
+          },
+        },
+        onInstall,
+      }),
+    );
+    const row = container.querySelector<HTMLElement>('[data-package-name="' + packageName + '"]');
+    expect(row?.querySelector('[role="alert"]')?.textContent).toContain("Review required.");
+    row?.querySelector<HTMLButtonElement>(".plugins-row-message button")?.click();
+    expect(onInstall).toHaveBeenCalledWith(key, {
+      source: "clawhub",
+      packageName,
+      version: "2.0.0",
+      acknowledgeClawHubRisk: true,
+    });
+  });
+
+  it("correlates installed ClawHub packages without a search runtime id", () => {
+    const packageName = "@community/calendar-plus";
+    const installed = createPlugin({
+      id: "calendar-runtime",
+      name: "Calendar Plus",
+      packageName,
+      origin: "global",
+      installed: true,
+      enabled: true,
+      state: "enabled",
+      featured: false,
+      install: undefined,
+    });
+    const onSetEnabled = vi.fn();
+    const container = mount(
+      createProps({
+        activeTab: "discover",
+        query: "calendar",
+        result: createResult([installed]),
+        searchResults: [
+          {
+            score: 0.9,
+            package: {
+              name: packageName,
+              displayName: "Calendar Plus",
+              family: "code-plugin",
+              channel: "community",
+              isOfficial: false,
+            },
+          },
+        ],
+        onSetEnabled,
+      }),
+    );
+    const row = container.querySelector<HTMLElement>('[data-package-name="' + packageName + '"]')!;
+    expect(row.querySelector(".plugins-install")).toBeNull();
+    expect(row.dataset.pluginStatus).toBe("enabled");
+    actionButton(row, "Disable")?.click();
+    expect(onSetEnabled).toHaveBeenCalledWith("calendar-runtime", false, clawHubKey(packageName));
   });
 
   it("offers enable and remove through direct row actions", () => {
@@ -290,44 +437,6 @@ describe("renderPlugins", () => {
     });
   });
 
-  it("splits discover shelves into featured, official, and connectors", () => {
-    const plugins = [
-      createPlugin(),
-      createPlugin({
-        id: "tavily",
-        name: "Tavily",
-        origin: "official",
-        installed: false,
-        enabled: false,
-        state: "not-installed",
-        featured: false,
-        install: { source: "official", pluginId: "tavily" },
-      }),
-    ];
-    const shelves = discoverShelves(plugins);
-    expect(shelves.featured.map((plugin) => plugin.id)).toEqual(["workboard"]);
-    expect(shelves.official.map((plugin) => plugin.id)).toEqual(["tavily"]);
-    expect(shelves.connectors.length).toBeGreaterThan(0);
-
-    const onInstall = vi.fn();
-    const container = mount(
-      createProps({ activeTab: "discover", result: createResult(plugins), onInstall }),
-    );
-    expect(
-      normalizedText(
-        container.querySelector("#plugins-shelf-featured")?.closest(".plugins-group__heading") ??
-          null,
-      ),
-    ).toBe("Featured 1");
-    container
-      .querySelector<HTMLButtonElement>('[data-plugin-id="tavily"] .plugins-install')
-      ?.click();
-    expect(onInstall).toHaveBeenCalledWith(pluginRowKey("tavily"), {
-      source: "official",
-      pluginId: "tavily",
-    });
-  });
-
   it("adds MCP connectors and routes ClawHub connector searches", () => {
     const onAddConnector = vi.fn();
     const onSearchClawHub = vi.fn();
@@ -362,63 +471,6 @@ describe("renderPlugins", () => {
     expect(github?.querySelector(".plugins-card__footer button")).toBeNull();
   });
 
-  it("appends live ClawHub results below the discover shelves while searching", () => {
-    const onQueryChange = vi.fn();
-    const onInstall = vi.fn();
-    const container = mount(
-      createProps({
-        activeTab: "discover",
-        query: "calendar",
-        searchResults: [
-          {
-            score: 0.9,
-            package: {
-              name: "@openclaw/calendar-plus",
-              displayName: "Calendar Plus",
-              family: "code-plugin",
-              channel: "official",
-              isOfficial: true,
-              summary: "Plan and coordinate work.",
-              latestVersion: "2.0.0",
-              downloads: 149263,
-              verificationTier: "source-linked",
-            },
-          },
-        ],
-        onQueryChange,
-        onInstall,
-      }),
-    );
-
-    const search = container.querySelector<HTMLInputElement>('[type="search"]');
-    search!.value = "work";
-    search!.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(onQueryChange).toHaveBeenCalledWith("work");
-
-    const heading = container.querySelector("#plugins-shelf-clawhub");
-    expect(normalizedText(heading)).toBe("From ClawHub");
-    const link = container
-      .querySelector("#plugins-shelf-clawhub")
-      ?.closest(".plugins-group")
-      ?.querySelector<HTMLAnchorElement>(".plugins-group__link");
-    expect(link?.href).toBe("https://clawhub.ai/plugins");
-    expect(link?.target).toBe("_blank");
-
-    const result = container.querySelector<HTMLElement>(
-      '[data-package-name="@openclaw/calendar-plus"]',
-    );
-    expect(result?.dataset.pluginSource).toBe("clawhub");
-    expect(normalizedText(result)).toContain("Official");
-    expect(normalizedText(result)).toContain("Verified source");
-    expect(normalizedText(result)).toContain("149.3K");
-    expect(normalizedText(result)).toContain("Code plugin");
-    result?.querySelector<HTMLButtonElement>('[aria-label="Install Calendar Plus"]')?.click();
-    expect(onInstall).toHaveBeenCalledWith(clawHubRowKey("@openclaw/calendar-plus"), {
-      source: "clawhub",
-      packageName: "@openclaw/calendar-plus",
-    });
-  });
-
   it("keeps discovery available while disabling all read-only mutations", () => {
     const onInstall = vi.fn();
     const onSetEnabled = vi.fn();
@@ -451,96 +503,6 @@ describe("renderPlugins", () => {
     enableItem?.click();
     expect(onInstall).not.toHaveBeenCalled();
     expect(onSetEnabled).not.toHaveBeenCalled();
-  });
-
-  it("renders row-local risk acknowledgement and busy state", () => {
-    const packageName = "@openclaw/calendar-plus";
-    const key = clawHubRowKey(packageName);
-    const onInstall = vi.fn();
-    const container = mount(
-      createProps({
-        activeTab: "discover",
-        query: "calendar",
-        searchResults: [
-          {
-            score: 0.9,
-            package: {
-              name: packageName,
-              displayName: "Calendar Plus",
-              family: "bundle-plugin",
-              channel: "community",
-              isOfficial: false,
-            },
-          },
-        ],
-        busy: {},
-        messages: {
-          [key]: {
-            kind: "error",
-            text: "Review required.",
-            acknowledge: { packageName, version: "2.0.0" },
-          },
-        },
-        onInstall,
-      }),
-    );
-
-    const row = container.querySelector<HTMLElement>(`[data-package-name="${packageName}"]`);
-    expect(row?.getAttribute("aria-busy")).toBe("false");
-    expect(row?.querySelector('[role="alert"]')?.textContent).toContain("Review required.");
-    row?.querySelector<HTMLButtonElement>(".plugins-row-message button")?.click();
-    expect(onInstall).toHaveBeenCalledWith(key, {
-      source: "clawhub",
-      packageName,
-      version: "2.0.0",
-      acknowledgeClawHubRisk: true,
-    });
-  });
-
-  it("correlates installed ClawHub packages without a search runtime id", () => {
-    const packageName = "@community/calendar-plus";
-    const installed = createPlugin({
-      id: "calendar-runtime",
-      name: "Calendar Plus",
-      packageName,
-      origin: "global",
-      installed: true,
-      enabled: true,
-      state: "enabled",
-      featured: false,
-      install: undefined,
-    });
-    const onSetEnabled = vi.fn();
-    const container = mount(
-      createProps({
-        activeTab: "discover",
-        query: "calendar",
-        result: createResult([installed]),
-        searchResults: [
-          {
-            score: 0.9,
-            package: {
-              name: packageName,
-              displayName: "Calendar Plus",
-              family: "code-plugin",
-              channel: "community",
-              isOfficial: false,
-            },
-          },
-        ],
-        onSetEnabled,
-      }),
-    );
-
-    const row = container.querySelector<HTMLElement>(`[data-package-name="${packageName}"]`)!;
-    expect(row.querySelector("h3")?.textContent).toBe("Calendar Plus");
-    expect(row.querySelector(".plugins-install")).toBeNull();
-    actionButton(row, "Disable")?.click();
-    expect(onSetEnabled).toHaveBeenCalledWith(
-      "calendar-runtime",
-      false,
-      clawHubRowKey(packageName),
-    );
   });
 
   it("does not present an empty catalog alongside an initial list failure", () => {

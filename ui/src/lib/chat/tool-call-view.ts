@@ -21,7 +21,7 @@ import { parsePatchView } from "./tool-call-patch.ts";
 
 export type ToolCallKind = "command" | "read" | "edit" | "write" | "search" | "fetch" | "generic";
 
-export type ToolCallViewSource = {
+type ToolCallViewSource = {
   name: string;
   args?: unknown;
   details?: unknown;
@@ -81,7 +81,7 @@ function resolvePathArg(args: Record<string, unknown> | null): string | undefine
   );
 }
 
-export function splitPathForDisplay(path: string): { base: string; dir?: string } {
+function splitPathForDisplay(path: string): { base: string; dir?: string } {
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const slash = normalized.lastIndexOf("/");
   if (slash <= 0) {

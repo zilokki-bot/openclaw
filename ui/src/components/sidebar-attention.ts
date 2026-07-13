@@ -9,91 +9,21 @@ import type { GatewayBrowserClient } from "../api/gateway.ts";
 import type { CronJob, ModelAuthStatusResult } from "../api/types.ts";
 import type { NavigationRouteId } from "../app-navigation.ts";
 import { applicationContext, type ApplicationContext } from "../app/context.ts";
-import { t } from "../i18n/index.ts";
-import { isCronJobActiveFailure } from "../lib/cron-status.ts";
 import { createInitialCronState, loadCronJobsPage } from "../lib/cron/index.ts";
-import { isMonitoredAuthProvider, loadModelAuthStatus } from "../lib/model-auth.ts";
+import { loadModelAuthStatus } from "../lib/model-auth.ts";
 import { OpenClawLightDomContentsElement } from "../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../lit/subscriptions-controller.ts";
-import { icons, type IconName } from "./icons.ts";
+import { icons } from "./icons.ts";
+import { buildSidebarAttentionItems } from "./sidebar-attention-items.ts";
 
 // A cron job counts as overdue when its next planned run is this far in the
 // past; mirrors the threshold the Overview attention list used.
-const CRON_OVERDUE_GRACE_MS = 300_000;
 // Reloads are connection-scoped; a visibility change only refetches after the
 // snapshot is older than this, so tab switches stay free of request bursts.
 const VISIBILITY_REFRESH_MIN_AGE_MS = 60_000;
 // Always-visible windows (the macOS app) never fire visibilitychange, so a
 // slow lifecycle-owned interval keeps the chips from going permanently stale.
 const IDLE_REFRESH_INTERVAL_MS = 10 * 60_000;
-
-export type SidebarAttentionItem = {
-  severity: "error" | "warning";
-  icon: IconName;
-  label: string;
-  routeId: NavigationRouteId;
-};
-
-export function buildSidebarAttentionItems(params: {
-  cronJobs: readonly CronJob[];
-  modelAuthStatus: ModelAuthStatusResult | null;
-  now: number;
-}): SidebarAttentionItem[] {
-  const items: SidebarAttentionItem[] = [];
-
-  const failedCron = params.cronJobs.filter(isCronJobActiveFailure).length;
-  if (failedCron > 0) {
-    items.push({
-      severity: "error",
-      icon: "clock",
-      label: t("attention.cronFailed", { count: String(failedCron) }),
-      routeId: "cron",
-    });
-  }
-  const overdueCron = params.cronJobs.filter(
-    (job) =>
-      job.enabled &&
-      job.state?.nextRunAtMs != null &&
-      params.now - job.state.nextRunAtMs > CRON_OVERDUE_GRACE_MS,
-  ).length;
-  if (overdueCron > 0) {
-    items.push({
-      severity: "warning",
-      icon: "clock",
-      label: t("attention.cronOverdue", { count: String(overdueCron) }),
-      routeId: "cron",
-    });
-  }
-
-  const monitored = (params.modelAuthStatus?.providers ?? []).filter(isMonitoredAuthProvider);
-  const expired = monitored.filter(
-    (provider) => provider.status === "expired" || provider.status === "missing",
-  );
-  if (expired.length > 0) {
-    items.push({
-      severity: "error",
-      icon: "plug",
-      label: t("attention.modelAuthExpired", {
-        providers: expired.map((provider) => provider.displayName).join(", "),
-      }),
-      routeId: "model-providers",
-    });
-  }
-  const expiring = monitored.filter((provider) => provider.status === "expiring");
-  if (expiring.length > 0) {
-    items.push({
-      severity: "warning",
-      icon: "plug",
-      label: t("attention.modelAuthExpiring", {
-        providers: expiring
-          .map((provider) => `${provider.displayName} (${provider.expiry?.label ?? "soon"})`)
-          .join(", "),
-      }),
-      routeId: "model-providers",
-    });
-  }
-  return items;
-}
 
 class SidebarAttention extends OpenClawLightDomContentsElement {
   @consume({ context: applicationContext, subscribe: true })

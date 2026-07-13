@@ -8,13 +8,13 @@ import "../components/app-topbar.ts";
 import "../components/connection-banner.ts";
 import "../components/exec-approval.ts";
 import "../components/gateway-url-confirmation.ts";
-import "../components/github-link-hovercard.ts";
+import "../components/github-link-hovercard-registration.ts";
 import "../components/login-gate.ts";
 import "../components/browser/browser-panel.ts";
 import "../components/macos-titlebar-controls.ts";
 import "../components/resizable-divider.ts";
 import "../components/sidebar-update-card.ts";
-import "../components/terminal/terminal-panel.ts";
+import "../components/terminal/terminal-panel-registration.ts";
 import "../components/tooltip.ts";
 import "../components/update-banner.ts";
 import { isSettingsNavigationRoute, type SidebarNavRoute } from "../app-navigation.ts";
@@ -34,8 +34,8 @@ import { isWorkboardEnabledInConfigSnapshot } from "../lib/plugin-activation.ts"
 import { searchForSession } from "../lib/sessions/index.ts";
 import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../lit/subscriptions-controller.ts";
-import "../pages/approval/approval-page.ts";
 import { findSettingsSearchBlocks } from "../pages/config/settings-search.ts";
+import "../pages/approval/approval-page-registration.ts";
 import { renderDevicePairSetup } from "../pages/nodes/view-pairing.ts";
 import { pluginTabKey, pluginTabRefFromSearch } from "../pages/plugin/route.ts";
 import { bootstrapApplication, type ApplicationRuntime } from "./bootstrap.ts";
@@ -52,6 +52,7 @@ import {
   readNativeHistoryState,
   type NativeHistoryState,
 } from "./native-web-chrome.ts";
+import { navigationSurfaceIsHidden, renderFloatingUpdateCard } from "./navigation-surface.ts";
 import { hasOperatorAdminAccess } from "./operator-access.ts";
 import { controlUiPublicAssetPath } from "./public-assets.ts";
 import { selectRenderedRouteMatch } from "./router-outlet.ts";
@@ -165,32 +166,6 @@ function isBrowserPanelAvailable(snapshot: ApplicationContext["gateway"]["snapsh
 
 function isMobileNavLayout(): boolean {
   return globalThis.matchMedia?.("(max-width: 1100px)").matches ?? false;
-}
-
-export function navigationSurfaceIsHidden(params: {
-  navCollapsed: boolean;
-  navDrawerOpen: boolean;
-  mobileNavLayout: boolean;
-}): boolean {
-  return params.mobileNavLayout ? !params.navDrawerOpen : params.navCollapsed;
-}
-
-export function renderFloatingUpdateCard(params: {
-  navigationSurfaceHidden: boolean;
-  onboarding: boolean;
-  updateAvailable: ApplicationContext["overlays"]["snapshot"]["updateAvailable"];
-  updateRunning: boolean;
-  onUpdate: () => void;
-}) {
-  if (!params.navigationSurfaceHidden || params.onboarding) {
-    return nothing;
-  }
-  return html`<openclaw-sidebar-update-card
-    class="sidebar-update-card--floating"
-    .updateAvailable=${params.updateAvailable}
-    .updateRunning=${params.updateRunning}
-    .onUpdate=${params.onUpdate}
-  ></openclaw-sidebar-update-card>`;
 }
 
 class OpenClawApp extends OpenClawLightDomElement {
