@@ -399,3 +399,20 @@ export function resumeGatewaySuspend(suspensionId: string): GatewaySuspendResume
     resumed: true,
   };
 }
+
+// An in-process restart rebuilds scheduler and admission ownership. Resume and
+// discard the old suspension first so paused work cannot leak into the new run.
+export function resetGatewaySuspendCoordinatorForLifecycleRestart(): void {
+  const current = COORDINATOR_STATE.current;
+  if (!current) {
+    return;
+  }
+  clearEntryTimer(current);
+  try {
+    current.resumeScheduling();
+  } catch (err) {
+    current.warn?.(`gateway scheduler resume failed during lifecycle reset: ${String(err)}`);
+  }
+  current.reopenAdmission();
+  COORDINATOR_STATE.current = null;
+}

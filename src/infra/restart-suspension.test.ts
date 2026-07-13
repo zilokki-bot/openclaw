@@ -2,11 +2,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveGatewayRootWorkCount,
+  isGatewayWorkAdmissionClosed,
   resetGatewayWorkAdmission,
 } from "../process/gateway-work-admission.js";
 import type { GatewayActiveWorkInspectors } from "./gateway-active-work.js";
-import { prepareGatewaySuspend, resumeGatewaySuspend } from "./gateway-suspend-coordinator.js";
-import { markGatewaySigusr1RestartHandled, scheduleGatewaySigusr1Restart } from "./restart.js";
+import {
+  getGatewaySuspendStatus,
+  prepareGatewaySuspend,
+  resumeGatewaySuspend,
+} from "./gateway-suspend-coordinator.js";
+import {
+  isGatewaySigusr1RestartExternallyAllowed,
+  resetGatewayRestartStateForInProcessRestart,
+  scheduleGatewaySigusr1Restart,
+  setGatewaySigusr1RestartPolicy,
+  setPreRestartDeferralCheck,
+} from "./restart.js";
 
 function inspectors(): GatewayActiveWorkInspectors {
   return {
@@ -35,6 +46,9 @@ describe("scheduled restart during gateway suspension", () => {
   const sigusr1Handler = () => {};
 
   beforeEach(() => {
+    resetGatewayRestartStateForInProcessRestart();
+    setGatewaySigusr1RestartPolicy({ allowExternal: false });
+    setPreRestartDeferralCheck(() => 0);
     resetGatewayWorkAdmission();
     vi.useFakeTimers();
     process.on("SIGUSR1", sigusr1Handler);
@@ -42,7 +56,9 @@ describe("scheduled restart during gateway suspension", () => {
 
   afterEach(() => {
     process.removeListener("SIGUSR1", sigusr1Handler);
-    markGatewaySigusr1RestartHandled();
+    resetGatewayRestartStateForInProcessRestart();
+    setGatewaySigusr1RestartPolicy({ allowExternal: false });
+    setPreRestartDeferralCheck(() => 0);
     resetGatewayWorkAdmission();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -120,5 +136,45 @@ describe("scheduled restart during gateway suspension", () => {
       status: "busy",
       reason: "gateway-draining",
     });
+  });
+
+  it("resumes and clears a prepared suspension during an in-process restart", () => {
+    const resumeScheduling = vi.fn();
+    const prepared = prepareGatewaySuspend({
+      requestId: "request-lifecycle-reset",
+      pauseScheduling: vi.fn(),
+      resumeScheduling,
+      inspect: inspectors(),
+      createSuspensionId: () => "suspension-lifecycle-reset",
+    });
+    expect(prepared).toMatchObject({ status: "ready" });
+
+    resetGatewayRestartStateForInProcessRestart();
+
+    expect(resumeScheduling).toHaveBeenCalledOnce();
+    expect(getGatewaySuspendStatus("suspension-lifecycle-reset")).toEqual({ status: "running" });
+    expect(isGatewayWorkAdmissionClosed()).toBe(false);
+  });
+
+  it("resets transient restart state without dropping live runtime bindings", async () => {
+    const emitSpy = vi.spyOn(process, "emit");
+    const preRestartCheck = vi.fn(() => 0);
+    setPreRestartDeferralCheck(preRestartCheck);
+    setGatewaySigusr1RestartPolicy({ allowExternal: true });
+
+    scheduleGatewaySigusr1Restart({ delayMs: 0, skipCooldown: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(countSigusr1Emits(emitSpy.mock.calls)).toBe(1);
+    expect(preRestartCheck).toHaveBeenCalledTimes(2);
+    expect(isGatewayWorkAdmissionClosed()).toBe(true);
+
+    resetGatewayRestartStateForInProcessRestart();
+    expect(isGatewayWorkAdmissionClosed()).toBe(false);
+    expect(isGatewaySigusr1RestartExternallyAllowed()).toBe(true);
+
+    scheduleGatewaySigusr1Restart({ delayMs: 0, skipCooldown: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(countSigusr1Emits(emitSpy.mock.calls)).toBe(2);
+    expect(preRestartCheck).toHaveBeenCalledTimes(4);
   });
 });
