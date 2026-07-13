@@ -19,7 +19,8 @@ import { buildAgentContext } from "../../lib/agents/display.ts";
 import type { AgentsPanel } from "../../lib/agents/index.ts";
 import { copyToClipboard } from "../../lib/clipboard.ts";
 import "./memory/memory-panel.ts";
-import { renderAgentOverview, type AgentIdentityDraft } from "./panels-overview.ts";
+import type { AgentIdentityDraft } from "./panels-overview.ts";
+import { renderAgentOverview } from "./panels-overview.ts";
 import { renderAgentFiles, renderAgentChannels, renderAgentCron } from "./panels-status-files.ts";
 import { renderAgentTools, renderAgentSkills } from "./panels-tools-skills.ts";
 
