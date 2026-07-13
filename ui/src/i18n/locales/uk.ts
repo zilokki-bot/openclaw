@@ -397,6 +397,9 @@ export const uk: TranslationMap = {
     working: "Працює…",
     ready: "Готовий до спілкування",
     whatCanAgentDo: "Що може робити {name}?",
+    agentSettings: "Налаштування агента",
+    filterAgents: "Знайти агента…",
+    noAgentMatches: "Відповідних агентів не знайдено",
   },
   newSession: {
     title: "Новий сеанс",
@@ -604,6 +607,8 @@ export const uk: TranslationMap = {
     setDefault: "Set Default",
     alreadyDefaultTitle: "Already the default agent",
     setDefaultTitle: "Set as the default agent",
+    pinToSwitcher: "Закріпити в перемикачі",
+    unpinFromSwitcher: "Відкріпити від перемикача",
     selectTitle: "Select an agent",
     selectSubtitle: "Pick an agent to inspect its workspace and tools.",
     tabs: {
@@ -628,6 +633,19 @@ export const uk: TranslationMap = {
       default: "Default",
       configurationSubtitle: "Workspace, identity, and model configuration.",
       schedulingSubtitle: "Workspace and scheduling targets.",
+    },
+    identity: {
+      title: "Ідентичність",
+      subtitle: "Ім’я, емодзі й аватар, які відображаються в чатах і на бічній панелі.",
+      name: "Відображуване ім’я",
+      namePlaceholder: "Ім’я агента",
+      emoji: "Емодзі",
+      chooseImage: "Вибрати зображення…",
+      replaceImage: "Замінити зображення…",
+      imageUnusable:
+        "Це зображення не можна використати. Виберіть файл зображення розміром до 2 МБ.",
+      fileHint:
+        "Агенти можуть налаштувати це самостійно, відредагувавши IDENTITY.md у своєму робочому просторі.",
     },
     overview: {
       title: "Огляд",

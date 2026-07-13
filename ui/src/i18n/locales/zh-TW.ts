@@ -392,6 +392,9 @@ export const zh_TW: TranslationMap = {
     working: "處理中…",
     ready: "可以開始聊天",
     whatCanAgentDo: "{name} 能做什麼？",
+    agentSettings: "Agent 設定",
+    filterAgents: "尋找 Agent…",
+    noAgentMatches: "沒有相符的 Agent",
   },
   newSession: {
     title: "新工作階段",
@@ -598,6 +601,8 @@ export const zh_TW: TranslationMap = {
     setDefault: "Set Default",
     alreadyDefaultTitle: "Already the default agent",
     setDefaultTitle: "Set as the default agent",
+    pinToSwitcher: "釘選至切換器",
+    unpinFromSwitcher: "從切換器取消釘選",
     selectTitle: "Select an agent",
     selectSubtitle: "Pick an agent to inspect its workspace and tools.",
     tabs: {
@@ -622,6 +627,17 @@ export const zh_TW: TranslationMap = {
       default: "Default",
       configurationSubtitle: "Workspace, identity, and model configuration.",
       schedulingSubtitle: "Workspace and scheduling targets.",
+    },
+    identity: {
+      title: "身分",
+      subtitle: "顯示於聊天和側邊欄中的名稱、表情符號及頭像。",
+      name: "顯示名稱",
+      namePlaceholder: "Agent 名稱",
+      emoji: "表情符號",
+      chooseImage: "選擇圖片…",
+      replaceImage: "更換圖片…",
+      imageUnusable: "無法使用該圖片。請選擇不超過 2 MB 的圖片檔案。",
+      fileHint: "Agent 可透過編輯其工作區中的 IDENTITY.md 自行設定。",
     },
     overview: {
       title: "概覽",

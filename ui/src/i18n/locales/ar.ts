@@ -394,6 +394,9 @@ export const ar: TranslationMap = {
     working: "جارٍ العمل…",
     ready: "جاهز للدردشة",
     whatCanAgentDo: "ما الذي يمكن لـ {name} فعله؟",
+    agentSettings: "إعدادات الوكيل",
+    filterAgents: "البحث عن وكيل…",
+    noAgentMatches: "لا توجد وكلاء مطابقة",
   },
   newSession: {
     title: "جلسة جديدة",
@@ -601,6 +604,8 @@ export const ar: TranslationMap = {
     setDefault: "تعيين كافتراضي",
     alreadyDefaultTitle: "الوكيل الافتراضي بالفعل",
     setDefaultTitle: "تعيينه كوكيل افتراضي",
+    pinToSwitcher: "تثبيت في مبدّل الوكلاء",
+    unpinFromSwitcher: "إلغاء التثبيت من مبدّل الوكلاء",
     selectTitle: "اختر وكيلاً",
     selectSubtitle: "اختر وكيلاً لفحص مساحة العمل والأدوات الخاصة به.",
     tabs: {
@@ -625,6 +630,17 @@ export const ar: TranslationMap = {
       default: "افتراضي",
       configurationSubtitle: "تكوين مساحة العمل والهوية والنموذج.",
       schedulingSubtitle: "مساحة العمل وأهداف الجدولة.",
+    },
+    identity: {
+      title: "الهوية",
+      subtitle: "الاسم والرمز التعبيري والصورة الرمزية التي تظهر في المحادثات والشريط الجانبي.",
+      name: "اسم العرض",
+      namePlaceholder: "اسم الوكيل",
+      emoji: "رمز تعبيري",
+      chooseImage: "اختيار صورة…",
+      replaceImage: "استبدال الصورة…",
+      imageUnusable: "لا يمكن استخدام هذه الصورة. اختر ملف صورة بحجم يصل إلى 2 MB.",
+      fileHint: "يمكن للوكلاء ضبط ذلك بأنفسهم من خلال تعديل IDENTITY.md في مساحة عملهم.",
     },
     overview: {
       title: "نظرة عامة",
