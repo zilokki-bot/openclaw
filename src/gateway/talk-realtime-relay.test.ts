@@ -13,7 +13,6 @@ import type {
 } from "../talk/provider-types.js";
 import {
   cancelTalkRealtimeRelayTurn,
-  clearTalkRealtimeRelaySessionsForTest,
   createTalkRealtimeRelaySession,
   registerTalkRealtimeRelayAgentRun,
   sendTalkRealtimeRelayAudio,
@@ -24,7 +23,6 @@ import {
 
 describe("talk realtime gateway relay", () => {
   afterEach(() => {
-    clearTalkRealtimeRelaySessionsForTest();
     vi.useRealTimers();
     embeddedRunTesting.resetActiveEmbeddedRuns();
   });
