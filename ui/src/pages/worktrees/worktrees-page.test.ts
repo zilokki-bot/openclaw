@@ -135,9 +135,13 @@ function contextWithConfig(
   gateway: ApplicationContext["gateway"],
   runtimeConfig: ReturnType<typeof runtimeConfigStub>,
 ): ApplicationContext {
-  const context = contextWithGateway(gateway);
-  context.runtimeConfig = runtimeConfig as unknown as ApplicationContext["runtimeConfig"];
-  return context;
+  return {
+    basePath: "",
+    gateway,
+    navigate: vi.fn(),
+    preload: vi.fn(async () => undefined),
+    runtimeConfig,
+  } as unknown as ApplicationContext;
 }
 
 afterEach(() => {
