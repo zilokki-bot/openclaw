@@ -75,7 +75,7 @@ function resolveWindowsExecutableExtSet(env: NodeJS.ProcessEnv | undefined): Set
   );
 }
 
-export function isExecutableFile(filePath: string, options?: { env?: NodeJS.ProcessEnv }): boolean {
+function isExecutableFile(filePath: string, options?: { env?: NodeJS.ProcessEnv }): boolean {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile()) {

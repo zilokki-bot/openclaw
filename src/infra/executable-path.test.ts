@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import { withMockedPlatform } from "../test-utils/vitest-spies.js";
 import {
-  isExecutableFile,
   resolveExecutable,
   resolveExecutableFromPathEnv,
   resolveExecutablePath,
@@ -21,23 +20,6 @@ function restoreEnvValue(name: string, value: string | undefined): void {
 }
 
 describe("executable path helpers", () => {
-  it("detects executable files and rejects directories or non-executables", async () => {
-    await withTempDir({ prefix: "openclaw-exec-path-" }, async (base) => {
-      const execPath = path.join(base, "tool");
-      const filePath = path.join(base, "plain.txt");
-      const dirPath = path.join(base, "dir");
-      await fs.writeFile(execPath, "#!/bin/sh\nexit 0\n", "utf8");
-      await fs.chmod(execPath, 0o755);
-      await fs.writeFile(filePath, "nope", "utf8");
-      await fs.mkdir(dirPath);
-
-      expect(isExecutableFile(execPath)).toBe(true);
-      expect(isExecutableFile(filePath)).toBe(false);
-      expect(isExecutableFile(dirPath)).toBe(false);
-      expect(isExecutableFile(path.join(base, "missing"))).toBe(false);
-    });
-  });
-
   it("resolves executables from PATH entries and cwd-relative paths", async () => {
     await withTempDir({ prefix: "openclaw-exec-path-" }, async (base) => {
       const binDir = path.join(base, "bin");
@@ -218,47 +200,6 @@ describe("resolveExecutable", () => {
 });
 
 describe("caller env PATHEXT propagation", () => {
-  // These tests verify that isExecutableFile and its callers use the
-  // caller-provided env.PATHEXT (not just process.env.PATHEXT) on Windows.
-  // Regression for: isExecutableFile hardcoded undefined -> ignore caller env.
-
-  it("isExecutableFile respects caller env.PATHEXT on Windows", async () => {
-    const orig = process.env.PATHEXT;
-    process.env.PATHEXT = ".TXT";
-    try {
-      await withTempDir({ prefix: "openclaw-exec-path-" }, async (base) => {
-        const ps1File = path.join(base, "script.ps1");
-        await fs.writeFile(ps1File, 'Write-Output "ok"\n', "utf8");
-
-        // On Windows with only .PS1 in caller env, isExecutableFile should accept it
-        withMockedPlatform("win32", () => {
-          expect(isExecutableFile(ps1File, { env: { PATHEXT: ".PS1" } })).toBe(true);
-        });
-      });
-    } finally {
-      restoreEnvValue("PATHEXT", orig);
-    }
-  });
-
-  it("isExecutableFile fallback to process.env when no caller env is given", async () => {
-    await withTempDir({ prefix: "openclaw-exec-path-" }, async (base) => {
-      const ps1File = path.join(base, "script.ps1");
-      await fs.writeFile(ps1File, 'Write-Output "ok"\n', "utf8");
-
-      // Save current process.env.PATHEXT, set it to empty so no extension matches
-      const orig = process.env.PATHEXT;
-      process.env.PATHEXT = ".TXT";
-      try {
-        withMockedPlatform("win32", () => {
-          // .PS1 not in process.env.PATHEXT (which is .TXT)
-          expect(isExecutableFile(ps1File)).toBe(false);
-        });
-      } finally {
-        restoreEnvValue("PATHEXT", orig);
-      }
-    });
-  });
-
   it("resolveExecutableFromPathEnv uses caller env PATHEXT on Windows", async () => {
     const orig = process.env.PATHEXT;
     process.env.PATHEXT = ".TXT";

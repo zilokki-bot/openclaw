@@ -1,13 +1,8 @@
 // Covers native approval route reporting behavior.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  clearApprovalNativeRouteStateForTest,
-  createApprovalNativeRouteReporter,
-} from "./approval-native-route-coordinator.js";
+import { createApprovalNativeRouteReporter } from "./approval-native-route-coordinator.js";
 
-afterEach(() => {
-  clearApprovalNativeRouteStateForTest();
-});
+afterEach(() => {});
 
 function createGatewayRequestMock() {
   return vi.fn(async (_method: string, _params: Record<string, unknown>) => ({
