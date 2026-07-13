@@ -350,7 +350,7 @@
   "extensions/telegram/src/bot-message-context.body.ts": 521,
   "extensions/telegram/src/bot-message-context.session.ts": 723,
   "extensions/telegram/src/bot-message-context.ts": 668,
-  "extensions/telegram/src/bot-message-dispatch.ts": 3106,
+  "extensions/telegram/src/bot-message-dispatch.ts": 3103,
   "extensions/telegram/src/bot-native-command-menu.ts": 593,
   "extensions/telegram/src/bot-native-commands.ts": 1970,
   "extensions/telegram/src/bot/body-helpers.ts": 600,
