@@ -308,6 +308,7 @@ class AppSidebar extends OpenClawLightDomContentsElement {
   @state() private sessionSortMenuPosition: { x: number; y: number } | null = null;
   // Anchored by its bottom edge so the footer menu grows upward regardless of height.
   @state() private agentMenuPosition: { x: number; bottom: number } | null = null;
+  @state() private agentMenuHelpOpen = false;
   @state() private visibleSessionLimit = SIDEBAR_SESSION_PAGE_SIZE;
   @state() private sessionsResult: SessionsListResult | null = null;
   @state() private sessionsAgentId: string | null = null;
@@ -1483,6 +1484,7 @@ class AppSidebar extends OpenClawLightDomContentsElement {
     const trigger = this.agentMenuTrigger;
     this.agentMenuTrigger = null;
     this.agentMenuPosition = null;
+    this.agentMenuHelpOpen = false;
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
     document.removeEventListener("keydown", this.handleDocumentKeydown, true);
     if (options.restoreFocus) {
@@ -2000,7 +2002,9 @@ class AppSidebar extends OpenClawLightDomContentsElement {
           ${agents.length > 1
             ? html`
                 <div class="sidebar-customize-menu__title">${t("agentChip.agents")}</div>
-                ${agents.map((entry) => this.renderAgentMenuAgentRow(entry, activeId))}
+                <div class="sidebar-agent-menu__agents">
+                  ${agents.map((entry) => this.renderAgentMenuAgentRow(entry, activeId))}
+                </div>
                 <div class="sidebar-customize-menu__separator" role="separator"></div>
               `
             : nothing}
@@ -2046,22 +2050,34 @@ class AppSidebar extends OpenClawLightDomContentsElement {
             <span class="nav-item__icon" aria-hidden="true">${icons.smartphone}</span>
             <span class="sidebar-customize-menu__text">${t("nodes.pairing.button")}</span>
           </button>
-          ${AGENT_MENU_LINKS.map(
-            (link) => html`
-              <a
-                class="sidebar-customize-menu__item"
-                role="menuitem"
-                tabindex="-1"
-                href=${link.href}
-                target=${EXTERNAL_LINK_TARGET}
-                rel=${buildExternalLinkRel()}
-                @click=${() => this.closeAgentMenu()}
-              >
-                <span class="nav-item__icon" aria-hidden="true">${icons[link.icon]}</span>
-                <span class="sidebar-customize-menu__text">${link.label()}</span>
-              </a>
-            `,
-          )}
+          <div
+            class="sidebar-customize-menu__submenu-host"
+            @pointerenter=${() => {
+              this.agentMenuHelpOpen = true;
+            }}
+            @pointerleave=${() => {
+              this.agentMenuHelpOpen = false;
+            }}
+          >
+            <button
+              type="button"
+              class="sidebar-customize-menu__item"
+              role="menuitem"
+              tabindex="-1"
+              aria-haspopup="menu"
+              aria-expanded=${String(this.agentMenuHelpOpen)}
+              @click=${() => {
+                this.agentMenuHelpOpen = !this.agentMenuHelpOpen;
+              }}
+            >
+              <span class="nav-item__icon" aria-hidden="true">${icons.circleQuestionMark}</span>
+              <span class="sidebar-customize-menu__text">${t("agentChip.help")}</span>
+              <span class="sidebar-customize-menu__chevron" aria-hidden="true">
+                ${icons.chevronRight}
+              </span>
+            </button>
+            ${this.agentMenuHelpOpen ? this.renderAgentMenuHelpSubmenu() : nothing}
+          </div>
           <div class="sidebar-customize-menu__separator" role="separator"></div>
           <div class="sidebar-agent-menu__footer">
             <openclaw-sidebar-build-chip
@@ -2078,6 +2094,40 @@ class AppSidebar extends OpenClawLightDomContentsElement {
           </div>
         </div>
       </openclaw-menu-surface>
+    `;
+  }
+
+  private renderAgentMenuHelpSubmenu() {
+    // Same flip rule as the session menu: fly out left when a right-side
+    // flyout would run past the viewport edge (narrow windows/overlay mode).
+    const menuWidth = 240;
+    const x = this.agentMenuPosition?.x ?? 0;
+    const flipLeft = x + menuWidth * 2 + 4 > window.innerWidth - 8;
+    return html`
+      <div
+        class="sidebar-customize-menu sidebar-customize-menu__submenu ${flipLeft
+          ? "sidebar-customize-menu__submenu--left"
+          : ""}"
+        role="menu"
+        aria-label=${t("agentChip.help")}
+      >
+        ${AGENT_MENU_LINKS.map(
+          (link) => html`
+            <a
+              class="sidebar-customize-menu__item"
+              role="menuitem"
+              tabindex="-1"
+              href=${link.href}
+              target=${EXTERNAL_LINK_TARGET}
+              rel=${buildExternalLinkRel()}
+              @click=${() => this.closeAgentMenu()}
+            >
+              <span class="nav-item__icon" aria-hidden="true">${icons[link.icon]}</span>
+              <span class="sidebar-customize-menu__text">${link.label()}</span>
+            </a>
+          `,
+        )}
+      </div>
     `;
   }
 

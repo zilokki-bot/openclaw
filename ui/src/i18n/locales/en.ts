@@ -394,6 +394,7 @@ export const en: TranslationMap = {
     working: "Working…",
     ready: "Ready to chat",
     whatCanAgentDo: "What can {name} do?",
+    help: "Help",
     getHelp: "Get help",
     discord: "Discord community",
     viewChangelog: "View changelog",

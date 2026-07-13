@@ -2087,6 +2087,56 @@ openclaw-session-menu[popover] {
   text-decoration: none;
 }
 
+/* The help flyout must escape the menu box, so the root stays
+   overflow-visible and scrolling moves to the agents list instead. */
+.sidebar-agent-menu {
+  overflow: visible;
+  max-height: none;
+}
+
+.sidebar-agent-menu__agents {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sidebar-customize-menu__submenu-host {
+  position: relative;
+}
+
+/* Bottom-aligned like the parent menu: both grow upward from the footer. */
+.sidebar-agent-menu .sidebar-customize-menu__submenu {
+  position: absolute;
+  bottom: -6px;
+  left: calc(100% + 4px);
+  max-height: min(360px, calc(100vh - 24px));
+  overflow-y: auto;
+}
+
+.sidebar-agent-menu .sidebar-customize-menu__submenu--left {
+  right: calc(100% + 4px);
+  left: auto;
+}
+
+.sidebar-customize-menu__chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.sidebar-customize-menu__chevron svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Footer menu row: build identity left, theme switch right. */
 .sidebar-agent-menu__footer {
   display: flex;
