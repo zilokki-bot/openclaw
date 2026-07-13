@@ -62,7 +62,7 @@ let pendingRestartSessionKey: string | undefined;
 let pendingRestartSkipDeferral = false;
 let pendingRestartPreparing = false;
 let pendingRestartSignalAdmission: GatewayRestartSignalAdmissionLease | null = null;
-const restartTransientGeneration = 0;
+let restartTransientGeneration = 0;
 const activeDeferralPolls = new Set<ReturnType<typeof setInterval>>();
 
 function shouldPreferRestartReason(next?: string, current?: string): boolean {
@@ -136,6 +136,15 @@ function clearActiveDeferralPolls(): void {
 }
 
 export function resetGatewayRestartStateForInProcessRestart(): void {
+  restartTransientGeneration += 1;
+  sigusr1AuthorizedCount = 0;
+  sigusr1AuthorizedUntil = 0;
+  restartCycleToken = 0;
+  emittedRestartToken = 0;
+  consumedRestartToken = 0;
+  emittedRestartReason = undefined;
+  emittedRestartIntent = undefined;
+  lastRestartEmittedAt = 0;
   clearActiveDeferralPolls();
   clearPendingScheduledRestart();
   clearPendingRestartSignalAdmission();

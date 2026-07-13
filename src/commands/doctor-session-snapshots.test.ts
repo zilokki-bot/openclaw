@@ -12,7 +12,6 @@ import {
 } from "../config/sessions/store.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { __testing as openClawRootTesting } from "../infra/openclaw-root.js";
 import { AGENT_HARNESS_SESSION_KEY_RESERVED_MESSAGE } from "../sessions/agent-harness-session-key.js";
 import type { Skill } from "../skills/loading/skill-contract.js";
 
@@ -123,11 +122,6 @@ describe("doctor session snapshot stale runtime metadata", () => {
     bundledSkillsDir = path.join(root, "current", "skills");
     await fs.mkdir(path.join(bundledSkillsDir, "doctor"), { recursive: true });
     await fs.writeFile(path.join(bundledSkillsDir, "doctor", "SKILL.md"), "# Doctor\n");
-  });
-
-  afterEach(async () => {
-    openClawRootTesting.clearOpenClawPackageRootCaches();
-    await fs.rm(root, { recursive: true, force: true });
   });
 
   it("flags cached bundled skill locations from inactive and temp-backed runtime roots", () => {

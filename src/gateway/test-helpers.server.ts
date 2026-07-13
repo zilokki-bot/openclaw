@@ -20,7 +20,7 @@ import {
   listSessionEntries,
 } from "../config/sessions/session-accessor.js";
 import { formatSqliteSessionFileMarker } from "../config/sessions/sqlite-marker.js";
-import { resetAgentRunContextForTest } from "../infra/agent-events.js";
+import { resetAgentEventsForTest } from "../infra/agent-events.js";
 import {
   loadOrCreateDeviceIdentity,
   publicKeyRawBase64UrlFromPem,
@@ -31,8 +31,7 @@ import {
   getPairedDevice,
   requestDevicePairing,
 } from "../infra/device-pairing.js";
-import { resetGatewaySuspendCoordinatorForTest } from "../infra/gateway-suspend-coordinator.js";
-import { __testing as restartTesting } from "../infra/restart.js";
+import { resetGatewayRestartStateForInProcessRestart } from "../infra/restart.js";
 import { drainSystemEvents, peekSystemEvents } from "../infra/system-events.js";
 import { rawDataToString } from "../infra/ws.js";
 import { resetLogger, setLoggerOverride } from "../logging.js";
@@ -291,22 +290,16 @@ function applyGatewaySkipEnv() {
     : "openclaw-test-no-bundled-extensions";
 }
 
-function resetGatewayLifecycleTestState(options: { preserveRuntimeBindings: boolean }): void {
-  // Resume a held scheduler before hard admission reset invalidates and forgets its
-  // lease. Then cancel restart timers and retire their module-local signal lease.
-  resetGatewaySuspendCoordinatorForTest();
-  if (options.preserveRuntimeBindings) {
-    restartTesting.resetSigusr1TransientState();
-  } else {
-    restartTesting.resetSigusr1State();
-  }
+function resetGatewayLifecycleTestState(): void {
+  // Cancel pending restart work before clearing gateway admission state.
+  resetGatewayRestartStateForInProcessRestart();
   resetGatewayWorkAdmission();
 }
 
 async function resetGatewayTestState(options: { uniqueConfigRoot: boolean }) {
   // Some tests intentionally use fake timers; ensure they don't leak into gateway suites.
   vi.useRealTimers();
-  resetGatewayLifecycleTestState({ preserveRuntimeBindings: false });
+  resetGatewayLifecycleTestState();
   setLoggerOverride({ level: "silent", consoleLevel: "silent" });
   if (!tempHome) {
     throw new Error("resetGatewayTestState called before temp home was initialized");
@@ -413,7 +406,7 @@ async function resetGatewayTestState(options: { uniqueConfigRoot: boolean }) {
   for (const sessionKey of resolveGatewayTestMainSessionKeys()) {
     drainSystemEvents(sessionKey);
   }
-  resetAgentRunContextForTest();
+  resetAgentEventsForTest();
   const mod = await getServerModule();
   await mod.resetModelCatalogCacheForTest();
   agentDiscoveryMock.enabled = false;
@@ -423,7 +416,7 @@ async function resetGatewayTestState(options: { uniqueConfigRoot: boolean }) {
 
 async function cleanupGatewayTestHome(options: { restoreEnv: boolean }) {
   vi.useRealTimers();
-  resetGatewayLifecycleTestState({ preserveRuntimeBindings: activeSuiteGatewayServerCount > 0 });
+  resetGatewayLifecycleTestState();
   clearGatewaySubagentRuntime();
   resetLogger();
   resetTaskRegistryForTests({ persist: false });
@@ -450,7 +443,7 @@ async function cleanupGatewayTestHome(options: { restoreEnv: boolean }) {
 
 async function resetGatewayTestRuntimeOnly() {
   vi.useRealTimers();
-  resetGatewayLifecycleTestState({ preserveRuntimeBindings: true });
+  resetGatewayLifecycleTestState();
   setLoggerOverride({ level: "silent", consoleLevel: "silent" });
   applyGatewaySkipEnv();
   delete process.env.OPENCLAW_GATEWAY_TOKEN;
@@ -508,7 +501,7 @@ async function resetGatewayTestRuntimeOnly() {
   for (const sessionKey of resolveGatewayTestMainSessionKeys()) {
     drainSystemEvents(sessionKey);
   }
-  resetAgentRunContextForTest();
+  resetAgentEventsForTest();
 }
 
 export function installGatewayTestHooks(options?: { scope?: "test" | "suite" }) {

@@ -7,10 +7,7 @@ import {
   MAX_TIMER_TIMEOUT_MS,
 } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  getActiveNodeContext,
-  resetActiveNodeContextForTests,
-} from "../infra/active-node-context.js";
+import { getActiveNodeContext } from "../infra/active-node-context.js";
 import { onDiagnosticEvent, resetDiagnosticEventsForTest } from "../infra/diagnostic-events.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import {
@@ -89,7 +86,6 @@ function makeClient(
 afterEach(() => {
   testNodeHostCommands = [];
   resetConnectedNodePluginToolsForTest();
-  resetActiveNodeContextForTests();
 });
 
 function registerDemoNodePluginTool(params: {

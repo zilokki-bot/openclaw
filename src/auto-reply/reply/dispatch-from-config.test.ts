@@ -5,10 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { clearAgentHarnesses, registerAgentHarness } from "../../agents/harness/registry.js";
 import type { ChannelMessagingAdapter } from "../../channels/plugins/types.core.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import {
-  clearApprovalNativeRouteStateForTest,
-  createApprovalNativeRouteReporter,
-} from "../../infra/approval-native-route-coordinator.js";
+import { createApprovalNativeRouteReporter } from "../../infra/approval-native-route-coordinator.js";
 import {
   createDiagnosticTraceContext,
   getActiveDiagnosticTraceContext,
@@ -472,7 +469,6 @@ describe("dispatchReplyFromConfig", () => {
         ...passiveThreadingTestPlugins,
       ]),
     );
-    clearApprovalNativeRouteStateForTest();
     acpManagerRuntimeMocks.getAcpSessionManager.mockReset();
     acpManagerRuntimeMocks.getAcpSessionManager.mockReturnValue(createMockAcpSessionManager());
     replyRunTesting.resetReplyRunRegistry();

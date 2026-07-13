@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearAllBootstrapSnapshots } from "../agents/bootstrap-cache.js";
 import { clearConfigCache, clearRuntimeConfigSnapshot } from "../config/config.js";
 import { clearSessionStoreCacheForTest } from "../config/sessions/store.js";
-import { resetAgentRunContextForTest } from "../infra/agent-events.js";
 import { PROXY_ENV_KEYS } from "../infra/net/proxy-env.js";
 import { clearGatewaySubagentRuntime } from "../plugins/runtime/index.js";
 import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
@@ -52,7 +51,6 @@ describe("gateway network runtime", () => {
     clearRuntimeConfigSnapshot();
     clearConfigCache();
     clearSessionStoreCacheForTest();
-    resetAgentRunContextForTest();
     clearAllBootstrapSnapshots();
     clearGatewaySubagentRuntime();
   });
@@ -61,7 +59,6 @@ describe("gateway network runtime", () => {
     clearRuntimeConfigSnapshot();
     clearConfigCache();
     clearSessionStoreCacheForTest();
-    resetAgentRunContextForTest();
     clearAllBootstrapSnapshots();
     clearGatewaySubagentRuntime();
   });

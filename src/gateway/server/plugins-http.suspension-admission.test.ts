@@ -3,10 +3,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GatewayActiveWorkInspectors } from "../../infra/gateway-active-work.js";
-import {
-  prepareGatewaySuspend,
-  resetGatewaySuspendCoordinatorForTest,
-} from "../../infra/gateway-suspend-coordinator.js";
+import { prepareGatewaySuspend } from "../../infra/gateway-suspend-coordinator.js";
 import { dispatchGatewayMethod } from "../../plugin-sdk/gateway-method-runtime.js";
 import type { PluginHttpRouteRegistration } from "../../plugins/registry.js";
 import {
@@ -114,13 +111,11 @@ function createUpgradeHandler(routes: PluginHttpRouteRegistration[]) {
 
 beforeEach(() => {
   controlPlaneRateLimitTesting.resetControlPlaneRateLimitState();
-  resetGatewaySuspendCoordinatorForTest();
   resetGatewayWorkAdmission();
 });
 
 afterEach(() => {
   controlPlaneRateLimitTesting.resetControlPlaneRateLimitState();
-  resetGatewaySuspendCoordinatorForTest();
   resetGatewayWorkAdmission();
 });
 
