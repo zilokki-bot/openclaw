@@ -1101,6 +1101,8 @@ async function processDiscordMessageInner(
         commentaryProgressEnabled: draftPreview.isProgressMode
           ? draftPreview.commentaryProgressEnabled
           : undefined,
+        progressPreambleEnabled:
+          draftPreview.draftStream && draftPreview.isProgressMode ? true : undefined,
         commentaryPayloadsEnabled: draftPreview.isProgressMode
           ? draftPreview.commentaryProgressEnabled
           : undefined,
@@ -1173,6 +1175,7 @@ async function processDiscordMessageInner(
             if (shouldYieldDraftProgress()) {
               return undefined;
             }
+            await draftPreview.pushPreambleHeadline(payload.progressText);
             if (draftPreview.commentaryProgressEnabled && payload.progressText) {
               // Count only commentary that actually streams to the window draft.
               noteWindowCommentary(payload.itemId, payload.progressText);
