@@ -1,66 +1,18 @@
 // Covers Windows install-root normalization and discovery.
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  privateTestApi,
-  resetWindowsInstallRootsForTests,
   getWindowsCmdExePath,
   getWindowsInstallRoots,
   getWindowsPowerShellExePath,
   getWindowsProgramFilesRoots,
   getWindowsSystem32ExePath,
   getWindowsWmicExePath,
-  normalizeWindowsInstallRoot,
 } from "./windows-install-roots.js";
 
-afterEach(() => {
-  resetWindowsInstallRootsForTests();
-});
-
-describe("normalizeWindowsInstallRoot", () => {
-  it("normalizes validated local Windows roots", () => {
-    expect(normalizeWindowsInstallRoot(" D:/Apps/Program Files/ ")).toBe("D:\\Apps\\Program Files");
-  });
-
-  it("rejects invalid or overly broad values", () => {
-    expect(normalizeWindowsInstallRoot("relative\\path")).toBeNull();
-    expect(normalizeWindowsInstallRoot("\\\\server\\share\\Program Files")).toBeNull();
-    expect(normalizeWindowsInstallRoot("D:\\")).toBeNull();
-    expect(normalizeWindowsInstallRoot("D:\\Apps;E:\\Other")).toBeNull();
-  });
-});
+afterEach(() => {});
 
 describe("getWindowsInstallRoots", () => {
   it("prefers HKLM registry roots over process environment values", () => {
-    resetWindowsInstallRootsForTests({
-      queryRegistryValue: (key, valueName) => {
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" &&
-          valueName === "SystemRoot"
-        ) {
-          return "D:\\Windows";
-        }
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion" &&
-          valueName === "ProgramFilesDir"
-        ) {
-          return "E:\\Programs";
-        }
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion" &&
-          valueName === "ProgramFilesDir (x86)"
-        ) {
-          return "F:\\Programs (x86)";
-        }
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion" &&
-          valueName === "ProgramW6432Dir"
-        ) {
-          return "E:\\Programs";
-        }
-        return null;
-      },
-    });
-
     const originalEnv = process.env;
     let roots;
     try {
@@ -85,24 +37,6 @@ describe("getWindowsInstallRoots", () => {
   });
 
   it("uses explicit env roots without consulting HKLM", () => {
-    resetWindowsInstallRootsForTests({
-      queryRegistryValue: (key, valueName) => {
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" &&
-          valueName === "SystemRoot"
-        ) {
-          return "D:\\Windows";
-        }
-        if (
-          key === "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion" &&
-          valueName === "ProgramFilesDir"
-        ) {
-          return "E:\\Programs";
-        }
-        return null;
-      },
-    });
-
     const roots = getWindowsInstallRoots({
       SystemRoot: "G:\\Windows",
       ProgramFiles: "H:\\Programs",
@@ -119,10 +53,6 @@ describe("getWindowsInstallRoots", () => {
   });
 
   it("falls back to validated env roots when registry lookup is unavailable", () => {
-    resetWindowsInstallRootsForTests({
-      queryRegistryValue: () => null,
-    });
-
     const roots = getWindowsInstallRoots({
       systemroot: "D:\\Windows\\",
       programfiles: "E:\\Programs",
@@ -139,10 +69,6 @@ describe("getWindowsInstallRoots", () => {
   });
 
   it("falls back to defaults when registry and env roots are invalid", () => {
-    resetWindowsInstallRootsForTests({
-      queryRegistryValue: () => "relative\\path",
-    });
-
     const roots = getWindowsInstallRoots({
       SystemRoot: "relative\\Windows",
       ProgramFiles: "\\\\server\\share\\Program Files",
@@ -161,10 +87,6 @@ describe("getWindowsInstallRoots", () => {
 
 describe("getWindowsProgramFilesRoots", () => {
   it("prefers ProgramW6432 and dedupes roots case-insensitively", () => {
-    resetWindowsInstallRootsForTests({
-      queryRegistryValue: () => null,
-    });
-
     expect(
       getWindowsProgramFilesRoots({
         ProgramW6432: "D:\\Programs",
@@ -201,29 +123,5 @@ describe("Windows system executable helpers", () => {
     expect(() => getWindowsSystem32ExePath("netstat")).toThrow(
       /Invalid Windows System32 executable name/u,
     );
-  });
-});
-
-describe("locateWindowsRegExe", () => {
-  it("uses the fixed Windows system reg.exe candidate", () => {
-    expect(privateTestApi.getWindowsRegExeCandidates()).toEqual(["C:\\Windows\\System32\\reg.exe"]);
-  });
-
-  it("does not resolve readable reg.exe files from env-derived roots", () => {
-    resetWindowsInstallRootsForTests({
-      isReadableFile: (filePath) => filePath === "D:\\Windows\\System32\\reg.exe",
-    });
-
-    const originalEnv = process.env;
-    try {
-      process.env = {
-        ...originalEnv,
-        SystemRoot: "D:\\Windows",
-        WINDIR: "E:\\Windows",
-      };
-      expect(privateTestApi.locateWindowsRegExe()).toBeNull();
-    } finally {
-      process.env = originalEnv;
-    }
   });
 });

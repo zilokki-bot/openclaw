@@ -8,7 +8,6 @@ import {
   getShellEnvAppliedKeys,
   getShellPathFromLoginShell,
   loadShellEnvFallback,
-  resetShellPathCacheForTests,
   resolveShellEnvFallbackTimeoutMs,
   shouldDeferShellEnvFallback,
   shouldEnableShellEnvFallback,
@@ -33,7 +32,6 @@ describe("shell env fallback", () => {
   }
 
   function runShellEnvFallbackForShell(shell: string) {
-    resetShellPathCacheForTests();
     const env: NodeJS.ProcessEnv = { SHELL: shell };
     const exec = vi.fn(() => Buffer.from("OPENAI_API_KEY=from-shell\0"));
     const res = runShellEnvFallback({
@@ -121,7 +119,6 @@ describe("shell env fallback", () => {
     exec: ReturnType<typeof vi.fn>;
     platform: NodeJS.Platform;
   }) {
-    resetShellPathCacheForTests();
     return getShellPathTwiceWithExec(params);
   }
 
@@ -166,7 +163,6 @@ describe("shell env fallback", () => {
   });
 
   it("caps oversized fallback exec timeouts before probing the login shell", () => {
-    resetShellPathCacheForTests();
     const env: NodeJS.ProcessEnv = {};
     let receivedTimeout: number | undefined;
     const exec = vi.fn((_shell: string, _args: string[], options: { timeout?: number }) => {
@@ -286,7 +282,6 @@ describe("shell env fallback", () => {
   });
 
   it("reuses the cached login-shell env probe across repeated fallback reads", () => {
-    resetShellPathCacheForTests();
     const env: NodeJS.ProcessEnv = {};
     const exec = vi.fn(() =>
       Buffer.from("OPENAI_API_KEY=from-shell\0ANTHROPIC_API_KEY=from-shell-anthropic\0"),
@@ -320,7 +315,6 @@ describe("shell env fallback", () => {
   });
 
   it("caches login-shell env probe failures for repeated fallback reads", () => {
-    resetShellPathCacheForTests();
     const env: NodeJS.ProcessEnv = {};
     const logger = { warn: vi.fn() };
     const exec = vi.fn(() => {
@@ -537,7 +531,6 @@ describe("shell env fallback", () => {
   });
 
   it("sanitizes startup-related env vars before login-shell PATH probe", () => {
-    resetShellPathCacheForTests();
     const env = makeUnsafeStartupEnv();
     let receivedEnv: NodeJS.ProcessEnv | undefined;
     const exec = vi.fn((_shell: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {

@@ -3672,7 +3672,7 @@ function listTopLevelSessionStoreKeys(raw: string): string[] | null {
   return null;
 }
 
-export function sessionStoreTextMayNeedCanonicalization(params: {
+function sessionStoreTextMayNeedCanonicalization(params: {
   raw: string;
   storeAgentIds: Iterable<string>;
   mainKey: string;
