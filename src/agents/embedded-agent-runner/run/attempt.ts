@@ -4458,10 +4458,12 @@ export async function runEmbeddedAttempt(
             }
             installPromptSubmissionLockRelease({
               session: activeSession,
+              agentId: sessionAgentId,
               waitForSessionEvents: (sessionToDrain) =>
                 sessionLockController.waitForSessionEvents(sessionToDrain),
               releaseForPrompt: () => sessionLockController.releaseForPrompt(),
               reacquireAfterPrompt: () => sessionLockController.reacquireAfterPrompt(),
+              abortSignal: runAbortController.signal,
               sessionKey: params.sessionKey,
               sessionFile: params.sessionFile,
               withSessionWriteLock: (run, options) =>

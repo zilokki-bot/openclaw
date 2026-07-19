@@ -4717,6 +4717,185 @@ describe("embedded attempt session lock lifecycle", () => {
     expect(events).toEqual(["drain", "release", "stream", "drain", "reacquire"]);
   });
 
+  it("serializes provider stream submissions for the same agent and session key", async () => {
+    const events: string[] = [];
+    let resolveFirstStream!: () => void;
+    let resolveSecondStream!: () => void;
+    const firstStreamDone = new Promise<void>((resolve) => {
+      resolveFirstStream = resolve;
+    });
+    const secondStreamDone = new Promise<void>((resolve) => {
+      resolveSecondStream = resolve;
+    });
+    const firstStreamFn = vi.fn(async () => {
+      events.push("first-stream");
+      await firstStreamDone;
+    });
+    const secondStreamFn = vi.fn(async () => {
+      events.push("second-stream");
+      await secondStreamDone;
+    });
+    const firstSession = {
+      agent: {
+        streamFn: firstStreamFn,
+      },
+    };
+    const secondSession = {
+      agent: {
+        streamFn: secondStreamFn,
+      },
+    };
+    const installForSession = (label: string, session: typeof firstSession) => {
+      installPromptSubmissionLockRelease({
+        session,
+        agentId: "doebator",
+        sessionKey: "sqlite:doebator:claude-verify-deadlock",
+        waitForSessionEvents: vi.fn(async () => {
+          events.push(`${label}-drain`);
+        }),
+        releaseForPrompt: vi.fn(async () => {
+          events.push(`${label}-release`);
+        }),
+        reacquireAfterPrompt: vi.fn(async () => {
+          events.push(`${label}-reacquire`);
+        }),
+      });
+    };
+
+    installForSession("first", firstSession);
+    installForSession("second", secondSession);
+
+    const firstPrompt = firstSession.agent.streamFn();
+    await waitUntil(() => events.includes("first-stream"), "first prompt did not start");
+
+    const secondPrompt = secondSession.agent.streamFn();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(secondStreamFn).not.toHaveBeenCalled();
+    expect(events).toEqual(["first-drain", "first-release", "first-stream"]);
+
+    resolveFirstStream();
+    await firstPrompt;
+    await waitUntil(() => events.includes("second-stream"), "second prompt did not start");
+
+    expect(events).toEqual([
+      "first-drain",
+      "first-release",
+      "first-stream",
+      "first-drain",
+      "first-reacquire",
+      "second-drain",
+      "second-release",
+      "second-stream",
+    ]);
+
+    resolveSecondStream();
+    await secondPrompt;
+    expect(events).toEqual([
+      "first-drain",
+      "first-release",
+      "first-stream",
+      "first-drain",
+      "first-reacquire",
+      "second-drain",
+      "second-release",
+      "second-stream",
+      "second-drain",
+      "second-reacquire",
+    ]);
+  });
+
+  it("does not let an aborted queued prompt block the next same-session prompt", async () => {
+    const events: string[] = [];
+    let resolveFirstStream!: () => void;
+    const firstStreamDone = new Promise<void>((resolve) => {
+      resolveFirstStream = resolve;
+    });
+    const firstStreamFn = vi.fn(async () => {
+      events.push("first-stream");
+      await firstStreamDone;
+    });
+    const abortedStreamFn = vi.fn(async () => {
+      events.push("aborted-stream");
+    });
+    const thirdStreamFn = vi.fn(async () => {
+      events.push("third-stream");
+    });
+    const firstSession = {
+      agent: {
+        streamFn: firstStreamFn,
+      },
+    };
+    const abortedSession = {
+      agent: {
+        streamFn: abortedStreamFn,
+      },
+    };
+    const thirdSession = {
+      agent: {
+        streamFn: thirdStreamFn,
+      },
+    };
+    const abortController = new AbortController();
+    const commonParams = {
+      agentId: "doebator",
+      sessionKey: "agent:doebator:claude-verify-deadlock",
+      waitForSessionEvents: vi.fn(async () => {
+        events.push("drain");
+      }),
+      releaseForPrompt: vi.fn(async () => {
+        events.push("release");
+      }),
+      reacquireAfterPrompt: vi.fn(async () => {
+        events.push("reacquire");
+      }),
+    };
+
+    installPromptSubmissionLockRelease({
+      session: firstSession,
+      ...commonParams,
+    });
+    installPromptSubmissionLockRelease({
+      session: abortedSession,
+      ...commonParams,
+      abortSignal: abortController.signal,
+    });
+    installPromptSubmissionLockRelease({
+      session: thirdSession,
+      ...commonParams,
+    });
+
+    const firstPrompt = firstSession.agent.streamFn();
+    await waitUntil(() => events.includes("first-stream"), "first prompt did not start");
+    const abortedPrompt = abortedSession.agent.streamFn();
+    abortController.abort(new Error("queued prompt aborted"));
+    await expect(abortedPrompt).rejects.toThrow("queued prompt aborted");
+    expect(abortedStreamFn).not.toHaveBeenCalled();
+
+    const thirdPrompt = thirdSession.agent.streamFn();
+    await Promise.resolve();
+    expect(thirdStreamFn).not.toHaveBeenCalled();
+
+    resolveFirstStream();
+    await firstPrompt;
+    await waitUntil(() => events.includes("third-stream"), "third prompt did not start");
+    await thirdPrompt;
+
+    expect(events).toEqual([
+      "drain",
+      "release",
+      "first-stream",
+      "drain",
+      "reacquire",
+      "drain",
+      "release",
+      "third-stream",
+      "drain",
+      "reacquire",
+    ]);
+  });
+
   it("rewraps provider stream submission after the stream function is rebuilt", async () => {
     const events: string[] = [];
     const firstStreamFn = vi.fn(async (..._args: unknown[]) => {
