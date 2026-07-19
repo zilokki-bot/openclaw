@@ -1,4 +1,6 @@
 // Workboard tests cover store plugin behavior.
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -47,6 +49,41 @@ function statfsFixture(type: number): ReturnType<typeof fs.statfsSync> {
     frsize: 1024,
     ffree: 0,
   };
+}
+
+async function withGitWorkspace<T>(run: (root: string) => Promise<T>): Promise<T> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-workboard-proof-git-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root, stdio: "ignore" });
+    return await run(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function commitProofFile(root: string, relativePath: string, content: string): string {
+  const absolutePath = path.join(root, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, content);
+  execFileSync("git", ["add", relativePath], { cwd: root, stdio: "ignore" });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=OpenClaw Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-q",
+      "-m",
+      "add proof artifact",
+    ],
+    { cwd: root, stdio: "ignore" },
+  );
+  return execFileSync("git", ["rev-parse", "--short=9", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  }).trim();
 }
 
 describe("WorkboardStore", () => {
@@ -1873,6 +1910,81 @@ describe("WorkboardStore", () => {
 
     await expect(store.get(card.id)).resolves.not.toMatchObject({
       metadata: { proof: [expect.objectContaining({ label: "CI" })] },
+    });
+  });
+
+  it("rejects passed proof notes that claim missing repository artifacts", async () => {
+    await withGitWorkspace(async (root) => {
+      const commit = commitProofFile(root, "state/shared/inventory/existing.md", "ok\n");
+      const store = new WorkboardStore(createMemoryStore(), { proofWorkspaceRoot: root });
+      const card = await store.create({ title: "Canary proof" });
+
+      await expect(
+        store.addProof(card.id, {
+          status: "passed",
+          note: `Proof attached: state/shared/inventory/missing.md commit ${commit}`,
+        }),
+      ).rejects.toThrow(/claimed proof artifact path is missing/);
+
+      await expect(store.get(card.id)).resolves.not.toMatchObject({
+        metadata: { proof: [expect.objectContaining({ status: "passed" })] },
+      });
+    });
+  });
+
+  it("rejects passed proof notes that claim non-existent commits", async () => {
+    await withGitWorkspace(async (root) => {
+      commitProofFile(root, "state/shared/inventory/workboard-flow-canary-2026-07-20.md", "ok\n");
+      const store = new WorkboardStore(createMemoryStore(), { proofWorkspaceRoot: root });
+      const card = await store.create({ title: "Canary proof" });
+
+      await expect(
+        store.addProof(card.id, {
+          status: "passed",
+          note:
+            "Proof attached: state/shared/inventory/workboard-flow-canary-2026-07-20.md " +
+            "commit cb56542c7",
+        }),
+      ).rejects.toThrow(/claimed proof commit is not a git commit/);
+    });
+  });
+
+  it("rejects passed proof notes when claimed sha256 prefix does not match artifact", async () => {
+    await withGitWorkspace(async (root) => {
+      const commit = commitProofFile(
+        root,
+        "state/shared/inventory/workboard-flow-canary-2026-07-20.md",
+        "actual proof\n",
+      );
+      const store = new WorkboardStore(createMemoryStore(), { proofWorkspaceRoot: root });
+      const card = await store.create({ title: "Canary proof" });
+
+      await expect(
+        store.addProof(card.id, {
+          status: "passed",
+          note:
+            "Proof attached: state/shared/inventory/workboard-flow-canary-2026-07-20.md " +
+            `sha256 prefix 0000000000000000 commit ${commit}`,
+        }),
+      ).rejects.toThrow(/claimed proof sha256 prefix does not match artifact/);
+    });
+  });
+
+  it("accepts passed proof notes when repository artifact, commit, and hash match", async () => {
+    await withGitWorkspace(async (root) => {
+      const relativePath = "state/shared/inventory/workboard-flow-canary-2026-07-20.md";
+      const content = "actual proof\n";
+      const commit = commitProofFile(root, relativePath, content);
+      const sha256 = createHash("sha256").update(content).digest("hex").slice(0, 16);
+      const store = new WorkboardStore(createMemoryStore(), { proofWorkspaceRoot: root });
+      const card = await store.create({ title: "Canary proof" });
+
+      const updated = await store.addProof(card.id, {
+        status: "passed",
+        note: `Proof attached: ${relativePath} sha256 prefix ${sha256} commit ${commit}`,
+      });
+
+      expect(updated.metadata?.proof).toEqual([expect.objectContaining({ status: "passed" })]);
     });
   });
 
