@@ -19,7 +19,6 @@ import { isRecord, truncateUtf16Safe } from "../../utils.js";
 import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import {
-  optionalFiniteNumberSchema,
   optionalNonNegativeIntegerSchema,
   optionalPositiveIntegerSchema,
   optionalStringEnum,
@@ -121,7 +120,12 @@ function cronPayloadObjectSchema(params: {
       message: Type.Optional(Type.String({ description: "agentTurn prompt" })),
       model: params.model,
       thinking: Type.Optional(Type.String({ description: "Thinking override" })),
-      timeoutSeconds: optionalFiniteNumberSchema({ minimum: 0 }),
+      timeoutSeconds: Type.Optional(
+        Type.Union([
+          Type.Number({ minimum: 0, description: "Payload timeout seconds" }),
+          Type.Null({ description: "Clear stored payload timeout" }),
+        ]),
+      ),
       lightContext: Type.Optional(Type.Boolean()),
       allowUnsafeExternalContent: Type.Optional(Type.Boolean()),
       fallbacks: params.fallbacks,

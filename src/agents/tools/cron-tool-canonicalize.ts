@@ -240,6 +240,7 @@ function canonicalizeCronToolPayload(value: Record<string, unknown>): void {
       payload.model === null ||
       isNonEmptyString(payload.thinking) ||
       typeof payload.timeoutSeconds === "number" ||
+      payload.timeoutSeconds === null ||
       typeof payload.lightContext === "boolean" ||
       typeof payload.allowUnsafeExternalContent === "boolean" ||
       (payload.fallbacks !== undefined && isStringArrayOrNull(payload.fallbacks)) ||

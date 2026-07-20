@@ -23,6 +23,30 @@ function makeJob(overrides: Partial<CronJob> = {}): CronJob {
 }
 
 describe("applyJobPatch delivery merge", () => {
+  it("clears an agent payload timeout without changing the payload kind", () => {
+    const job = makeJob({
+      payload: { kind: "agentTurn", message: "hello", timeoutSeconds: 100 },
+    });
+
+    applyJobPatch(job, {
+      payload: { kind: "agentTurn", timeoutSeconds: null },
+    });
+
+    expect(job.payload).toEqual({ kind: "agentTurn", message: "hello" });
+  });
+
+  it("clears a command payload timeout without changing the payload kind", () => {
+    const job = makeJob({
+      payload: { kind: "command", argv: ["sh", "-lc", "echo ok"], timeoutSeconds: 100 },
+    });
+
+    applyJobPatch(job, {
+      payload: { kind: "command", timeoutSeconds: null },
+    });
+
+    expect(job.payload).toEqual({ kind: "command", argv: ["sh", "-lc", "echo ok"] });
+  });
+
   it("threads explicit delivery threadId patches into delivery", () => {
     const job = makeJob();
     const patch = { delivery: { threadId: "99" } } as Parameters<typeof applyJobPatch>[1];
