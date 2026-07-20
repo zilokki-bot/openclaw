@@ -1953,6 +1953,54 @@ describe("CLI attempt execution", () => {
     });
   });
 
+  it("forwards internal background triggers to CLI runs", async () => {
+    const sessionKey = "agent:main:direct:claude-overflow-context";
+    const sessionEntry: SessionEntry = {
+      sessionId: "openclaw-session-overflow",
+      updatedAt: Date.now(),
+    };
+    const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+    await writeSessionStoreSeed(sessionStore);
+    runCliAgentMock.mockResolvedValueOnce(makeCliResult("overflow aware"));
+
+    await runAgentAttempt({
+      providerOverride: "claude-cli",
+      originalProvider: "claude-cli",
+      modelOverride: "opus",
+      cfg: {} as OpenClawConfig,
+      sessionEntry,
+      sessionId: sessionEntry.sessionId,
+      sessionKey,
+      sessionAgentId: "main",
+      sessionFile: path.join(tmpDir, "session.jsonl"),
+      workspaceDir: tmpDir,
+      body: "route this",
+      isFallbackRetry: false,
+      resolvedThinkLevel: "medium",
+      timeoutMs: 1_000,
+      runId: "run-cli-overflow-context",
+      opts: {
+        trigger: "overflow",
+      } as Parameters<typeof runAgentAttempt>[0]["opts"],
+      runContext: {} as Parameters<typeof runAgentAttempt>[0]["runContext"],
+      spawnedBy: undefined,
+      messageChannel: "openclaw",
+      skillsSnapshot: undefined,
+      resolvedVerboseLevel: undefined,
+      agentDir: tmpDir,
+      onAgentEvent: vi.fn(),
+      authProfileProvider: "claude-cli",
+      sessionStore,
+      storePath,
+      sessionHasHistory: false,
+    });
+
+    expect(runCliAgentMock).toHaveBeenCalledTimes(1);
+    expectMockArgFields(runCliAgentMock, {
+      trigger: "overflow",
+    });
+  });
+
   it("forwards message-tool-only policy and requires explicit subagent targets", async () => {
     const sessionKey = "agent:main:subagent:claude-message-policy";
     const sessionEntry: SessionEntry = {
@@ -2479,6 +2527,15 @@ describe("CLI attempt execution", () => {
     });
 
     expect(embeddedArg.allowGatewaySubagentBinding).toBe(true);
+  });
+
+  it("forwards internal background triggers to embedded runs", async () => {
+    const embeddedArg = await runOpenClawEmbeddedAttemptForTest({
+      opts: { trigger: "overflow" },
+      runId: "gateway-plugin-runtime-overflow",
+    });
+
+    expect(embeddedArg.trigger).toBe("overflow");
   });
 
   it("suppresses live stream output for hidden internal runs", async () => {

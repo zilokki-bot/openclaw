@@ -698,6 +698,7 @@ export function runAgentAttempt(params: {
       nextCliSessionId: string | undefined,
       activeCliSessionBinding = cliSessionBinding,
     ) => {
+      const runTrigger = params.opts.trigger ?? "user";
       const forkCliSessionOnResume = activeCliSessionBinding?.forkNextResume === true;
       if (
         forkCliSessionOnResume &&
@@ -720,7 +721,7 @@ export function runAgentAttempt(params: {
         sessionKey: params.sessionKey,
         sessionEntry: params.sessionEntry,
         agentId: params.sessionAgentId,
-        trigger: "user",
+        trigger: runTrigger,
         sessionFile: params.sessionFile,
         storePath: params.storePath,
         workspaceDir: params.workspaceDir,
@@ -870,7 +871,7 @@ export function runAgentAttempt(params: {
     sessionTarget: params.sessionTarget,
     sandboxSessionKey: params.sessionKey,
     agentId: params.sessionAgentId,
-    trigger: "user",
+    trigger: params.opts.trigger ?? "user",
     messageChannel: params.messageChannel,
     messageProvider: params.opts.messageProvider ?? params.messageChannel,
     agentAccountId: params.runContext.accountId,

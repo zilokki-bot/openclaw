@@ -280,6 +280,33 @@ function enqueueLaneEntry(state: LaneState, entry: QueueEntry): void {
   state.queue.splice(insertAt, 0, entry);
 }
 
+function hasRunnableForegroundLaneEntry(state: LaneState): boolean {
+  return state.queue.some((entry) => entry.priority >= 0);
+}
+
+function shouldReserveForegroundLaneSlot(state: LaneState, entry: QueueEntry): boolean {
+  if (entry.priority >= 0) {
+    return false;
+  }
+  if (state.maxConcurrent <= 1) {
+    return false;
+  }
+  const openSlots = state.maxConcurrent - state.activeTaskIds.size;
+  if (openSlots > 1) {
+    return false;
+  }
+  return !hasRunnableForegroundLaneEntry(state);
+}
+
+function shiftNextRunnableLaneEntry(state: LaneState): QueueEntry | undefined {
+  const index = state.queue.findIndex((entry) => !shouldReserveForegroundLaneSlot(state, entry));
+  if (index < 0) {
+    return undefined;
+  }
+  const [entry] = state.queue.splice(index, 1);
+  return entry;
+}
+
 async function runQueueEntryTask(lane: string, entry: QueueEntry): Promise<unknown> {
   const taskPromise = Promise.resolve().then(entry.task);
   const taskTimeoutMs = normalizeTaskTimeoutMs(entry.taskTimeoutMs);
@@ -397,7 +424,10 @@ function drainLane(lane: string) {
   const pump = () => {
     try {
       while (state.activeTaskIds.size < state.maxConcurrent && state.queue.length > 0) {
-        const entry = state.queue.shift() as QueueEntry;
+        const entry = shiftNextRunnableLaneEntry(state);
+        if (!entry) {
+          break;
+        }
         const waitedMs = Date.now() - entry.enqueuedAt;
         if (waitedMs >= entry.warnAfterMs) {
           try {
