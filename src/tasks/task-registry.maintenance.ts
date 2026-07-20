@@ -78,6 +78,8 @@ const TASK_RECONCILE_GRACE_MS = 5 * 60_000;
 const CHILDLESS_NATIVE_SUBAGENT_RECONCILE_GRACE_MS = 30 * 60_000;
 const TASK_STALE_RUNNING_MS = 30 * 60_000;
 const TASK_SWEEP_INTERVAL_MS = 60_000;
+export const CRON_HISTORY_KEEP_PER_JOB = 2000;
+export const CRON_HISTORY_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 /**
  * Number of tasks to process before yielding to the event loop.
@@ -568,9 +570,61 @@ function hasDetachedTaskRecoveryHook(): boolean {
   return Boolean(getDetachedTaskLifecycleRuntime().tryRecoverTaskBeforeMarkLost);
 }
 
-function shouldPruneTerminalTask(task: TaskRecord, now: number): boolean {
+function resolveCronTaskRecordTimestamp(task: TaskRecord): number {
+  return task.endedAt ?? task.lastEventAt ?? task.startedAt ?? task.createdAt;
+}
+
+function collectCronHistoryOverflowTaskIds(tasks: readonly TaskRecord[]): Set<string> {
+  const bySource = new Map<string, TaskRecord[]>();
+  for (const task of tasks) {
+    if (
+      task.runtime !== "cron" ||
+      !task.sourceId ||
+      !isTerminalTask(task) ||
+      task.status === "lost"
+    ) {
+      continue;
+    }
+    const sourceId = task.sourceId.trim();
+    if (!sourceId) {
+      continue;
+    }
+    const rows = bySource.get(sourceId) ?? [];
+    rows.push(task);
+    bySource.set(sourceId, rows);
+  }
+  const overflow = new Set<string>();
+  for (const rows of bySource.values()) {
+    for (const task of rows
+      .toSorted(
+        (left, right) =>
+          resolveCronTaskRecordTimestamp(right) - resolveCronTaskRecordTimestamp(left) ||
+          right.taskId.localeCompare(left.taskId),
+      )
+      .slice(CRON_HISTORY_KEEP_PER_JOB)) {
+      overflow.add(task.taskId);
+    }
+  }
+  return overflow;
+}
+
+function shouldPruneTerminalTask(
+  task: TaskRecord,
+  now: number,
+  cronHistoryOverflowTaskIds: ReadonlySet<string>,
+): boolean {
   if (!isTerminalTask(task)) {
     return false;
+  }
+  if (
+    task.runtime === "cron" &&
+    task.status !== "lost" &&
+    now - resolveCronTaskRecordTimestamp(task) >= CRON_HISTORY_RETENTION_MS
+  ) {
+    return true;
+  }
+  if (cronHistoryOverflowTaskIds.has(task.taskId)) {
+    return true;
   }
   if (typeof task.cleanupAfter === "number") {
     return now >= resolveEffectiveTaskCleanupAfter(task);
@@ -972,7 +1026,9 @@ export function previewTaskRegistryMaintenance(): TaskRegistryMaintenanceSummary
   let pruned = 0;
   const cronRecoveryContext = createCronRecoveryContext();
   const backingSessionContext = createBackingSessionLookupContext();
-  for (const task of taskRegistryMaintenanceRuntime.listTaskRecords()) {
+  const tasks = taskRegistryMaintenanceRuntime.listTaskRecords();
+  const cronHistoryOverflowTaskIds = collectCronHistoryOverflowTaskIds(tasks);
+  for (const task of tasks) {
     if (resolveDurableCronTaskRecovery(task, cronRecoveryContext)) {
       recovered += 1;
       continue;
@@ -981,7 +1037,7 @@ export function previewTaskRegistryMaintenance(): TaskRegistryMaintenanceSummary
       reconciled += 1;
       continue;
     }
-    if (shouldPruneTerminalTask(task, now)) {
+    if (shouldPruneTerminalTask(task, now, cronHistoryOverflowTaskIds)) {
       pruned += 1;
       continue;
     }
@@ -1090,6 +1146,7 @@ export async function runTaskRegistryMaintenance(): Promise<TaskRegistryMaintena
   let cleanupStamped = 0;
   let pruned = 0;
   const tasks = taskRegistryMaintenanceRuntime.listTaskRecords();
+  const cronHistoryOverflowTaskIds = collectCronHistoryOverflowTaskIds(tasks);
   const cronRecoveryContext = createCronRecoveryContext();
   const backingSessionContext = createBackingSessionLookupContext();
   const recoveryHookRegistered = hasDetachedTaskRecoveryHook();
@@ -1159,7 +1216,7 @@ export async function runTaskRegistryMaintenance(): Promise<TaskRegistryMaintena
     }
     await cleanupTerminalAcpSession(current);
     if (
-      shouldPruneTerminalTask(current, now) &&
+      shouldPruneTerminalTask(current, now, cronHistoryOverflowTaskIds) &&
       taskRegistryMaintenanceRuntime.deleteTaskRecordById(current.taskId)
     ) {
       pruned += 1;

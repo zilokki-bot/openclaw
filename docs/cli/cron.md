@@ -213,7 +213,7 @@ Cron does not classify final-output prose or approval-looking refusal phrases as
 Retention and pruning are controlled in config:
 
 - `cron.sessionRetention` (default `24h`, or `false` to disable) prunes completed isolated run sessions.
-- `cron.runLog.keepLines` (default `2000`) prunes retained SQLite run-history rows per job. `cron.runLog.maxBytes` (default `2000000`) remains accepted for compatibility with older file-backed run logs; SQLite pruning is row-count based.
+- Run history keeps terminal rows for 30 days and also caps each cron job to the newest 2000 terminal rows. Lost rows retain the standard 24-hour lost-task cleanup window.
 
 ## Migrating older jobs
 
