@@ -725,10 +725,11 @@ async function listGatewayHost(params: {
         ...(params.query.search ? { searchTerm: params.query.search } : {}),
       }),
     );
-    const adoptedSessions = await listAdoptedSessionEntries({
+    const adoptedSessions = await listAdoptedSessionEntriesForThreads({
       bindingStore: params.bindingStore,
       config: params.config,
       runtime: params.runtime,
+      threadIds: page.sessions.map((session) => session.threadId),
     });
     return {
       hostId: CODEX_LOCAL_SESSION_HOST_ID,
@@ -1125,6 +1126,10 @@ function isAdoptionSessionKeyForThread(sessionKey: string, threadId: string): bo
   return adoptionSessionKeyRest(sessionKey) === adoptionSessionKey(threadId);
 }
 
+function agentQualifiedAdoptionSessionKey(agentId: string, threadId: string): string {
+  return `agent:${agentId}:${adoptionSessionKey(threadId)}`;
+}
+
 type CodexSessionDisposition = "existing" | "forked";
 
 type CodexSupervisionMarker = { sourceThreadId: string };
@@ -1176,6 +1181,78 @@ async function listAdoptedSessionEntries(params: {
       throw new Error(`multiple OpenClaw sessions adopt Codex thread ${sourceThreadId}`);
     }
     adopted.set(sourceThreadId, { key: sessionKey, sessionId });
+  }
+  return adopted;
+}
+
+async function readAdoptedSessionEntry(params: {
+  bindingStore: CodexAppServerBindingStore;
+  config?: OpenClawConfig;
+  entry: ReturnType<PluginRuntime["agent"]["session"]["getSessionEntry"]>;
+  sessionKey: string;
+  sourceThreadId: string;
+}): Promise<AdoptedSessionEntry | undefined> {
+  const sessionKeyRest = adoptionSessionKeyRest(params.sessionKey);
+  if (
+    !params.entry ||
+    params.entry.initializationPending === true ||
+    params.entry.agentHarnessId !== "codex" ||
+    params.entry.modelSelectionLocked !== true ||
+    sessionKeyRest !== adoptionSessionKey(params.sourceThreadId)
+  ) {
+    return undefined;
+  }
+  const sessionId = params.entry.sessionId?.trim();
+  if (!sessionId) {
+    return undefined;
+  }
+  const binding = await params.bindingStore.read(
+    sessionBindingIdentity({ sessionId, sessionKey: params.sessionKey, config: params.config }),
+  );
+  if (
+    binding?.connectionScope !== "supervision" ||
+    binding.supervisionSourceThreadId?.trim() !== params.sourceThreadId
+  ) {
+    return undefined;
+  }
+  return { key: params.sessionKey, sessionId };
+}
+
+async function listAdoptedSessionEntriesForThreads(params: {
+  bindingStore: CodexAppServerBindingStore;
+  config?: OpenClawConfig;
+  runtime: PluginRuntime;
+  threadIds: readonly string[];
+}): Promise<Map<string, AdoptedSessionEntry>> {
+  const adopted = new Map<string, AdoptedSessionEntry>();
+  const threadIds = [
+    ...new Set(params.threadIds.map((threadId) => threadId.trim()).filter(Boolean)),
+  ];
+  if (threadIds.length === 0) {
+    return adopted;
+  }
+  for (const sourceThreadId of threadIds) {
+    for (const agentId of listSupervisionAgentIds(params.config ?? {})) {
+      const sessionKey = agentQualifiedAdoptionSessionKey(agentId, sourceThreadId);
+      const candidate = await readAdoptedSessionEntry({
+        bindingStore: params.bindingStore,
+        config: params.config,
+        entry: params.runtime.agent.session.getSessionEntry({
+          agentId,
+          readConsistency: "latest",
+          sessionKey,
+        }),
+        sessionKey,
+        sourceThreadId,
+      });
+      if (!candidate) {
+        continue;
+      }
+      if (adopted.has(sourceThreadId)) {
+        throw new Error(`multiple OpenClaw sessions adopt Codex thread ${sourceThreadId}`);
+      }
+      adopted.set(sourceThreadId, candidate);
+    }
   }
   return adopted;
 }
