@@ -230,11 +230,36 @@ describe("acp translator stable lifecycle handlers", () => {
     expect(second.nextCursor).toBeNull();
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {
       limit: 3,
-      includeDerivedTitles: true,
+      includeDerivedTitles: false,
     });
     expect(request).toHaveBeenNthCalledWith(2, "sessions.list", {
       limit: 5,
-      includeDerivedTitles: true,
+      includeDerivedTitles: false,
+    });
+
+    sessionStore.clearAllSessionsForTest();
+  });
+
+
+  it("keeps session/list lightweight by skipping derived-title hydration", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "sessions.list") {
+        return createGatewaySessions([
+          createSessionRow({ key: "agent:main:work", cwd: "/work/a", title: "Work session" }),
+        ]);
+      }
+      return { ok: true };
+    }) as GatewayClient["request"];
+    const sessionStore = createInMemorySessionStore();
+    const agent = new AcpGatewayAgent(createAcpConnection(), createAcpGateway(request), {
+      sessionStore,
+    });
+
+    await agent.listSessions(createListSessionsRequest({ cwd: "/work/a", limit: 1 }));
+
+    expect(request).toHaveBeenCalledWith("sessions.list", {
+      limit: 2,
+      includeDerivedTitles: false,
     });
 
     sessionStore.clearAllSessionsForTest();
