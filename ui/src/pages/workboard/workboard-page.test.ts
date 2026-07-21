@@ -110,7 +110,7 @@ describe("WorkboardPage lifecycle", () => {
 
     expect(invalidateLoads).toHaveBeenCalledWith(workboard);
     expect(loadWorkboardMock).toHaveBeenCalledWith(
-      expect.objectContaining({ host: workboard, client: firstClient }),
+      expect.objectContaining({ host: workboard, client: firstClient, force: true }),
     );
     vi.clearAllMocks();
 
@@ -123,7 +123,7 @@ describe("WorkboardPage lifecycle", () => {
 
     expect(invalidateLoads).toHaveBeenCalledWith(workboard);
     expect(loadWorkboardMock).toHaveBeenCalledWith(
-      expect.objectContaining({ host: workboard, client: secondClient }),
+      expect.objectContaining({ host: workboard, client: secondClient, force: true }),
     );
   });
 });

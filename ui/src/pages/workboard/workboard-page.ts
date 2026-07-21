@@ -117,7 +117,8 @@ class WorkboardPage extends OpenClawLightDomElement {
       this.lastGatewayClient = null;
       return;
     }
-    if (this.lastGatewayClient !== gateway.client) {
+    const gatewayClientChanged = this.lastGatewayClient !== gateway.client;
+    if (gatewayClientChanged) {
       invalidateWorkboardLoads(context.workboard);
       this.lastGatewayClient = gateway.client;
     }
@@ -132,6 +133,7 @@ class WorkboardPage extends OpenClawLightDomElement {
       host: context.workboard,
       client: gateway.client,
       requestUpdate: this.requestPageUpdate,
+      force: gatewayClientChanged,
       refreshDiagnostics: hasOperatorWriteAccess(gateway.hello?.auth ?? null),
     });
     if (!state.pollRefreshInProgress && !state.dispatching) {
