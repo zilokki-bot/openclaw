@@ -281,12 +281,20 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
     });
   });
 
-  it("uses the configured fleet cheap heartbeat lane instead of expensive primary", async () => {
+  it("uses default heartbeat model config instead of expensive primary", async () => {
     const { sessionKey } = mockAutoFallbackSession({ modelSelectionLocked: true });
     mockFallbackDirectiveResult({ sessionKey, resolvedThinkLevel: "off" });
+    const cfg = makeReasoningModelConfig();
+    cfg.agents = {
+      ...cfg.agents,
+      defaults: {
+        ...cfg.agents?.defaults,
+        heartbeat: { model: "deepseek/deepseek-v4-flash" },
+      },
+    };
 
     await expect(
-      getReplyFromConfig(buildGetReplyCtx(), { isHeartbeat: true }, makeReasoningModelConfig()),
+      getReplyFromConfig(buildGetReplyCtx(), { isHeartbeat: true }, cfg),
     ).resolves.toEqual({ text: "ok" });
 
     expect(mocks.resolveReplyDirectives).toHaveBeenCalledOnce();

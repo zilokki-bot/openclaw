@@ -185,7 +185,6 @@ const loadHeartbeatRunnerRuntime = createLazyRuntimeModule(
 
 const HEARTBEAT_ALWAYS_BUSY_LANES = [CommandLane.Cron, CommandLane.CronNested] as const;
 const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 10 * 60;
-const FLEET_CHEAP_HEARTBEAT_MODEL = "deepseek/deepseek-v4-flash";
 
 function hasQueuedWorkInLanes(
   lanes: readonly string[],
@@ -457,14 +456,6 @@ function resolveHeartbeatResponseToolPrompt(cfg: OpenClawConfig, heartbeat?: Hea
   return resolveHeartbeatPromptForResponseTool(resolveHeartbeatPromptRaw(cfg, heartbeat));
 }
 
-function hasConfiguredFleetCheapHeartbeatModel(cfg: OpenClawConfig): boolean {
-  return Boolean(
-    cfg.models?.providers?.deepseek?.models?.some(
-      (entry) => normalizeOptionalString(entry?.id) === "deepseek-v4-flash",
-    ),
-  );
-}
-
 function resolveHeartbeatModelOverrideRaw(
   cfg: OpenClawConfig,
   heartbeat?: HeartbeatConfig,
@@ -472,7 +463,7 @@ function resolveHeartbeatModelOverrideRaw(
   return (
     normalizeOptionalString(heartbeat?.model) ??
     normalizeOptionalString(cfg.agents?.defaults?.heartbeat?.model) ??
-    (hasConfiguredFleetCheapHeartbeatModel(cfg) ? FLEET_CHEAP_HEARTBEAT_MODEL : undefined)
+    undefined
   );
 }
 

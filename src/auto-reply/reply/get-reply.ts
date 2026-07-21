@@ -81,18 +81,7 @@ type RuntimeInternalGetReplyOptions = BaseInternalGetReplyOptions & {
   extractedFileImages?: ExtractedFileImage[];
 };
 
-const FLEET_CHEAP_HEARTBEAT_MODEL = "deepseek/deepseek-v4-flash";
-
-function hasConfiguredFleetCheapHeartbeatModel(cfg: OpenClawConfig): boolean {
-  return Boolean(
-    cfg.models?.providers?.deepseek?.models?.some(
-      (entry) => normalizeOptionalString(entry?.id) === "deepseek-v4-flash",
-    ),
-  );
-}
-
 function resolveHeartbeatModelOverrideRaw(params: {
-  cfg: OpenClawConfig;
   agentHeartbeatModel?: unknown;
   defaultHeartbeatModel?: unknown;
   optionHeartbeatModel?: unknown;
@@ -101,7 +90,7 @@ function resolveHeartbeatModelOverrideRaw(params: {
     normalizeOptionalString(params.optionHeartbeatModel) ??
     normalizeOptionalString(params.agentHeartbeatModel) ??
     normalizeOptionalString(params.defaultHeartbeatModel) ??
-    (hasConfiguredFleetCheapHeartbeatModel(params.cfg) ? FLEET_CHEAP_HEARTBEAT_MODEL : "")
+    ""
   );
 }
 
@@ -376,9 +365,8 @@ export async function getReplyFromConfig(
   let hasResolvedHeartbeatModelOverride = false;
   if (opts?.isHeartbeat) {
     // Prefer the resolved per-agent heartbeat model passed from the heartbeat runner,
-    // then the per-agent/default heartbeat config, then the configured fleet cheap lane.
+    // then the per-agent/default heartbeat config.
     const heartbeatRaw = resolveHeartbeatModelOverrideRaw({
-      cfg,
       optionHeartbeatModel: opts.heartbeatModelOverride,
       agentHeartbeatModel: agentEntry?.heartbeat?.model,
       defaultHeartbeatModel: agentCfg?.heartbeat?.model,
