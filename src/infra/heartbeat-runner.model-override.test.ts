@@ -1,6 +1,6 @@
 // Covers heartbeat model override routing.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../config/config.js";
+import type { ModelDefinitionConfig, OpenClawConfig } from "../config/config.js";
 import { resolveAgentMainSessionKey, resolveMainSessionKey } from "../config/sessions.js";
 import { runHeartbeatOnce } from "./heartbeat-runner.js";
 import {
@@ -21,6 +21,18 @@ type SeedSessionInput = {
 };
 type AgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]>;
 type HeartbeatConfig = NonNullable<AgentDefaultsConfig["heartbeat"]>;
+
+function makeTestModel(id: string, name: string, reasoning: boolean): ModelDefinitionConfig {
+  return {
+    id,
+    name,
+    reasoning,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 8192,
+  };
+}
 
 function expectReplyOptions(options: unknown, expected: Record<string, unknown>) {
   if (!options || typeof options !== "object") {
@@ -104,6 +116,7 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
     timeoutSeconds?: number;
     lightContext?: boolean;
     isolatedSession?: boolean;
+    includeFleetCheapModel?: boolean;
   }) {
     return withHeartbeatFixture(async ({ tmpDir, storePath, replySpy, seedSession }) => {
       const cfg: OpenClawConfig = {
@@ -123,6 +136,18 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
           },
         },
         channels: { whatsapp: { allowFrom: ["*"] } },
+        ...(params.includeFleetCheapModel
+          ? {
+              models: {
+                providers: {
+                  deepseek: {
+                    baseUrl: "https://api.deepseek.test/v1",
+                    models: [makeTestModel("deepseek-v4-flash", "DeepSeek V4 Flash", false)],
+                  },
+                },
+              },
+            }
+          : {}),
         session: { store: storePath },
       };
       const sessionKey = resolveMainSessionKey(cfg);
@@ -331,7 +356,18 @@ describe("runHeartbeatOnce – heartbeat model override", () => {
     });
   });
 
-  it("does not pass heartbeatModelOverride when no heartbeat model is configured", async () => {
+  it("passes configured fleet cheap heartbeat model when no heartbeat model is configured", async () => {
+    const replyOpts = await runDefaultsHeartbeat({
+      model: undefined,
+      includeFleetCheapModel: true,
+    });
+    expectReplyOptions(replyOpts, {
+      isHeartbeat: true,
+      heartbeatModelOverride: "deepseek/deepseek-v4-flash",
+    });
+  });
+
+  it("does not pass heartbeatModelOverride when no heartbeat model or cheap provider is configured", async () => {
     const replyOpts = await runDefaultsHeartbeat({ model: undefined });
     const actual = expectReplyOptions(replyOpts, { isHeartbeat: true });
     expect(actual.heartbeatModelOverride).toBeUndefined();

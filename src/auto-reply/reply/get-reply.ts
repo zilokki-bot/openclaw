@@ -81,6 +81,61 @@ type RuntimeInternalGetReplyOptions = BaseInternalGetReplyOptions & {
   extractedFileImages?: ExtractedFileImage[];
 };
 
+const FLEET_CHEAP_HEARTBEAT_MODEL = "deepseek/deepseek-v4-flash";
+
+function hasConfiguredFleetCheapHeartbeatModel(cfg: OpenClawConfig): boolean {
+  return Boolean(
+    cfg.models?.providers?.deepseek?.models?.some(
+      (entry) => normalizeOptionalString(entry?.id) === "deepseek-v4-flash",
+    ),
+  );
+}
+
+function resolveHeartbeatModelOverrideRaw(params: {
+  cfg: OpenClawConfig;
+  agentHeartbeatModel?: unknown;
+  defaultHeartbeatModel?: unknown;
+  optionHeartbeatModel?: unknown;
+}): string {
+  return (
+    normalizeOptionalString(params.optionHeartbeatModel) ??
+    normalizeOptionalString(params.agentHeartbeatModel) ??
+    normalizeOptionalString(params.defaultHeartbeatModel) ??
+    (hasConfiguredFleetCheapHeartbeatModel(params.cfg) ? FLEET_CHEAP_HEARTBEAT_MODEL : "")
+  );
+}
+
+function resolveConfiguredHeartbeatModelRef(params: {
+  cfg: OpenClawConfig;
+  raw: string;
+  defaultProvider: string;
+  aliasIndex: ReturnType<typeof resolveDefaultModel>["aliasIndex"];
+}) {
+  const resolved = resolveModelRefFromString({
+    cfg: params.cfg,
+    raw: params.raw,
+    defaultProvider: params.defaultProvider,
+    aliasIndex: params.aliasIndex,
+  });
+  if (resolved) {
+    return resolved.ref;
+  }
+  const slash = params.raw.indexOf("/");
+  if (slash <= 0) {
+    return null;
+  }
+  const provider = params.raw.slice(0, slash).trim();
+  const model = params.raw.slice(slash + 1).trim();
+  if (!provider || !model) {
+    return null;
+  }
+  const providerConfig = params.cfg.models?.providers?.[provider];
+  const hasConfiguredModel = providerConfig?.models?.some(
+    (entry) => normalizeOptionalString(entry?.id) === model,
+  );
+  return hasConfiguredModel ? { provider, model } : null;
+}
+
 function classifyHeartbeatPendingFinalDelivery(text: string, ackMaxChars: number) {
   const stripped = stripHeartbeatToken(text, {
     mode: "heartbeat",
@@ -321,21 +376,24 @@ export async function getReplyFromConfig(
   let hasResolvedHeartbeatModelOverride = false;
   if (opts?.isHeartbeat) {
     // Prefer the resolved per-agent heartbeat model passed from the heartbeat runner,
-    // fall back to the global defaults heartbeat model for backward compatibility.
-    const heartbeatRaw =
-      normalizeOptionalString(opts.heartbeatModelOverride) ??
-      normalizeOptionalString(agentCfg?.heartbeat?.model) ??
-      "";
+    // then the per-agent/default heartbeat config, then the configured fleet cheap lane.
+    const heartbeatRaw = resolveHeartbeatModelOverrideRaw({
+      cfg,
+      optionHeartbeatModel: opts.heartbeatModelOverride,
+      agentHeartbeatModel: agentEntry?.heartbeat?.model,
+      defaultHeartbeatModel: agentCfg?.heartbeat?.model,
+    });
     const heartbeatRef = heartbeatRaw
-      ? resolveModelRefFromString({
+      ? resolveConfiguredHeartbeatModelRef({
+          cfg,
           raw: heartbeatRaw,
           defaultProvider,
           aliasIndex,
         })
       : null;
     if (heartbeatRef) {
-      provider = heartbeatRef.ref.provider;
-      model = heartbeatRef.ref.model;
+      provider = heartbeatRef.provider;
+      model = heartbeatRef.model;
       hasResolvedHeartbeatModelOverride = true;
     }
   }
@@ -519,13 +577,10 @@ export async function getReplyFromConfig(
     bodyStripped,
   } = sessionState;
   const sessionModelSelectionLocked = isModelSelectionLocked(sessionEntry);
-  if (sessionModelSelectionLocked && hasResolvedHeartbeatModelOverride) {
-    // Heartbeat routing is turn-local. A native harness lock owns the durable
-    // model selection, so heartbeat.model must not retarget its AppServer turn.
-    provider = defaultProvider;
-    model = defaultModel;
-    hasResolvedHeartbeatModelOverride = false;
-  }
+  // Heartbeat model overrides are turn-local and cost-control critical. Keep
+  // them active even when the durable session model selection is locked; the
+  // lock protects persisted/user-facing model selection, not the configured
+  // heartbeat lane.
   // Utility-model narration is turn-local decoration. Initialize the durable
   // session first, then keep it completely outside model-locked native runs.
   const resolvedOpts = attachProgressNarratorToReplyOptions({
