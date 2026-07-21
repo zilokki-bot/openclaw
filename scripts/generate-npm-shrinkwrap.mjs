@@ -1392,7 +1392,10 @@ function updateOrCheckPackage(packageDir, check, changedPaths = []) {
   }
   if (current !== generated) {
     throw new Error(
-      `${label}: npm-shrinkwrap.json is stale. Run \`pnpm deps:shrinkwrap:generate\`.`,
+      [
+        label + ": npm-shrinkwrap.json is stale. Run pnpm deps:shrinkwrap:generate.",
+        summarizeShrinkwrapMismatch(current, generated),
+      ].join(" "),
     );
   }
   return `${label}: npm-shrinkwrap.json is current.`;
