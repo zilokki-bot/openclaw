@@ -426,7 +426,9 @@ class AppSidebar extends OpenClawLightDomContentsElement {
     void this.refreshSessionCatalogs();
   }
 
-  private canRefreshSessionCatalogs(snapshot: ApplicationContext<RouteId>["gateway"]["snapshot"]) {
+  private canRefreshSessionCatalogs(
+    snapshot: ApplicationContext<RouteId>["gateway"]["snapshot"] | undefined,
+  ) {
     return (
       snapshot?.connected &&
       snapshot.client &&

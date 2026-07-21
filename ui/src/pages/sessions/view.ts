@@ -54,7 +54,9 @@ function formatSessionKeySegment(value: string): string {
   return trimmed
     .split(/[-_]+/g)
     .filter(Boolean)
-    .map((part) => (part.length <= 3 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1)))
+    .map((part) =>
+      part.length <= 3 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1),
+    )
     .join(" ");
 }
 
