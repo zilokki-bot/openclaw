@@ -1208,11 +1208,19 @@ function packageDependencyInputsChanged(packageDir, changedPaths) {
 }
 
 function listCheckChangedPaths() {
-  try {
-    return listChangedPathsFromGit({ base: "origin/main", head: "HEAD" });
-  } catch {
-    return [];
+  const baseCandidates = [
+    process.env.PR_BASE_SHA,
+    "refs/remotes/origin/pr-base",
+    "origin/main",
+  ].filter(Boolean);
+  for (const base of baseCandidates) {
+    try {
+      return listChangedPathsFromGit({ base, head: "HEAD" });
+    } catch {
+      // Try the next PR/checkout base.
+    }
   }
+  return process.env.PR_BASE_SHA ? ["pnpm-workspace.yaml"] : [];
 }
 
 /** @internal Directly tested script implementation detail. */
