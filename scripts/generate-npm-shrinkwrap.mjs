@@ -1354,6 +1354,22 @@ export function resolvePackageDirs(args) {
   };
 }
 
+function summarizeShrinkwrapMismatch(current, generated) {
+  const currentLines = current.split(/\r?\n/u);
+  const generatedLines = generated.split(/\r?\n/u);
+  const maxLines = Math.max(currentLines.length, generatedLines.length);
+  for (let index = 0; index < maxLines; index += 1) {
+    if (currentLines[index] !== generatedLines[index]) {
+      return [
+        `first differing line: ${index + 1}`,
+        `current: ${JSON.stringify(currentLines[index] ?? "<missing>")}`,
+        `generated: ${JSON.stringify(generatedLines[index] ?? "<missing>")}`,
+      ].join("; ");
+    }
+  }
+  return "content differs without line-level delta";
+}
+
 function updateOrCheckPackage(packageDir, check, changedPaths = []) {
   const generated = generateShrinkwrap(packageDir, {
     useCurrentShrinkwrapOverrides:
