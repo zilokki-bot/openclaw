@@ -361,6 +361,10 @@ describe("WorkboardStore", () => {
       toStatus: "running",
     });
 
+    await expect(store.move(card.id, "done", 1000)).rejects.toThrow(
+      /workboard_complete with proof/,
+    );
+
     const done = await store.update(card.id, { status: "done" });
     expect(done.completedAt).toBeGreaterThanOrEqual(done.startedAt ?? 0);
 
@@ -1299,7 +1303,9 @@ describe("WorkboardStore", () => {
     await expect(store.claim(child.id, { ownerId: "main" })).rejects.toThrow(/dependencies/);
     await expect(store.move(child.id, "ready", child.position)).rejects.toThrow(/dependencies/);
     await expect(store.move(child.id, "running", child.position)).rejects.toThrow(/dependencies/);
-    await expect(store.move(child.id, "done", child.position)).rejects.toThrow(/dependencies/);
+    await expect(store.move(child.id, "done", child.position)).rejects.toThrow(
+      /workboard_complete with proof/,
+    );
     await expect(store.update(child.id, { status: "ready" })).rejects.toThrow(/dependencies/);
     await expect(store.update(child.id, { status: "done" })).rejects.toThrow(/dependencies/);
     await expect(store.complete(child.id, { summary: "Too early." })).rejects.toThrow(
