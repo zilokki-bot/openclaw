@@ -1207,22 +1207,46 @@ function packageDependencyInputsChanged(packageDir, changedPaths) {
   });
 }
 
-function listCheckChangedPaths() {
-  if (process.env.PR_BASE_SHA) {
+/** @internal Directly tested script implementation detail. */
+export function listCheckChangedPathsForShrinkwrap({
+  execFile = execFileSync,
+  gitChangedPaths = listChangedPathsFromGit,
+  prBaseSha = process.env.PR_BASE_SHA,
+} = {}) {
+  if (prBaseSha) {
     try {
-      return listChangedPathsFromGit({ base: process.env.PR_BASE_SHA, head: "HEAD" });
+      return gitChangedPaths({ base: prBaseSha, head: "HEAD" });
     } catch {
-      return ["pnpm-workspace.yaml"];
+      try {
+        execFile(
+          "git",
+          [
+            "fetch",
+            "--no-tags",
+            "--depth=1",
+            "origin",
+            `+${prBaseSha}:refs/remotes/origin/pr-base`,
+          ],
+          { cwd: ROOT_DIR, stdio: "ignore" },
+        );
+        return gitChangedPaths({ base: "refs/remotes/origin/pr-base", head: "HEAD" });
+      } catch {
+        return ["pnpm-workspace.yaml"];
+      }
     }
   }
   for (const base of ["refs/remotes/origin/pr-base", "origin/main"]) {
     try {
-      return listChangedPathsFromGit({ base, head: "HEAD" });
+      return gitChangedPaths({ base, head: "HEAD" });
     } catch {
       // Try the next checkout base.
     }
   }
   return [];
+}
+
+function listCheckChangedPaths() {
+  return listCheckChangedPathsForShrinkwrap();
 }
 
 /** @internal Directly tested script implementation detail. */
