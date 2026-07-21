@@ -522,14 +522,14 @@ describe("generate-npm-shrinkwrap", () => {
 
     const changedPaths = listCheckChangedPathsForShrinkwrap({
       prBaseSha: "abc123",
-      gitChangedPaths: ({ base, head }) => {
+      gitChangedPaths: ({ base, head }: { base: string; head: string }) => {
         calls.push({ base, head });
         if (base === "abc123") {
           throw new Error("missing shallow base");
         }
         return ["extensions/acpx/package.json"];
       },
-      execFile: (command, args) => {
+      execFile: (command: string, args: string[]) => {
         fetches.push({ command, args: args.map(String) });
         return Buffer.from("");
       },

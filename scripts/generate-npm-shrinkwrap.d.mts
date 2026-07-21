@@ -42,6 +42,11 @@ export function createNpmShrinkwrapExecOptions(
   timeout: number;
   windowsVerbatimArguments: unknown;
 };
+export function listCheckChangedPathsForShrinkwrap(options?: {
+  execFile?: (command: string, args: string[]) => unknown;
+  gitChangedPaths?: (options: { base: string; head: string }) => string[];
+  prBaseSha?: string;
+}): string[];
 export function resolvePackageDirs(args: string[]): {
   check: unknown;
   changedPaths: string[];
