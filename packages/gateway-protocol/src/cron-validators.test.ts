@@ -247,7 +247,7 @@ describe("cron protocol validators", () => {
     ).toBe(false);
   });
 
-  it("accepts nullable model clears only on update payload patches", () => {
+  it("accepts nullable payload clears only on update payload patches", () => {
     expect(
       validateCronUpdateParams({
         id: "job-1",
@@ -255,6 +255,7 @@ describe("cron protocol validators", () => {
           payload: {
             kind: "agentTurn",
             model: null,
+            timeoutSeconds: null,
           },
         },
       }),
@@ -266,9 +267,21 @@ describe("cron protocol validators", () => {
           kind: "agentTurn",
           message: "tick",
           model: null,
+          timeoutSeconds: null,
         },
       }),
     ).toBe(false);
+    expect(
+      validateCronUpdateParams({
+        id: "job-1",
+        patch: {
+          payload: {
+            kind: "command",
+            timeoutSeconds: null,
+          },
+        },
+      }),
+    ).toBe(true);
   });
 
   it("accepts get params for id and jobId selectors", () => {

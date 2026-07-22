@@ -649,8 +649,17 @@
                       "type": "string"
                     },
                     "timeoutSeconds": {
-                      "minimum": 0,
-                      "type": "number"
+                      "anyOf": [
+                        {
+                          "description": "Payload timeout seconds",
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "description": "Clear stored payload timeout",
+                          "type": "null"
+                        }
+                      ]
                     },
                     "toolsAllow": {
                       "description": "Allowed tools",
@@ -995,8 +1004,17 @@
                       "type": "string"
                     },
                     "timeoutSeconds": {
-                      "minimum": 0,
-                      "type": "number"
+                      "anyOf": [
+                        {
+                          "description": "Payload timeout seconds",
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "description": "Clear stored payload timeout",
+                          "type": "null"
+                        }
+                      ]
                     },
                     "toolsAllow": {
                       "anyOf": [

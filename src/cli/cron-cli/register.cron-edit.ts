@@ -149,6 +149,7 @@ export function registerCronEditCommand(cron: Command) {
         false,
       )
       .option("--timeout-seconds <n>", "Timeout seconds for agent or command jobs")
+      .option("--clear-timeout-seconds", "Remove the per-job payload timeout override", false)
       .option("--no-output-timeout-seconds <n>", "No-output timeout seconds for command jobs")
       .option("--output-max-bytes <n>", "Maximum captured stdout/stderr bytes for command jobs")
       .option("--light-context", "Enable lightweight bootstrap context for agent jobs")
@@ -360,6 +361,9 @@ export function registerCronEditCommand(cron: Command) {
           const toolsAllow = parseCronToolsAllow(opts.tools);
           const rawTimeoutSeconds =
             opts.timeoutSeconds === undefined ? undefined : String(opts.timeoutSeconds).trim();
+          if (rawTimeoutSeconds !== undefined && opts.clearTimeoutSeconds) {
+            throw new Error("Use --timeout-seconds or --clear-timeout-seconds, not both");
+          }
           if (rawTimeoutSeconds !== undefined && !/^\d+$/u.test(rawTimeoutSeconds)) {
             throw new Error("Invalid --timeout-seconds (must be a positive integer).");
           }
@@ -369,6 +373,7 @@ export function registerCronEditCommand(cron: Command) {
             typeof timeoutSeconds === "number" &&
             Number.isSafeInteger(timeoutSeconds) &&
             timeoutSeconds > 0;
+          const hasClearTimeoutSeconds = Boolean(opts.clearTimeoutSeconds);
           if (rawTimeoutSeconds !== undefined && !hasTimeoutSeconds) {
             throw new Error("Invalid --timeout-seconds (must be a positive integer).");
           }
@@ -424,7 +429,7 @@ export function registerCronEditCommand(cron: Command) {
             outputMaxBytes !== undefined;
           let timeoutOnlyPayloadKind: "agentTurn" | "command" | undefined;
           if (
-            hasTimeoutSeconds &&
+            (hasTimeoutSeconds || hasClearTimeoutSeconds) &&
             !hasCommandSpecificPayloadField &&
             typeof opts.message !== "string" &&
             !model &&
@@ -448,7 +453,7 @@ export function registerCronEditCommand(cron: Command) {
             Boolean(opts.clearFallbacks) ||
             Boolean(thinking) ||
             Boolean(opts.clearThinking) ||
-            (hasTimeoutSeconds &&
+            ((hasTimeoutSeconds || hasClearTimeoutSeconds) &&
               !hasCommandSpecificPayloadField &&
               timeoutOnlyPayloadKind !== "command") ||
             typeof opts.lightContext === "boolean" ||
@@ -457,7 +462,7 @@ export function registerCronEditCommand(cron: Command) {
             opts.clearTools;
           const hasCommandPayloadField =
             hasCommandSpecificPayloadField ||
-            (hasTimeoutSeconds &&
+            ((hasTimeoutSeconds || hasClearTimeoutSeconds) &&
               (hasCommandSpecificPayloadField || timeoutOnlyPayloadKind === "command"));
           const hasAgentTurnPatch = hasAgentTurnPayloadField;
           const hasCommandPatch = hasCommandPayloadField;
@@ -486,7 +491,11 @@ export function registerCronEditCommand(cron: Command) {
             } else {
               assignIf(payload, "thinking", thinking, Boolean(thinking));
             }
-            assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+            if (hasClearTimeoutSeconds) {
+              payload.timeoutSeconds = null;
+            } else {
+              assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+            }
             assignIf(
               payload,
               "lightContext",
@@ -516,7 +525,11 @@ export function registerCronEditCommand(cron: Command) {
               opts.commandEnv !== undefined,
             );
             assignIf(payload, "input", opts.commandInput, typeof opts.commandInput === "string");
-            assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+            if (hasClearTimeoutSeconds) {
+              payload.timeoutSeconds = null;
+            } else {
+              assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+            }
             assignIf(
               payload,
               "noOutputTimeoutSeconds",

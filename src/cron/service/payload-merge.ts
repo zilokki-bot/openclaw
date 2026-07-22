@@ -91,6 +91,8 @@ export function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch)
     }
     if (typeof patch.timeoutSeconds === "number") {
       next.timeoutSeconds = patch.timeoutSeconds;
+    } else if (patch.timeoutSeconds === null) {
+      delete next.timeoutSeconds;
     }
     if (typeof patch.noOutputTimeoutSeconds === "number") {
       next.noOutputTimeoutSeconds = patch.noOutputTimeoutSeconds;
@@ -128,6 +130,8 @@ export function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch)
   }
   if (typeof patch.timeoutSeconds === "number") {
     next.timeoutSeconds = patch.timeoutSeconds;
+  } else if (patch.timeoutSeconds === null) {
+    delete next.timeoutSeconds;
   }
   if (typeof patch.lightContext === "boolean") {
     next.lightContext = patch.lightContext;
