@@ -512,6 +512,12 @@ function normalizeStatus(value: unknown, fallback: WorkboardStatus): WorkboardSt
   throw new Error(`status must be one of: ${WORKBOARD_STATUSES.join(", ")}.`);
 }
 
+function assertNonTerminalMoveStatus(status: WorkboardStatus): void {
+  if (status === "done") {
+    throw new Error("workboard move cannot mark cards done; use workboard_complete with proof.");
+  }
+}
+
 function normalizePriority(value: unknown, fallback: WorkboardPriority): WorkboardPriority {
   if (typeof value !== "string" || !value.trim()) {
     return fallback;
@@ -2850,6 +2856,7 @@ export class WorkboardStore {
   }
 
   async move(id: string, status: unknown, position: unknown): Promise<WorkboardCard> {
+    assertNonTerminalMoveStatus(normalizeStatus(status, "todo"));
     return await this.update(id, {
       status,
       position,

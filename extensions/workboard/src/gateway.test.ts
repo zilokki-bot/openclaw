@@ -184,6 +184,44 @@ describe("workboard gateway methods", () => {
     });
   });
 
+  it("blocks terminal status through the card move gateway method", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const methods = new Map<string, RegisteredMethod>();
+    const api = {
+      runtime: {
+        state: {
+          openKeyedStore: vi.fn(() => createMemoryStore()),
+        },
+      },
+      registerGatewayMethod: vi.fn(
+        (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
+          methods.set(method, { handler, opts });
+        },
+      ),
+    } as unknown as OpenClawPluginApi;
+
+    registerWorkboardGatewayMethods({ api, store: new WorkboardStore(createMemoryStore()) });
+
+    const createRespond = vi.fn();
+    await methods.get("workboard.cards.create")?.handler({
+      params: { title: "Needs proof" },
+      respond: createRespond,
+    } as never);
+    const cardId = createRespond.mock.calls[0]?.[1]?.card.id;
+
+    const moveRespond = vi.fn();
+    await methods.get("workboard.cards.move")?.handler({
+      params: { id: cardId, status: "done" },
+      respond: moveRespond,
+    } as never);
+
+    expect(moveRespond.mock.calls[0]?.[0]).toBe(false);
+    expect(moveRespond.mock.calls[0]?.[2]?.message).toContain("workboard_complete with proof");
+  });
+
   it("validates labels from comma-separated gateway input", async () => {
     type RegisteredMethod = {
       handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
