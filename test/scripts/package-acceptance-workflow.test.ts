@@ -1975,8 +1975,12 @@ describe("package artifact reuse", () => {
     );
     expect(runTestboxStep.uses).toContain("useblacksmith/run-testbox@");
     expect(runTestboxStep.if).toBe("github.event_name == 'workflow_dispatch' && always()");
-    expect(runArmTestboxStep.if).toBe("always()");
-    expect(runBuildArtifactsTestboxStep.if).toBe("always()");
+    expect(runArmTestboxStep.if).toBe(
+      "${{ always() && github.event_name == 'workflow_dispatch' }}",
+    );
+    expect(runBuildArtifactsTestboxStep.if).toBe(
+      "${{ always() && github.event_name == 'workflow_dispatch' }}",
+    );
     expect(runWindowsTestboxStep.if).toBe("always()");
     expect(runTestboxStep["continue-on-error"]).toBeUndefined();
   });

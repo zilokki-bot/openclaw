@@ -7,6 +7,7 @@ import { isWorkboardEnabledInConfigSnapshot } from "../../lib/plugin-activation.
 import { searchForSession } from "../../lib/sessions/index.ts";
 import {
   configureWorkboardPolling,
+  invalidateWorkboardLoads,
   loadWorkboard,
   stopWorkboardLifecycleRefresh,
   stopWorkboardPolling,
@@ -19,6 +20,7 @@ import { renderWorkboard } from "./view.ts";
 class WorkboardPage extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
   private context?: ApplicationContext;
+  private lastGatewayClient: ApplicationContext["gateway"]["snapshot"]["client"] | null = null;
 
   private readonly requestPageUpdate = () => this.context?.workboard.notify();
   private readonly subscriptions = new SubscriptionsController(this)
@@ -112,7 +114,13 @@ class WorkboardPage extends OpenClawLightDomElement {
         stopWorkboardPolling(context.workboard);
         stopWorkboardLifecycleRefresh(context.workboard);
       }
+      this.lastGatewayClient = null;
       return;
+    }
+    const gatewayClientChanged = this.lastGatewayClient !== gateway.client;
+    if (gatewayClientChanged) {
+      invalidateWorkboardLoads(context.workboard);
+      this.lastGatewayClient = gateway.client;
     }
     const state = context.workboard.state;
     configureWorkboardPolling({
@@ -125,6 +133,7 @@ class WorkboardPage extends OpenClawLightDomElement {
       host: context.workboard,
       client: gateway.client,
       requestUpdate: this.requestPageUpdate,
+      force: gatewayClientChanged,
       refreshDiagnostics: hasOperatorWriteAccess(gateway.hello?.auth ?? null),
     });
     if (!state.pollRefreshInProgress && !state.dispatching) {

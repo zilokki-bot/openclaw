@@ -70,6 +70,7 @@ export {
 export { startWorkboardCard, stopWorkboardCard } from "./execution.ts";
 export {
   getWorkboardState,
+  invalidateWorkboardLoads,
   stopWorkboardLifecycleRefresh,
   workboardHasActiveWrites,
   workboardMutationsReady,

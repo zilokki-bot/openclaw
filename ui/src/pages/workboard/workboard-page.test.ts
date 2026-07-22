@@ -3,15 +3,20 @@ import type { ApplicationContext, ApplicationGatewaySnapshot } from "../../app/c
 import { createWorkboardCapability } from "../../lib/workboard/capability.ts";
 import type { WorkboardCapability } from "../../lib/workboard/capability.ts";
 
-const { stopPolling, stopLifecycleRefresh } = vi.hoisted(() => ({
-  stopPolling: vi.fn(),
-  stopLifecycleRefresh: vi.fn(),
-}));
+const { invalidateLoads, loadWorkboardMock, stopPolling, stopLifecycleRefresh } = vi.hoisted(
+  () => ({
+    invalidateLoads: vi.fn(),
+    loadWorkboardMock: vi.fn(async () => true),
+    stopPolling: vi.fn(),
+    stopLifecycleRefresh: vi.fn(),
+  }),
+);
 
 vi.mock("../../lib/workboard/index.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/workboard/index.ts")>()),
   configureWorkboardPolling: vi.fn(),
-  loadWorkboard: vi.fn(async () => true),
+  invalidateWorkboardLoads: invalidateLoads,
+  loadWorkboard: loadWorkboardMock,
   stopWorkboardLifecycleRefresh: stopLifecycleRefresh,
   stopWorkboardPolling: stopPolling,
   syncWorkboardLifecycle: vi.fn(async () => undefined),
@@ -24,7 +29,10 @@ type WorkboardPageTestElement = HTMLElement & {
   updateComplete: Promise<boolean>;
 };
 
-function contextWithWorkboard(workboard: WorkboardCapability): ApplicationContext {
+function contextWithWorkboard(
+  workboard: WorkboardCapability,
+  gatewayOverride: Partial<ApplicationGatewaySnapshot> = {},
+): ApplicationContext {
   const snapshot: ApplicationGatewaySnapshot = {
     client: null,
     connected: false,
@@ -34,6 +42,7 @@ function contextWithWorkboard(workboard: WorkboardCapability): ApplicationContex
     sessionKey: "main",
     lastError: null,
     lastErrorCode: null,
+    ...gatewayOverride,
   };
   const subscribe = () => () => undefined;
   return {
@@ -42,6 +51,7 @@ function contextWithWorkboard(workboard: WorkboardCapability): ApplicationContex
     agents: {
       state: { agentsList: null, agentsLoading: false },
       subscribe,
+      ensureList: vi.fn(async () => undefined),
     } as unknown as ApplicationContext["agents"],
     runtimeConfig: {
       state: {
@@ -55,6 +65,7 @@ function contextWithWorkboard(workboard: WorkboardCapability): ApplicationContex
     sessions: {
       state: { result: null, loading: false },
       subscribe,
+      refresh: vi.fn(async () => undefined),
     } as unknown as ApplicationContext["sessions"],
     workboard,
     navigate: vi.fn(),
@@ -83,5 +94,36 @@ describe("WorkboardPage lifecycle", () => {
 
     expect(stopPolling).toHaveBeenCalledWith(first);
     expect(stopLifecycleRefresh).toHaveBeenCalledWith(first);
+  });
+
+  it("reloads cards when the gateway client changes", async () => {
+    const workboard = createWorkboardCapability();
+    const firstClient = { request: vi.fn() } as never;
+    const secondClient = { request: vi.fn() } as never;
+    const page = document.createElement("openclaw-workboard-page") as WorkboardPageTestElement;
+    page.context = contextWithWorkboard(workboard, {
+      client: firstClient,
+      connected: true,
+    });
+    document.body.append(page);
+    await page.updateComplete;
+
+    expect(invalidateLoads).toHaveBeenCalledWith(workboard);
+    expect(loadWorkboardMock).toHaveBeenCalledWith(
+      expect.objectContaining({ host: workboard, client: firstClient, force: true }),
+    );
+    vi.clearAllMocks();
+
+    page.context = contextWithWorkboard(workboard, {
+      client: secondClient,
+      connected: true,
+    });
+    (page as unknown as { requestUpdate: () => void }).requestUpdate();
+    await page.updateComplete;
+
+    expect(invalidateLoads).toHaveBeenCalledWith(workboard);
+    expect(loadWorkboardMock).toHaveBeenCalledWith(
+      expect.objectContaining({ host: workboard, client: secondClient, force: true }),
+    );
   });
 });

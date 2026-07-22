@@ -28,10 +28,11 @@ jobs:
     permissions:
       contents: read
     name: "check-arm"
-    runs-on: blacksmith-16vcpu-ubuntu-2404-arm
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04-arm' || 'blacksmith-16vcpu-ubuntu-2404-arm' }}
     timeout-minutes: 120
     steps:
       - name: Begin Testbox
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: useblacksmith/begin-testbox@d0e04585c26905fdd92c94a09c159544c7ee1b67
         with:
           testbox_id: ${{ inputs.testbox_id }}
@@ -106,6 +107,7 @@ jobs:
         with:
           install-bun: "false"
       - name: Prepare Testbox shell
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -136,6 +138,7 @@ jobs:
           sudo chmod 0755 /usr/local/bin/pnpm
 
       - name: Hydrate Testbox provider env helper
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -188,6 +191,6 @@ jobs:
 
       - name: Run Testbox
         uses: useblacksmith/run-testbox@5ca05834db1d3813554d1dd109e5f2087a8d7cbc
-        if: always()
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
         env:
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
