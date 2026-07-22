@@ -7756,6 +7756,9 @@ describe("gateway agent handler", () => {
         );
         await waitForAgentCommandCall();
 
+        expect(mocks.agentCommand.mock.calls.at(-1)?.[0]).toMatchObject({
+          trigger: "overflow",
+        });
         // plugin_subagent precedence means the run is tracked through the
         // subagent registry as a `subagent` row, never a duplicate `cli` row.
         expect(createRunningTaskRunSpy).toHaveBeenCalledTimes(1);

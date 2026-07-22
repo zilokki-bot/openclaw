@@ -198,6 +198,54 @@ describe("command queue", () => {
     expect(calls).toEqual(["foreground", "normal", "background"]);
   });
 
+  it("reserves the last multi-concurrency slot from background work", async () => {
+    setCommandLaneConcurrency(CommandLane.Main, 2);
+    const calls: string[] = [];
+    const firstBackgroundRelease = createDeferred();
+
+    const firstBackground = enqueueCommandInLane(
+      CommandLane.Main,
+      async () => {
+        calls.push("background-1");
+        await firstBackgroundRelease.promise;
+        return "background-1";
+      },
+      { priority: "background" },
+    );
+    await Promise.resolve();
+
+    const secondBackground = enqueueCommandInLane(
+      CommandLane.Main,
+      async () => {
+        calls.push("background-2");
+        return "background-2";
+      },
+      { priority: "background" },
+    );
+    await Promise.resolve();
+
+    expect(calls).toEqual(["background-1"]);
+    expectLaneSnapshotFields(CommandLane.Main, {
+      activeCount: 1,
+      queuedCount: 1,
+      maxConcurrent: 2,
+    });
+
+    const foreground = enqueueCommandInLane(CommandLane.Main, async () => {
+      calls.push("foreground");
+      return "foreground";
+    });
+    await Promise.resolve();
+
+    await expect(foreground).resolves.toBe("foreground");
+    expect(calls).toEqual(["background-1", "foreground"]);
+
+    firstBackgroundRelease.resolve();
+    await expect(firstBackground).resolves.toBe("background-1");
+    await expect(secondBackground).resolves.toBe("background-2");
+    expect(calls).toEqual(["background-1", "foreground", "background-2"]);
+  });
+
   it("preserves FIFO order within each priority", async () => {
     const { task: blocker, release } = enqueueBlockedMainTask(async () => "blocker");
     const calls: string[] = [];

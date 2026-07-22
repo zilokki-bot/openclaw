@@ -3843,6 +3843,8 @@ export const agentHandlers: GatewayRequestHandlers = {
           }
           const execApprovalFollowupElevatedDefaults =
             execApprovalFollowupRuntimeHandoff?.bashElevated;
+          const internalRunTrigger =
+            client?.internal?.agentRunTracking === "plugin_subagent" ? "overflow" : undefined;
 
           dispatchAgentRunFromGateway({
             ingressOpts: {
@@ -3881,6 +3883,7 @@ export const agentHandlers: GatewayRequestHandlers = {
               messageChannel: originMessageChannel,
               runId,
               lane: request.lane,
+              trigger: internalRunTrigger,
               modelRun: request.modelRun === true,
               promptMode: request.promptMode,
               extraSystemPrompt: request.extraSystemPrompt,
