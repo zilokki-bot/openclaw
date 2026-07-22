@@ -240,7 +240,6 @@ describe("acp translator stable lifecycle handlers", () => {
     sessionStore.clearAllSessionsForTest();
   });
 
-
   it("keeps session/list lightweight by skipping derived-title hydration", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "sessions.list") {
