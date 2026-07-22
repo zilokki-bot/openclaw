@@ -117,7 +117,12 @@ describe("createCronToolSchema", () => {
       expect(propertyAt(schemaRecord, path)).toMatchObject({ type: "integer", minimum: 1 });
     }
     for (const path of ["job.payload.timeoutSeconds", "patch.payload.timeoutSeconds"]) {
-      expect(propertyAt(schemaRecord, path)).toMatchObject({ type: "number", minimum: 0 });
+      expect(propertyAt(schemaRecord, path)).toMatchObject({
+        anyOf: [
+          expect.objectContaining({ type: "number", minimum: 0 }),
+          expect.objectContaining({ type: "null" }),
+        ],
+      });
     }
   });
 
