@@ -929,15 +929,27 @@ type SessionFileOwnerEntry = {
 type SessionFileOwnerState = {
   owners: Map<string, SessionFileOwnerEntry>;
 };
+type PromptSubmissionQueueState = {
+  queues: Map<string, Promise<void>>;
+};
 
 const EMBEDDED_ATTEMPT_SESSION_FILE_OWNER_STATE_KEY = Symbol.for(
   "openclaw.embeddedAttemptSessionFileOwnerState",
+);
+const EMBEDDED_ATTEMPT_PROMPT_QUEUE_STATE_KEY = Symbol.for(
+  "openclaw.embeddedAttemptPromptQueueState",
 );
 
 const sessionFileOwnerState = resolveGlobalSingleton(
   EMBEDDED_ATTEMPT_SESSION_FILE_OWNER_STATE_KEY,
   (): SessionFileOwnerState => ({
     owners: new Map<string, SessionFileOwnerEntry>(),
+  }),
+);
+const promptSubmissionQueueState = resolveGlobalSingleton(
+  EMBEDDED_ATTEMPT_PROMPT_QUEUE_STATE_KEY,
+  (): PromptSubmissionQueueState => ({
+    queues: new Map<string, Promise<void>>(),
   }),
 );
 
@@ -1021,6 +1033,98 @@ function waitForSessionFileOwnerRelease(params: {
   });
 }
 
+function resolvePromptSubmissionQueueKey(params: {
+  agentId?: string;
+  sessionKey?: string;
+}): string | undefined {
+  const agentId = params.agentId?.trim();
+  const sessionKey = params.sessionKey?.trim();
+  if (!agentId || !sessionKey) {
+    return undefined;
+  }
+  return `${agentId}\0${sessionKey}`;
+}
+
+function waitForPromptSubmissionTurn(params: {
+  previous: Promise<void>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  if (params.signal?.aborted) {
+    return Promise.reject(
+      toErrorObject(abortOwnerWaitReason(params.signal), "Non-Error rejection"),
+    );
+  }
+  if (!params.signal) {
+    return params.previous.catch(() => undefined);
+  }
+  const signal = params.signal;
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(toErrorObject(abortOwnerWaitReason(signal), "Non-Error rejection"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    params.previous.then(
+      () => {
+        cleanup();
+        resolve();
+      },
+      () => {
+        cleanup();
+        resolve();
+      },
+    );
+  });
+}
+
+async function runWithPromptSubmissionQueue<T>(
+  params: {
+    agentId?: string;
+    sessionKey?: string;
+    signal?: AbortSignal;
+  },
+  run: () => Promise<T>,
+): Promise<T> {
+  const queueKey = resolvePromptSubmissionQueueKey(params);
+  if (!queueKey) {
+    return await run();
+  }
+  const previous = promptSubmissionQueueState.queues.get(queueKey) ?? Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const tail = previous.catch(() => undefined).then(() => current);
+  promptSubmissionQueueState.queues.set(queueKey, tail);
+  void tail.finally(() => {
+    if (promptSubmissionQueueState.queues.get(queueKey) === tail) {
+      promptSubmissionQueueState.queues.delete(queueKey);
+    }
+  });
+  let currentReleased = false;
+  const releaseQueue = () => {
+    if (currentReleased) {
+      return;
+    }
+    currentReleased = true;
+    releaseCurrent();
+  };
+  try {
+    await waitForPromptSubmissionTurn({ previous, signal: params.signal });
+  } catch (err) {
+    releaseQueue();
+    throw err;
+  }
+  try {
+    return await run();
+  } finally {
+    releaseQueue();
+  }
+}
+
 export async function acquireEmbeddedAttemptSessionFileOwner(params: {
   sessionFile: string;
   timeoutMs?: number;
@@ -1072,6 +1176,7 @@ export function resetEmbeddedAttemptSessionFileOwnersForTest(): void {
     }
   }
   sessionFileOwnerState.owners.clear();
+  promptSubmissionQueueState.queues.clear();
   ownedSessionFileWrites.clear();
   trustedSessionFileStates.clear();
   ownedSessionFileWriteGeneration = 0;
@@ -2161,9 +2266,11 @@ export async function createEmbeddedAttemptSessionLockController(params: {
 
 export function installPromptSubmissionLockRelease(params: {
   session: unknown;
+  agentId?: string;
   waitForSessionEvents: (session: unknown) => Promise<void>;
   releaseForPrompt: () => Promise<void>;
   reacquireAfterPrompt: () => Promise<void>;
+  abortSignal?: AbortSignal;
   sessionFile?: string;
   sessionKey?: string;
   withSessionWriteLock?: <T>(
@@ -2183,26 +2290,35 @@ export function installPromptSubmissionLockRelease(params: {
   }
   const originalStreamFn = currentStreamFn.bind(agent);
   const wrappedStreamFn: PromptReleaseStreamFn = async (...args: unknown[]) => {
-    await params.waitForSessionEvents(params.session);
-    await params.releaseForPrompt();
-    try {
-      if (params.sessionFile && params.withSessionWriteLock) {
-        return await withOwnedSessionTranscriptWrites(
-          {
-            sessionFile: params.sessionFile,
-            sessionKey: params.sessionKey,
-            withSessionWriteLock: params.withSessionWriteLock,
-            canAdvanceSessionEntryCache: params.canAdvanceSessionEntryCache,
-            publishSessionFileSnapshot: params.publishSessionFileSnapshot,
-          },
-          async () => await originalStreamFn(...args),
-        );
-      }
-      return await originalStreamFn(...args);
-    } finally {
-      await params.waitForSessionEvents(params.session);
-      await params.reacquireAfterPrompt();
-    }
+    return await runWithPromptSubmissionQueue(
+      {
+        agentId: params.agentId,
+        sessionKey: params.sessionKey,
+        signal: params.abortSignal,
+      },
+      async () => {
+        await params.waitForSessionEvents(params.session);
+        await params.releaseForPrompt();
+        try {
+          if (params.sessionFile && params.withSessionWriteLock) {
+            return await withOwnedSessionTranscriptWrites(
+              {
+                sessionFile: params.sessionFile,
+                sessionKey: params.sessionKey,
+                withSessionWriteLock: params.withSessionWriteLock,
+                canAdvanceSessionEntryCache: params.canAdvanceSessionEntryCache,
+                publishSessionFileSnapshot: params.publishSessionFileSnapshot,
+              },
+              async () => await originalStreamFn(...args),
+            );
+          }
+          return await originalStreamFn(...args);
+        } finally {
+          await params.waitForSessionEvents(params.session);
+          await params.reacquireAfterPrompt();
+        }
+      },
+    );
   };
   wrappedStreamFn["__openclawSessionLockPromptReleaseInstalled"] = true;
   agent.streamFn = wrappedStreamFn;
