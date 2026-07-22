@@ -2397,6 +2397,38 @@ describe("cron tool", () => {
     });
   });
 
+  it("preserves null timeoutSeconds payload patches on update", async () => {
+    callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+    const tool = createTestCronTool();
+    await tool.execute("call-update-clear-timeout", {
+      action: "update",
+      id: "job-8",
+      patch: {
+        payload: {
+          timeoutSeconds: null,
+        },
+      },
+    });
+
+    const params = expectSingleGatewayCallMethod("cron.update") as
+      | {
+          id?: string;
+          patch?: {
+            payload?: {
+              kind?: string;
+              timeoutSeconds?: number | null;
+            };
+          };
+        }
+      | undefined;
+    expect(params?.id).toBe("job-8");
+    expect(params?.patch?.payload).toEqual({
+      kind: "agentTurn",
+      timeoutSeconds: null,
+    });
+  });
+
   it("caps agentTurn update toolsAllow to the creator tool surface", async () => {
     callGatewayMock.mockResolvedValueOnce({ ok: true });
 

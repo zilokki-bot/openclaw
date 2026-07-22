@@ -326,6 +326,91 @@ describe("cron edit command", () => {
     );
   });
 
+  it("clears the agent payload timeout with --clear-timeout-seconds", async () => {
+    callGatewayFromCli.mockImplementation(async (method: string) => {
+      if (method === "cron.get") {
+        return {
+          id: "job-1",
+          payload: { kind: "agentTurn", message: "hello", timeoutSeconds: 12 },
+        };
+      }
+      return { ok: true };
+    });
+    const program = createCronProgram();
+
+    await program.parseAsync(["edit", "job-1", "--clear-timeout-seconds"], { from: "user" });
+
+    expect(callGatewayFromCli).toHaveBeenCalledWith("cron.get", expect.anything(), {
+      id: "job-1",
+    });
+    expect(callGatewayFromCli).toHaveBeenCalledWith(
+      "cron.update",
+      expect.objectContaining({ clearTimeoutSeconds: true }),
+      {
+        id: "job-1",
+        patch: {
+          payload: {
+            kind: "agentTurn",
+            timeoutSeconds: null,
+          },
+        },
+      },
+    );
+  });
+
+  it("preserves command payload kind for timeout clear-only edits", async () => {
+    callGatewayFromCli.mockImplementation(async (method: string) => {
+      if (method === "cron.get") {
+        return {
+          id: "job-1",
+          payload: { kind: "command", argv: ["sh", "-lc", "echo ok"], timeoutSeconds: 12 },
+        };
+      }
+      return { ok: true };
+    });
+    const program = createCronProgram();
+
+    await program.parseAsync(["edit", "job-1", "--clear-timeout-seconds"], { from: "user" });
+
+    expect(callGatewayFromCli).toHaveBeenCalledWith("cron.get", expect.anything(), {
+      id: "job-1",
+    });
+    expect(callGatewayFromCli).toHaveBeenCalledWith(
+      "cron.update",
+      expect.objectContaining({ clearTimeoutSeconds: true }),
+      {
+        id: "job-1",
+        patch: {
+          payload: {
+            kind: "command",
+            timeoutSeconds: null,
+          },
+        },
+      },
+    );
+  });
+
+  it("rejects combining --timeout-seconds with --clear-timeout-seconds", async () => {
+    const errorSpy = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(defaultRuntime, "exit").mockImplementation((() => undefined) as never);
+    const program = createCronProgram();
+
+    await program.parseAsync(
+      ["edit", "job-1", "--timeout-seconds", "12", "--clear-timeout-seconds"],
+      {
+        from: "user",
+      },
+    );
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Use --timeout-seconds or --clear-timeout-seconds, not both"),
+    );
+    expect(callGatewayFromCli).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   it("rejects combining --thinking with --clear-thinking", async () => {
     const errorSpy = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
     const exitSpy = vi.spyOn(defaultRuntime, "exit").mockImplementation((() => undefined) as never);
@@ -350,6 +435,7 @@ describe("cron edit command", () => {
 
     expect(help).toContain("--clear-model");
     expect(help).toContain("--clear-thinking");
+    expect(help).toContain("--clear-timeout-seconds");
     expect(help).toContain("--clear-tools");
   });
 
