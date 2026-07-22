@@ -282,6 +282,21 @@ function createRuntime(
     summary.entry = next;
     return next;
   });
+  const getSessionEntry = vi.fn(
+    (readParams: Parameters<PluginRuntime["agent"]["session"]["getSessionEntry"]>[0]) => {
+      const sessionKey = readParams.sessionKey.trim();
+      if (!sessionKey) {
+        return undefined;
+      }
+      const agentPrefix = readParams.agentId ? `agent:${readParams.agentId}:` : undefined;
+      const summary = entries.find(
+        (candidate) =>
+          candidate.sessionKey === sessionKey &&
+          (!agentPrefix || candidate.sessionKey.startsWith(agentPrefix)),
+      );
+      return summary?.entry;
+    },
+  );
   const runtime = {
     nodes: {
       list: vi.fn(async () => ({ nodes: params.nodes ?? [] })),
@@ -290,6 +305,7 @@ function createRuntime(
     agent: {
       session: {
         createSessionEntry,
+        getSessionEntry,
         listSessionEntries: vi.fn((listParams) => {
           const agentPrefix = listParams?.agentId ? `agent:${listParams.agentId}:` : undefined;
           return entries.filter(
@@ -300,7 +316,7 @@ function createRuntime(
       },
     },
   } as unknown as PluginRuntime;
-  return { runtime, entries, createSessionEntry, patchSessionEntry };
+  return { runtime, entries, createSessionEntry, getSessionEntry, patchSessionEntry };
 }
 
 function archiveTestSession(params: {
@@ -1168,6 +1184,61 @@ describe("Codex supervision catalog", () => {
       threadId: "source-thread",
       status: "idle",
       archived: false,
+    });
+  });
+
+  it("looks up adopted sessions by the visible catalog page instead of scanning every session", async () => {
+    const control = createControl({
+      listPage: vi.fn(async () => ({
+        sessions: [
+          { threadId: "visible-thread", status: "idle", archived: false },
+          { threadId: "unadopted-thread", status: "idle", archived: false },
+        ],
+      })),
+    });
+    const sessionKey = supervisionSessionKey("visible-thread");
+    const sessionId = "openclaw-session-visible";
+    const hiddenEntries = Array.from({ length: 250 }, (_, index) => ({
+      sessionKey: supervisionSessionKey(`hidden-thread-${index}`),
+      entry: adoptedEntry({
+        sourceThreadId: `hidden-thread-${index}`,
+        sessionId: `openclaw-session-hidden-${index}`,
+      }),
+    }));
+    const { runtime, getSessionEntry } = createRuntime({
+      entries: [
+        ...hiddenEntries,
+        {
+          sessionKey,
+          entry: adoptedEntry({ sourceThreadId: "visible-thread", sessionId }),
+        },
+      ],
+    });
+    const bindingStore = createCodexTestBindingStore();
+    await seedSupervisionBinding({
+      bindingStore,
+      sessionId,
+      sessionKey,
+      sourceThreadId: "visible-thread",
+    });
+
+    const result = await listCodexSessionCatalog({ bindingStore, config, runtime, control });
+
+    expect(result.hosts[0]?.sessions).toEqual([
+      {
+        threadId: "visible-thread",
+        status: "idle",
+        archived: false,
+        openClawSessionKey: sessionKey,
+      },
+      { threadId: "unadopted-thread", status: "idle", archived: false },
+    ]);
+    expect(runtime.agent.session.listSessionEntries).not.toHaveBeenCalled();
+    expect(getSessionEntry).toHaveBeenCalledTimes(2);
+    expect(getSessionEntry).toHaveBeenCalledWith({
+      agentId: "main",
+      readConsistency: "latest",
+      sessionKey,
     });
   });
 
