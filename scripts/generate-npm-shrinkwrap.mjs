@@ -1207,12 +1207,46 @@ function packageDependencyInputsChanged(packageDir, changedPaths) {
   });
 }
 
-function listCheckChangedPaths() {
-  try {
-    return listChangedPathsFromGit({ base: "origin/main", head: "HEAD" });
-  } catch {
-    return [];
+/** @internal Directly tested script implementation detail. */
+export function listCheckChangedPathsForShrinkwrap({
+  execFile = execFileSync,
+  gitChangedPaths = listChangedPathsFromGit,
+  prBaseSha = process.env.PR_BASE_SHA,
+} = {}) {
+  if (prBaseSha) {
+    try {
+      return gitChangedPaths({ base: prBaseSha, head: "HEAD" });
+    } catch {
+      try {
+        execFile(
+          "git",
+          [
+            "fetch",
+            "--no-tags",
+            "--depth=1",
+            "origin",
+            `+${prBaseSha}:refs/remotes/origin/pr-base`,
+          ],
+          { cwd: ROOT_DIR, stdio: "ignore" },
+        );
+        return gitChangedPaths({ base: "refs/remotes/origin/pr-base", head: "HEAD" });
+      } catch {
+        return ["pnpm-workspace.yaml"];
+      }
+    }
   }
+  for (const base of ["refs/remotes/origin/pr-base", "origin/main"]) {
+    try {
+      return gitChangedPaths({ base, head: "HEAD" });
+    } catch {
+      // Try the next checkout base.
+    }
+  }
+  return [];
+}
+
+function listCheckChangedPaths() {
+  return listCheckChangedPathsForShrinkwrap();
 }
 
 /** @internal Directly tested script implementation detail. */
@@ -1320,6 +1354,22 @@ export function resolvePackageDirs(args) {
   };
 }
 
+function summarizeShrinkwrapMismatch(current, generated) {
+  const currentLines = current.split(/\r?\n/u);
+  const generatedLines = generated.split(/\r?\n/u);
+  const maxLines = Math.max(currentLines.length, generatedLines.length);
+  for (let index = 0; index < maxLines; index += 1) {
+    if (currentLines[index] !== generatedLines[index]) {
+      return [
+        `first differing line: ${index + 1}`,
+        `current: ${JSON.stringify(currentLines[index] ?? "<missing>")}`,
+        `generated: ${JSON.stringify(generatedLines[index] ?? "<missing>")}`,
+      ].join("; ");
+    }
+  }
+  return "content differs without line-level delta";
+}
+
 function updateOrCheckPackage(packageDir, check, changedPaths = []) {
   const generated = generateShrinkwrap(packageDir, {
     useCurrentShrinkwrapOverrides:
@@ -1342,7 +1392,10 @@ function updateOrCheckPackage(packageDir, check, changedPaths = []) {
   }
   if (current !== generated) {
     throw new Error(
-      `${label}: npm-shrinkwrap.json is stale. Run \`pnpm deps:shrinkwrap:generate\`.`,
+      [
+        label + ": npm-shrinkwrap.json is stale. Run pnpm deps:shrinkwrap:generate.",
+        summarizeShrinkwrapMismatch(current, generated),
+      ].join(" "),
     );
   }
   return `${label}: npm-shrinkwrap.json is current.`;

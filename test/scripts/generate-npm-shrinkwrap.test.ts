@@ -11,6 +11,7 @@ import {
   disableShrinkwrappedOverrideConflictSources,
   exactOverrideRulesFromOverrides,
   exactVersionFromOverrideSpec,
+  listCheckChangedPathsForShrinkwrap,
   normalizeNpmVersionDrift,
   normalizeOverrides,
   packageJsonForShrinkwrap,
@@ -513,6 +514,38 @@ describe("generate-npm-shrinkwrap", () => {
     expect(packageDirs).toContain("");
     expect(packageDirs).toContain("extensions/acpx");
     expect(packageDirs.length).toBeGreaterThan(1);
+  });
+
+  it("fetches PR base before falling back to broad shrinkwrap checks", () => {
+    const calls: Array<{ base: string; head: string }> = [];
+    const fetches: Array<{ command: string; args: string[] }> = [];
+
+    const changedPaths = listCheckChangedPathsForShrinkwrap({
+      prBaseSha: "abc123",
+      gitChangedPaths: ({ base, head }: { base: string; head: string }) => {
+        calls.push({ base, head });
+        if (base === "abc123") {
+          throw new Error("missing shallow base");
+        }
+        return ["extensions/acpx/package.json"];
+      },
+      execFile: (command: string, args: string[]) => {
+        fetches.push({ command, args: args.map(String) });
+        return Buffer.from("");
+      },
+    });
+
+    expect(changedPaths).toEqual(["extensions/acpx/package.json"]);
+    expect(calls).toEqual([
+      { base: "abc123", head: "HEAD" },
+      { base: "refs/remotes/origin/pr-base", head: "HEAD" },
+    ]);
+    expect(fetches).toEqual([
+      {
+        command: "git",
+        args: ["fetch", "--no-tags", "--depth=1", "origin", "+abc123:refs/remotes/origin/pr-base"],
+      },
+    ]);
   });
 
   it("detects package dependency inputs that make current shrinkwrap pins unsafe", () => {

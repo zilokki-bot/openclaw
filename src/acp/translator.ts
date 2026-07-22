@@ -513,7 +513,7 @@ export class AcpGatewayAgent implements Agent {
     while (true) {
       const result = await this.gateway.request<SessionsListResult>("sessions.list", {
         limit: fetchLimit,
-        includeDerivedTitles: true,
+        includeDerivedTitles: false,
       });
       rows = result.sessions
         .filter((session) => {
