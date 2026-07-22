@@ -1,5 +1,8 @@
 // Workboard plugin module implements store behavior.
-import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import {
   isFutureDateTimestampMs,
   MAX_DATE_TIMESTAMP_MS,
@@ -91,6 +94,12 @@ const READY_STRANDED_MS = 60 * 60 * 1000;
 const RUNNING_HEARTBEAT_STALE_MS = 20 * 60 * 1000;
 const BLOCKED_TOO_LONG_MS = 24 * 60 * 60 * 1000;
 const CLAIM_RECLAIM_MS = 5 * 60 * 1000;
+const REPO_RELATIVE_PROOF_PATH_RE =
+  /\b(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._@%+=,-]+\.[A-Za-z0-9._-]+\b/g;
+const COMMIT_CLAIM_RE =
+  /\b(?:commit|committed|head|sha|revision|rev)\s*[:=#-]?\s*([a-f0-9]{7,40})\b/gi;
+const SHA256_PREFIX_CLAIM_RE =
+  /\bsha256(?:\s+(?:prefix|префикс))?\s*[:=#-]?\s*([a-f0-9]{8,64})\b/gi;
 
 function secondsToDurationMs(seconds: number): number {
   const ms = Math.trunc(seconds) * 1000;
@@ -1238,6 +1247,149 @@ function normalizeProofInput(input: WorkboardProofInput, now: number): Workboard
   };
 }
 
+function proofTextFragments(
+  proofInput: WorkboardProofInput | undefined,
+  artifactInputs: WorkboardArtifactInput[] = [],
+): string[] {
+  const fragments: string[] = [];
+  for (const value of [
+    proofInput?.label,
+    proofInput?.command,
+    proofInput?.url,
+    proofInput?.note,
+    ...artifactInputs.map((artifact) => artifact.path),
+  ]) {
+    if (typeof value === "string" && value.trim()) {
+      fragments.push(value);
+    }
+  }
+  return fragments;
+}
+
+function uniqueProofClaims(pattern: RegExp, text: string): string[] {
+  const claims: string[] = [];
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const value = (match[1] ?? match[0]).trim();
+    if (value && !claims.includes(value)) {
+      claims.push(value);
+    }
+  }
+  return claims;
+}
+
+function uniqueRepoRelativeProofPathClaims(text: string): string[] {
+  const claims: string[] = [];
+  REPO_RELATIVE_PROOF_PATH_RE.lastIndex = 0;
+  for (const match of text.matchAll(REPO_RELATIVE_PROOF_PATH_RE)) {
+    const index = match.index ?? 0;
+    const previous = index > 0 ? text[index - 1] : "";
+    if (previous === "/" || previous === ":" || previous === ".") {
+      continue;
+    }
+    const value = match[0].trim();
+    if (value && !claims.includes(value)) {
+      claims.push(value);
+    }
+  }
+  return claims;
+}
+
+function normalizeProofRepoPath(candidate: string): string | undefined {
+  const normalized = path.posix.normalize(candidate.replaceAll("\\", "/"));
+  if (
+    !normalized ||
+    normalized === "." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../") ||
+    path.isAbsolute(normalized) ||
+    normalized.startsWith(".git/")
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function resolveGitRootForProof(workspaceRoot: string | undefined): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: workspaceRoot ?? process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    throw new Error("passed proof with repository artifact claims requires a git workspace.");
+  }
+}
+
+function assertProofCommitExists(gitRoot: string, commit: string): void {
+  try {
+    execFileSync("git", ["-C", gitRoot, "cat-file", "-e", `${commit}^{commit}`], {
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error(`claimed proof commit is not a git commit: ${commit}`);
+  }
+}
+
+function assertProofPathExistsAndIsTracked(gitRoot: string, repoPath: string): string {
+  const absolutePath = path.join(gitRoot, repoPath);
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`claimed proof artifact path is missing: ${repoPath}`);
+  }
+  try {
+    execFileSync("git", ["-C", gitRoot, "ls-files", "--error-unmatch", "--", repoPath], {
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error(`claimed proof artifact path is not tracked by git: ${repoPath}`);
+  }
+  return absolutePath;
+}
+
+function assertProofSha256PrefixesMatch(filePaths: string[], prefixes: string[]): void {
+  if (prefixes.length === 0 || filePaths.length === 0) {
+    return;
+  }
+  const hashes = filePaths.map((filePath) =>
+    createHash("sha256").update(fs.readFileSync(filePath)).digest("hex"),
+  );
+  for (const prefix of prefixes) {
+    if (!hashes.some((hash) => hash.startsWith(prefix.toLowerCase()))) {
+      throw new Error(`claimed proof sha256 prefix does not match artifact: ${prefix}`);
+    }
+  }
+}
+
+function assertPassedProofGitClaims(
+  proofInput: WorkboardProofInput | undefined,
+  artifactInputs: WorkboardArtifactInput[] = [],
+  workspaceRoot?: string,
+): void {
+  if (normalizeProofStatus(proofInput?.status, "unknown") !== "passed") {
+    return;
+  }
+  const text = proofTextFragments(proofInput, artifactInputs).join("\n");
+  const repoPaths = uniqueRepoRelativeProofPathClaims(text)
+    .map(normalizeProofRepoPath)
+    .filter((value): value is string => Boolean(value));
+  const commits = uniqueProofClaims(COMMIT_CLAIM_RE, text);
+  const sha256Prefixes = uniqueProofClaims(SHA256_PREFIX_CLAIM_RE, text).map((value) =>
+    value.toLowerCase(),
+  );
+  if (!repoPaths.length && !commits.length && !sha256Prefixes.length) {
+    return;
+  }
+  const gitRoot = resolveGitRootForProof(workspaceRoot);
+  for (const commit of commits) {
+    assertProofCommitExists(gitRoot, commit);
+  }
+  const absoluteArtifactPaths = repoPaths.map((repoPath) =>
+    assertProofPathExistsAndIsTracked(gitRoot, repoPath),
+  );
+  assertProofSha256PrefixesMatch(absoluteArtifactPaths, sha256Prefixes);
+}
+
 function normalizeMetadata(
   value: unknown,
   fallback: WorkboardMetadata = {},
@@ -2297,6 +2449,7 @@ export class WorkboardStore {
       boards?: WorkboardKeyedStore<PersistedWorkboardBoard>;
       subscriptions?: WorkboardKeyedStore<PersistedWorkboardNotificationSubscription>;
       attachments?: WorkboardKeyedStore<PersistedWorkboardAttachment>;
+      proofWorkspaceRoot?: string;
     } = {},
   ) {
     this.boardStore =
@@ -2306,7 +2459,10 @@ export class WorkboardStore {
       (store as unknown as WorkboardKeyedStore<PersistedWorkboardNotificationSubscription>);
     this.attachmentStore =
       stores.attachments ?? (store as unknown as WorkboardKeyedStore<PersistedWorkboardAttachment>);
+    this.proofWorkspaceRoot = stores.proofWorkspaceRoot;
   }
+
+  private readonly proofWorkspaceRoot: string | undefined;
 
   private async enqueueMutation<T>(run: () => Promise<T>): Promise<T> {
     const result = this.mutationQueue.then(run, run);
@@ -3160,6 +3316,7 @@ export class WorkboardStore {
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard> {
     const now = Date.now();
+    assertPassedProofGitClaims(input, [], this.proofWorkspaceRoot);
     const proof = normalizeProofInput(input, now);
     return await this.updateMetadata(id, (existing) => {
       assertCanMutateClaimedCard(existing, scope);
@@ -3178,6 +3335,7 @@ export class WorkboardStore {
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard> {
     const now = Date.now();
+    assertPassedProofGitClaims(proofInput, [artifactInput], this.proofWorkspaceRoot);
     const proof = normalizeProofInput(proofInput, now);
     const artifact = normalizeArtifact({ ...artifactInput, createdAt: now });
     if (!artifact) {
@@ -3563,6 +3721,11 @@ export class WorkboardStore {
       input.proof && typeof input.proof === "object" && !Array.isArray(input.proof)
         ? (input.proof as WorkboardProofInput)
         : undefined;
+    assertPassedProofGitClaims(
+      proofInput,
+      Array.isArray(input.artifacts) ? (input.artifacts as WorkboardArtifactInput[]) : [],
+      this.proofWorkspaceRoot,
+    );
     const proof = proofInput ? normalizeProofInput(proofInput, now) : undefined;
     const artifacts = Array.isArray(input.artifacts)
       ? input.artifacts
