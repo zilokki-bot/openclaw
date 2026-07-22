@@ -4964,6 +4964,16 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: References
   - H2: Related
 
+## ops/workboard-background-admission-reserve-20260720.md
+
+- Route: /ops/workboard-background-admission-reserve-20260720
+- Headings:
+  - H1: Workboard background admission reserve 2026-07-20
+  - H2: Boundary
+  - H2: Problem
+  - H2: Contract
+  - H2: Verification
+
 ## perplexity.md
 
 - Route: /perplexity
