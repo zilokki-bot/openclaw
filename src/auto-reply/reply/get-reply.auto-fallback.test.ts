@@ -69,6 +69,10 @@ function makeReasoningModelConfig(): OpenClawConfig {
           baseUrl: "https://api.anthropic.test/v1",
           models: [makeTestModel("claude-fallback", "Claude Fallback", false)],
         },
+        deepseek: {
+          baseUrl: "https://api.deepseek.test/v1",
+          models: [makeTestModel("deepseek-v4-flash", "DeepSeek V4 Flash", false)],
+        },
       },
     },
   } satisfies OpenClawConfig);
@@ -231,23 +235,73 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
     expect(runParams?.autoFallbackPrimaryProbe).toBeUndefined();
   });
 
-  it("suppresses heartbeat model overrides for a model-locked session", async () => {
+  it("honors cheap heartbeat model overrides for a model-locked session", async () => {
     const { sessionKey } = mockAutoFallbackSession({ modelSelectionLocked: true });
     mockFallbackDirectiveResult({ sessionKey, resolvedThinkLevel: "off" });
 
     await expect(
       getReplyFromConfig(
         buildGetReplyCtx(),
-        { isHeartbeat: true, heartbeatModelOverride: "openai/gpt-5.5" },
+        { isHeartbeat: true, heartbeatModelOverride: "deepseek/deepseek-v4-flash" },
         makeReasoningModelConfig(),
       ),
     ).resolves.toEqual({ text: "ok" });
 
     expect(mocks.resolveReplyDirectives).toHaveBeenCalledOnce();
     expect(mocks.resolveReplyDirectives.mock.calls[0]?.[0]).toMatchObject({
-      provider: "anthropic",
-      model: "claude-fallback",
-      hasResolvedHeartbeatModelOverride: false,
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      hasResolvedHeartbeatModelOverride: true,
+    });
+  });
+
+  it("uses per-agent heartbeat model config for a model-locked heartbeat session", async () => {
+    const { sessionKey } = mockAutoFallbackSession({ modelSelectionLocked: true });
+    mockFallbackDirectiveResult({ sessionKey, resolvedThinkLevel: "off" });
+    const cfg = makeReasoningModelConfig();
+    cfg.agents = {
+      ...cfg.agents,
+      list: [
+        {
+          id: "main",
+          heartbeat: { model: "deepseek/deepseek-v4-flash" },
+        },
+      ],
+    };
+
+    await expect(
+      getReplyFromConfig(buildGetReplyCtx(), { isHeartbeat: true }, cfg),
+    ).resolves.toEqual({ text: "ok" });
+
+    expect(mocks.resolveReplyDirectives).toHaveBeenCalledOnce();
+    expect(mocks.resolveReplyDirectives.mock.calls[0]?.[0]).toMatchObject({
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      hasResolvedHeartbeatModelOverride: true,
+    });
+  });
+
+  it("uses default heartbeat model config instead of expensive primary", async () => {
+    const { sessionKey } = mockAutoFallbackSession({ modelSelectionLocked: true });
+    mockFallbackDirectiveResult({ sessionKey, resolvedThinkLevel: "off" });
+    const cfg = makeReasoningModelConfig();
+    cfg.agents = {
+      ...cfg.agents,
+      defaults: {
+        ...cfg.agents?.defaults,
+        heartbeat: { model: "deepseek/deepseek-v4-flash" },
+      },
+    };
+
+    await expect(
+      getReplyFromConfig(buildGetReplyCtx(), { isHeartbeat: true }, cfg),
+    ).resolves.toEqual({ text: "ok" });
+
+    expect(mocks.resolveReplyDirectives).toHaveBeenCalledOnce();
+    expect(mocks.resolveReplyDirectives.mock.calls[0]?.[0]).toMatchObject({
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      hasResolvedHeartbeatModelOverride: true,
     });
   });
 

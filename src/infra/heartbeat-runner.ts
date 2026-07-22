@@ -456,6 +456,48 @@ function resolveHeartbeatResponseToolPrompt(cfg: OpenClawConfig, heartbeat?: Hea
   return resolveHeartbeatPromptForResponseTool(resolveHeartbeatPromptRaw(cfg, heartbeat));
 }
 
+function resolveHeartbeatModelOverrideRaw(
+  cfg: OpenClawConfig,
+  heartbeat?: HeartbeatConfig,
+): string | undefined {
+  return (
+    normalizeOptionalString(heartbeat?.model) ??
+    normalizeOptionalString(cfg.agents?.defaults?.heartbeat?.model) ??
+    undefined
+  );
+}
+
+function resolveConfiguredHeartbeatModelRef(params: {
+  cfg: OpenClawConfig;
+  raw: string;
+  defaultProvider: string;
+  aliasIndex: ReturnType<typeof resolveDefaultModel>["aliasIndex"];
+}): ModelRef | null {
+  const resolved = resolveModelRefFromString({
+    cfg: params.cfg,
+    raw: params.raw,
+    defaultProvider: params.defaultProvider,
+    aliasIndex: params.aliasIndex,
+  })?.ref;
+  if (resolved) {
+    return resolved;
+  }
+  const slash = params.raw.indexOf("/");
+  if (slash <= 0) {
+    return null;
+  }
+  const provider = params.raw.slice(0, slash).trim();
+  const model = params.raw.slice(slash + 1).trim();
+  if (!provider || !model) {
+    return null;
+  }
+  const providerConfig = params.cfg.models?.providers?.[provider];
+  const hasConfiguredModel = providerConfig?.models?.some(
+    (entry) => normalizeOptionalString(entry?.id) === model,
+  );
+  return hasConfiguredModel ? { provider, model } : null;
+}
+
 function resolveHeartbeatModelRef(params: {
   cfg: OpenClawConfig;
   agentId: string;
@@ -466,16 +508,14 @@ function resolveHeartbeatModelRef(params: {
     cfg: params.cfg,
     agentId: params.agentId,
   });
-  const heartbeatRaw =
-    normalizeOptionalString(params.heartbeat?.model) ??
-    normalizeOptionalString(params.cfg.agents?.defaults?.heartbeat?.model) ??
-    "";
+  const heartbeatRaw = resolveHeartbeatModelOverrideRaw(params.cfg, params.heartbeat) ?? "";
   const heartbeatRef = heartbeatRaw
-    ? resolveModelRefFromString({
+    ? resolveConfiguredHeartbeatModelRef({
+        cfg: params.cfg,
         raw: heartbeatRaw,
         defaultProvider,
         aliasIndex,
-      })?.ref
+      })
     : undefined;
   if (heartbeatRef) {
     return heartbeatRef;
@@ -1995,7 +2035,7 @@ export async function runHeartbeatOnce(opts: {
 
   try {
     await heartbeatTyping?.onReplyStart();
-    const heartbeatModelOverride = normalizeOptionalString(heartbeat?.model);
+    const heartbeatModelOverride = resolveHeartbeatModelOverrideRaw(cfg, heartbeat);
     const suppressToolErrorWarnings = heartbeat?.suppressToolErrorWarnings === true;
     const timeoutOverrideSeconds = resolveHeartbeatTimeoutOverrideSeconds(cfg, heartbeat);
     const bootstrapContextMode: "lightweight" | undefined =
