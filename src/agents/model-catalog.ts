@@ -74,6 +74,7 @@ type DiscoveredModel = {
   id: string;
   name?: string;
   provider: string;
+  profileId?: string;
   api?: ModelCatalogEntry["api"];
   contextWindow?: number;
   contextTokens?: number;
