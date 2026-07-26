@@ -253,7 +253,9 @@ export async function dispatchAndStartWorkboardCards(params: {
         ttlSeconds: card.metadata?.automation?.maxRuntimeSeconds,
       });
       token = claimed.token;
-      const context = await params.store.buildWorkerContext(card.id);
+      // Reuse the board already loaded for this dispatch pass instead of
+      // re-listing the whole board once per started worker.
+      const context = await params.store.buildWorkerContext(card.id, cards);
       const materialized = await materializeWorkspace({
         card: claimed.card,
         worktrees: params.worktrees,
