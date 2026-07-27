@@ -165,7 +165,7 @@ function buildPayloadFromPatch(patch: CronPayloadPatch): CronPayload {
       cwd: patch.cwd,
       env: patch.env,
       input: patch.input,
-      timeoutSeconds: patch.timeoutSeconds,
+      timeoutSeconds: typeof patch.timeoutSeconds === "number" ? patch.timeoutSeconds : undefined,
       noOutputTimeoutSeconds: patch.noOutputTimeoutSeconds,
       outputMaxBytes: patch.outputMaxBytes,
     };
@@ -183,7 +183,7 @@ function buildPayloadFromPatch(patch: CronPayloadPatch): CronPayload {
     model: typeof patch.model === "string" ? patch.model : undefined,
     fallbacks: Array.isArray(patch.fallbacks) ? patch.fallbacks : undefined,
     thinking: typeof patch.thinking === "string" ? patch.thinking : undefined,
-    timeoutSeconds: patch.timeoutSeconds,
+    timeoutSeconds: typeof patch.timeoutSeconds === "number" ? patch.timeoutSeconds : undefined,
     lightContext: patch.lightContext,
     allowUnsafeExternalContent: patch.allowUnsafeExternalContent,
   };
