@@ -195,7 +195,7 @@ type WorkboardStaleState = {
   reason: string;
 };
 
-export type WorkboardStatusHoldOverride = {
+type WorkboardStatusHoldOverride = {
   createdAt: number;
   reason?: string;
 };
