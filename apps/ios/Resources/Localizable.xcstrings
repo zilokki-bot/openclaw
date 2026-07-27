@@ -7617,6 +7617,142 @@
         }
       }
     },
+    "Access": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "访问权限"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存取權限"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acesso"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zugriff"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acceso"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセス"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "접근 권한"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accès"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँच"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "الوصول"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accesso"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erişim"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доступ"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Akses"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dostęp"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "การเข้าถึง"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quyền truy cập"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toegang"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "دسترسی"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доступ"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åtkomst"
+          }
+        }
+      }
+    },
     "Access Level": {
       "localizations": {
         "en": {
@@ -59565,6 +59701,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "Förgrena"
+          }
+        }
+      }
+    },
+    "Full": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Full"
           }
         }
       }
@@ -123897,6 +124169,142 @@
         }
       }
     },
+    "Scan Full-Access Code": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Scan Full-Access Code"
+          }
+        }
+      }
+    },
     "Scan QR": {
       "localizations": {
         "en": {
@@ -149873,6 +150281,142 @@
         }
       }
     },
+    "This phone has limited Gateway access.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This phone has limited Gateway access."
+          }
+        }
+      }
+    },
     "This removes saved credentials, device access, TLS trust, and cached chats for this gateway.": {
       "localizations": {
         "en": {
@@ -153681,6 +154225,142 @@
         }
       }
     },
+    "Upgrade access": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade access"
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Upgrade access"
+          }
+        }
+      }
+    },
     "Usage": {
       "localizations": {
         "en": {
@@ -154085,6 +154765,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "Använd manuell konfiguration"
+          }
+        }
+      }
+    },
+    "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "zh-CN": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "zh-TW": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "ja-JP": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Use a secure wss:// or Tailscale Serve Gateway, then scan a full-access setup code from the Control UI or openclaw qr and reconnect to enable settings and upgrades."
           }
         }
       }
