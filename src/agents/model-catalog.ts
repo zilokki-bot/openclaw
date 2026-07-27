@@ -70,7 +70,6 @@ export {
 } from "./model-catalog-lookup.js";
 
 type DiscoveredModel = {
-  profileId?: string;
   id: string;
   name?: string;
   provider: string;
