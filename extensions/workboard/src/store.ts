@@ -1393,7 +1393,7 @@ function assertPassedProofGitClaims(
 function normalizeMetadata(
   value: unknown,
   fallback: WorkboardMetadata = {},
-  options: { allowDependencyLinks?: boolean } = {},
+  options: { allowDependencyLinks?: boolean; allowStatusHoldOverride?: boolean } = {},
 ): WorkboardMetadata {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return trimMetadataToBudget(fallback);
@@ -1405,6 +1405,7 @@ function normalizeMetadata(
       : null;
   const hasArchivedAt = Object.hasOwn(record, "archivedAt");
   const hasStale = Object.hasOwn(record, "stale");
+  const hasStatusHoldOverride = Object.hasOwn(record, "statusHoldOverride");
   const hasLifecycleStatusSourceUpdatedAt = Object.hasOwn(record, "lifecycleStatusSourceUpdatedAt");
   const links = Array.isArray(record.links)
     ? record.links.map(normalizeLink).filter((link): link is WorkboardLink => link !== null)
@@ -1502,6 +1503,10 @@ function normalizeMetadata(
           }
         : undefined
       : fallback.stale,
+    statusHoldOverride:
+      options.allowStatusHoldOverride === true && hasStatusHoldOverride
+        ? normalizeStatusHoldOverride(record.statusHoldOverride)
+        : fallback.statusHoldOverride,
     lifecycleStatusSourceUpdatedAt: hasLifecycleStatusSourceUpdatedAt
       ? normalizeTimestamp(record.lifecycleStatusSourceUpdatedAt, 0)
       : fallback.lifecycleStatusSourceUpdatedAt,
@@ -1510,6 +1515,24 @@ function normalizeMetadata(
         ? Math.max(0, Math.trunc(record.failureCount))
         : fallback.failureCount,
   });
+}
+
+function normalizeStatusHoldOverride(value: unknown): WorkboardMetadata["statusHoldOverride"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const createdAt = normalizeTimestamp(record.createdAt, 0);
+  if (!createdAt) {
+    return undefined;
+  }
+  const reason = normalizeBoundedString(
+    record.reason,
+    undefined,
+    1000,
+    "status hold override reason",
+  );
+  return { createdAt, ...(reason ? { reason } : {}) };
 }
 
 function normalizeExecution(value: unknown): WorkboardExecution | undefined {
@@ -1613,6 +1636,7 @@ function removeUndefinedMetadataFields(metadata: WorkboardMetadata): WorkboardMe
     "templateId",
     "archivedAt",
     "stale",
+    "statusHoldOverride",
     "lifecycleStatusSourceUpdatedAt",
     "failureCount",
   ] as const) {
@@ -2867,7 +2891,11 @@ export class WorkboardStore {
   private async updateCard(
     id: string,
     patch: WorkboardCardPatch,
-    options: { allowMetadataDependencyLinks?: boolean; enforceStatusHolds?: boolean } = {},
+    options: {
+      allowMetadataDependencyLinks?: boolean;
+      allowStatusHoldOverride?: boolean;
+      enforceStatusHolds?: boolean;
+    } = {},
   ): Promise<WorkboardCard> {
     const existing = await this.get(id);
     if (!existing) {
@@ -2925,6 +2953,7 @@ export class WorkboardStore {
         : normalizeExecution(effectivePatch.execution);
     let metadata = normalizeMetadata(effectivePatch.metadata, existing.metadata, {
       allowDependencyLinks: options.allowMetadataDependencyLinks !== false,
+      allowStatusHoldOverride: options.allowStatusHoldOverride,
     });
     if (status !== existing.status && !hasFreshLifecycleStatusSource) {
       // Status patches often spread existing metadata. Only a newly supplied
@@ -3005,6 +3034,14 @@ export class WorkboardStore {
     if (options.enforceStatusHolds && effectivePatch.status !== undefined) {
       await this.assertActiveStatusAllowed(existing, next, now);
     }
+    if (
+      next.metadata?.statusHoldOverride &&
+      status !== "ready" &&
+      status !== "running" &&
+      status !== "review"
+    ) {
+      delete next.metadata.statusHoldOverride;
+    }
     if (status !== "done") {
       delete next.completedAt;
     }
@@ -3033,6 +3070,9 @@ export class WorkboardStore {
       next.status !== "review" &&
       next.status !== "done"
     ) {
+      return;
+    }
+    if (next.metadata?.statusHoldOverride) {
       return;
     }
     const parents = cardParentIds(next);
@@ -3208,6 +3248,9 @@ export class WorkboardStore {
 
   private async dependencyTargetStatus(card: WorkboardCard, now: number): Promise<WorkboardStatus> {
     const scheduledAt = card.metadata?.automation?.scheduledAt;
+    if (card.metadata?.statusHoldOverride) {
+      return card.status;
+    }
     const parents = cardParentIds(card);
     if (card.status === "scheduled" && !scheduledAt) {
       return "scheduled";
@@ -3898,11 +3941,12 @@ export class WorkboardStore {
         throw new Error(`card not found: ${id}`);
       }
       assertCanMutateClaimedCard(existing, scope === null ? undefined : scope);
+      const now = Date.now();
       const reason = normalizeBoundedString(input.reason, undefined, 1000, "promote reason");
       const comments = reason
         ? [
             ...(existing.metadata?.comments ?? []),
-            { id: randomUUID(), body: reason, createdAt: Date.now() },
+            { id: randomUUID(), body: reason, createdAt: now },
           ].slice(-MAX_CARD_COMMENTS)
         : existing.metadata?.comments;
       return await this.updateCard(
@@ -3913,9 +3957,15 @@ export class WorkboardStore {
             ...clearDiagnostics(existing.metadata, ["stranded_ready", "blocked_too_long"]),
             comments,
             stale: null,
+            ...(input.force === true
+              ? { statusHoldOverride: { createdAt: now, ...(reason ? { reason } : {}) } }
+              : {}),
           },
         },
-        { enforceStatusHolds: input.force !== true },
+        {
+          allowStatusHoldOverride: input.force === true,
+          enforceStatusHolds: input.force !== true,
+        },
       );
     });
   }
