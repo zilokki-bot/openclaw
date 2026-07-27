@@ -70,7 +70,7 @@ function envThreshold(name: string): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-export function resolveThresholds(
+function resolveThresholds(
   thresholds?: DiagnosticMemoryThresholds,
 ): Required<DiagnosticMemoryThresholds> {
   return {

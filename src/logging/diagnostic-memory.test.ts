@@ -9,11 +9,7 @@ import {
   resetDiagnosticEventsForTest,
   type DiagnosticEventPayload,
 } from "../infra/diagnostic-events.js";
-import {
-  emitDiagnosticMemorySample,
-  resetDiagnosticMemoryForTest,
-  resolveThresholds,
-} from "./diagnostic-memory.js";
+import { emitDiagnosticMemorySample, resetDiagnosticMemoryForTest } from "./diagnostic-memory.js";
 import {
   readLatestDiagnosticStabilityBundleSync,
   resetDiagnosticStabilityBundleForTest,
@@ -74,39 +70,43 @@ describe("diagnostic memory", () => {
     }
   });
 
-  it("allows memory pressure thresholds to be raised with env vars", () => {
-    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = String(3 * 1024 * 1024 * 1024);
-    process.env.OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES = String(4 * 1024 * 1024 * 1024);
-    process.env.OPENCLAW_DIAGNOSTIC_HEAP_WARNING_BYTES = String(2 * 1024 * 1024 * 1024);
-    process.env.OPENCLAW_DIAGNOSTIC_HEAP_CRITICAL_BYTES = String(5 * 1024 * 1024 * 1024);
-    process.env.OPENCLAW_DIAGNOSTIC_RSS_GROWTH_WARNING_BYTES = String(768 * 1024 * 1024);
-    process.env.OPENCLAW_DIAGNOSTIC_RSS_GROWTH_CRITICAL_BYTES = String(1536 * 1024 * 1024);
-    process.env.OPENCLAW_DIAGNOSTIC_GROWTH_WINDOW_MS = "900000";
-    process.env.OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS = "120000";
+  it("applies RSS pressure thresholds from env vars when no explicit thresholds are given", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "1000";
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES = "3000";
+    process.env.OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS = "60000";
 
-    expect(resolveThresholds()).toMatchObject({
-      rssWarningBytes: 3 * 1024 * 1024 * 1024,
-      rssCriticalBytes: 4 * 1024 * 1024 * 1024,
-      heapUsedWarningBytes: 2 * 1024 * 1024 * 1024,
-      heapUsedCriticalBytes: 5 * 1024 * 1024 * 1024,
-      rssGrowthWarningBytes: 768 * 1024 * 1024,
-      rssGrowthCriticalBytes: 1536 * 1024 * 1024,
-      growthWindowMs: 900000,
-      pressureRepeatMs: 120000,
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
+
+    emitDiagnosticMemorySample({
+      now: 1000,
+      uptimeMs: 0,
+      memoryUsage: memoryUsage({ rss: 2000 }),
     });
+    stop();
+
+    const pressure = events.filter((event) => event.type === "diagnostic.memory.pressure");
+    expect(pressure).toMatchObject([
+      { type: "diagnostic.memory.pressure", level: "warning", thresholdBytes: 1000 },
+    ]);
   });
 
-  it("keeps explicit threshold arguments above env vars", () => {
-    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = String(3 * 1024 * 1024 * 1024);
+  it("ignores invalid RSS env thresholds and keeps the default (no false pressure)", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "abc";
 
-    expect(resolveThresholds({ rssWarningBytes: 42 }).rssWarningBytes).toBe(42);
-  });
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
 
-  it("ignores invalid memory threshold env vars", () => {
-    for (const bad of ["", "   ", "abc", "-5", "0"]) {
-      process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = bad;
-      expect(resolveThresholds().rssWarningBytes).toBe(1536 * 1024 * 1024);
-    }
+    // 2000 bytes is far below the default 1.5GiB warning; an invalid env value
+    // must fall through to that default and emit no pressure.
+    emitDiagnosticMemorySample({
+      now: 1000,
+      uptimeMs: 0,
+      memoryUsage: memoryUsage({ rss: 2000 }),
+    });
+    stop();
+
+    expect(events.some((event) => event.type === "diagnostic.memory.pressure")).toBe(false);
   });
 
   it("emits memory samples with byte counts", () => {
