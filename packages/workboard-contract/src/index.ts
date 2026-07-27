@@ -201,6 +201,11 @@ export type WorkboardStaleState = {
   reason: string;
 };
 
+type WorkboardStatusHoldOverride = {
+  createdAt: number;
+  reason?: string;
+};
+
 export type WorkboardClaim = {
   ownerId: string;
   token: string;
@@ -343,6 +348,7 @@ export type WorkboardMetadata = {
   templateId?: WorkboardTemplateId;
   archivedAt?: number;
   stale?: WorkboardStaleState;
+  statusHoldOverride?: WorkboardStatusHoldOverride;
   lifecycleStatusSourceUpdatedAt?: number;
   failureCount?: number;
 };

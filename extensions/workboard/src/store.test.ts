@@ -1717,6 +1717,40 @@ describe("WorkboardStore", () => {
     });
   });
 
+  it("preserves forced recovery promotion through dispatch holds", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const store = new WorkboardStore(createMemoryStore());
+      const parent = await store.create({ title: "Blocked parent", status: "running" });
+      const child = await store.create({
+        title: "Forced child",
+        parents: [parent.id],
+        scheduledAt: 10_000,
+      });
+
+      await expect(
+        store.promote(child.id, { force: true, reason: "operator recovery" }),
+      ).resolves.toMatchObject({
+        status: "ready",
+        metadata: {
+          statusHoldOverride: {
+            createdAt: 1_000,
+            reason: "operator recovery",
+          },
+        },
+      });
+
+      expect((await store.dispatch(2_000)).promoted).toEqual([]);
+      await expect(store.get(child.id)).resolves.toMatchObject({
+        status: "ready",
+        metadata: { statusHoldOverride: expect.objectContaining({ createdAt: 1_000 }) },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("preserves dependency links across link caps and parent deletion", async () => {
     const store = new WorkboardStore(createMemoryStore());
     const parent = await store.create({ title: "Parent", status: "running" });

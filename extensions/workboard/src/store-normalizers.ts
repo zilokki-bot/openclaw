@@ -41,6 +41,7 @@ import {
   type WorkboardProofStatus,
   type WorkboardRunAttempt,
   type WorkboardStatus,
+  type WorkboardStatusHoldOverride,
   type WorkboardTemplateId,
   type WorkboardWorkerLog,
   type WorkboardWorkerProtocol,
@@ -986,7 +987,7 @@ export function normalizeProofInput(input: WorkboardProofInput, now: number): Wo
 export function normalizeMetadata(
   value: unknown,
   fallback: WorkboardMetadata = {},
-  options: { allowDependencyLinks?: boolean } = {},
+  options: { allowDependencyLinks?: boolean; allowStatusHoldOverride?: boolean } = {},
 ): WorkboardMetadata {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return trimMetadataToBudget(fallback);
@@ -998,6 +999,7 @@ export function normalizeMetadata(
       : null;
   const hasArchivedAt = Object.hasOwn(record, "archivedAt");
   const hasStale = Object.hasOwn(record, "stale");
+  const hasStatusHoldOverride = Object.hasOwn(record, "statusHoldOverride");
   const hasLifecycleStatusSourceUpdatedAt = Object.hasOwn(record, "lifecycleStatusSourceUpdatedAt");
   const links = Array.isArray(record.links)
     ? record.links.map(normalizeLink).filter((link): link is WorkboardLink => link !== null)
@@ -1095,6 +1097,10 @@ export function normalizeMetadata(
           }
         : undefined
       : fallback.stale,
+    statusHoldOverride:
+      options.allowStatusHoldOverride === true && hasStatusHoldOverride
+        ? normalizeStatusHoldOverride(record.statusHoldOverride)
+        : fallback.statusHoldOverride,
     lifecycleStatusSourceUpdatedAt: hasLifecycleStatusSourceUpdatedAt
       ? normalizeTimestamp(record.lifecycleStatusSourceUpdatedAt, 0)
       : fallback.lifecycleStatusSourceUpdatedAt,
@@ -1103,6 +1109,22 @@ export function normalizeMetadata(
         ? Math.max(0, Math.trunc(record.failureCount))
         : fallback.failureCount,
   });
+}
+
+function normalizeStatusHoldOverride(value: unknown): WorkboardStatusHoldOverride | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const createdAt = normalizeTimestamp(record.createdAt, 0);
+  if (!createdAt) {
+    return undefined;
+  }
+  const reason = normalizeBoundedString(record.reason, undefined, 1000, "status hold reason");
+  return {
+    createdAt,
+    ...(reason ? { reason } : {}),
+  };
 }
 
 export function normalizeExecution(value: unknown): WorkboardExecution | undefined {
@@ -1216,6 +1238,7 @@ export function removeUndefinedMetadataFields(metadata: WorkboardMetadata): Work
     "templateId",
     "archivedAt",
     "stale",
+    "statusHoldOverride",
     "lifecycleStatusSourceUpdatedAt",
     "failureCount",
   ] as const) {

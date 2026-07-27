@@ -24,8 +24,40 @@ import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { recordSessionStateEvent } from "../../sessions/session-state-events.js";
 import { upsertSessionUpstreamLink } from "../../sessions/session-upstream-links.js";
 import { resolveAgentIdOrRespondError } from "./agent-id-shared.js";
+import {
+  buildSessionCatalogListCacheKey,
+  SessionCatalogListBusyError,
+  SessionCatalogListCoordinator,
+} from "./session-catalog-list-coordinator.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
+
+const SESSION_CATALOG_CACHE_FRESH_TTL_MS = 1_500;
+const SESSION_CATALOG_CACHE_STALE_TTL_MS = 15_000;
+const SESSION_CATALOG_CACHE_MAX_ENTRIES = 128;
+const SESSION_CATALOG_MAX_CONCURRENT_LOADS = 4;
+const SESSION_CATALOG_MAX_QUEUED_LOADS = 32;
+
+const sessionCatalogListCoordinator = new SessionCatalogListCoordinator<SessionCatalogHost[]>({
+  freshTtlMs: SESSION_CATALOG_CACHE_FRESH_TTL_MS,
+  staleTtlMs: SESSION_CATALOG_CACHE_STALE_TTL_MS,
+  maxCacheEntries: SESSION_CATALOG_CACHE_MAX_ENTRIES,
+  maxConcurrentLoads: SESSION_CATALOG_MAX_CONCURRENT_LOADS,
+  maxQueuedLoads: SESSION_CATALOG_MAX_QUEUED_LOADS,
+});
+
+const sessionCatalogProviderCacheIds = new WeakMap<SessionCatalogProvider, number>();
+let nextSessionCatalogProviderCacheId = 1;
+
+function sessionCatalogProviderCacheId(provider: SessionCatalogProvider): number {
+  const existing = sessionCatalogProviderCacheIds.get(provider);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const assigned = nextSessionCatalogProviderCacheId++;
+  sessionCatalogProviderCacheIds.set(provider, assigned);
+  return assigned;
+}
 
 const SESSION_CATALOG_SEARCH_MAX_UTF16_UNITS = 500;
 
@@ -156,34 +188,15 @@ function catalogResult(
   return result;
 }
 
-type PendingCatalogList = {
-  promise: Promise<SessionCatalogHost[]>;
-};
-
-const pendingCatalogLists = new Map<string, PendingCatalogList>();
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJson).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .toSorted()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 function catalogListKey(
   provider: SessionCatalogProvider,
   request: SessionsCatalogListParams,
   search: string | undefined,
+  agentId: string,
 ) {
-  return stableJson({
-    providerId: provider.id,
+  return buildSessionCatalogListCacheKey({
+    catalogIds: [JSON.stringify([provider.id, sessionCatalogProviderCacheId(provider)])],
+    agentId,
     search,
     limitPerHost: request.limitPerHost,
     hostIds: request.hostIds,
@@ -196,38 +209,32 @@ async function listProviderHosts(
   request: SessionsCatalogListParams,
   options: {
     search?: string;
+    agentId?: string;
     onHost?: (host: SessionCatalogHost) => void;
   } = {},
 ): Promise<SessionCatalogHost[]> {
+  const search = options.search ?? request.search;
   if (options.onHost) {
     return provider.list({
-      search: options.search,
+      search,
       limitPerHost: request.limitPerHost,
       hostIds: request.hostIds,
       ...("cursors" in request ? { cursors: request.cursors } : {}),
       onHost: options.onHost,
     });
   }
-  const search = options.search ?? request.search;
-  const key = catalogListKey(provider, request, search);
-  const pending = pendingCatalogLists.get(key);
-  if (pending) {
-    return pending.promise;
-  }
-  const promise = provider.list({
-    search,
-    limitPerHost: request.limitPerHost,
-    hostIds: request.hostIds,
-    ...("cursors" in request ? { cursors: request.cursors } : {}),
+  const key = catalogListKey(provider, request, search, options.agentId ?? "default");
+  return sessionCatalogListCoordinator.run({
+    key,
+    cacheable: () => true,
+    load: () =>
+      provider.list({
+        search,
+        limitPerHost: request.limitPerHost,
+        hostIds: request.hostIds,
+        ...("cursors" in request ? { cursors: request.cursors } : {}),
+      }),
   });
-  pendingCatalogLists.set(key, { promise });
-  try {
-    return await promise;
-  } finally {
-    if (pendingCatalogLists.get(key)?.promise === promise) {
-      pendingCatalogLists.delete(key);
-    }
-  }
 }
 
 export const sessionCatalogHandlers: GatewayRequestHandlers = {
@@ -266,35 +273,50 @@ export const sessionCatalogHandlers: GatewayRequestHandlers = {
     const search = normalizeSessionCatalogSearch(request.search);
     const progressId = request.progressId;
     const progressConnId = progressId && client?.connId ? client.connId : undefined;
-    const catalogList = await Promise.all(
-      selected.map(async (provider): Promise<SessionCatalog> => {
-        const createTarget = resolveProviderCreateTarget(provider, resolvedAgent.agentId);
-        const createSession = createTarget.ok ? { model: createTarget.target.model } : undefined;
-        const onHost = progressConnId
-          ? (host: SessionCatalog["hosts"][number]) => {
-              // Progressive frames are an optimization. The final RPC response remains
-              // authoritative when a slow client drops an intermediate host update.
-              context.broadcastToConnIds(
-                "sessions.catalog.host",
-                {
-                  progressId,
-                  agentId: resolvedAgent.agentId,
-                  catalog: catalogResult(provider, [host], undefined, createSession),
-                },
-                new Set([progressConnId]),
-                { dropIfSlow: true },
-              );
+    try {
+      const catalogList = await Promise.all(
+        selected.map(async (provider): Promise<SessionCatalog> => {
+          const createTarget = resolveProviderCreateTarget(provider, resolvedAgent.agentId);
+          const createSession = createTarget.ok ? { model: createTarget.target.model } : undefined;
+          const onHost = progressConnId
+            ? (host: SessionCatalog["hosts"][number]) => {
+                // Progressive frames are an optimization. The final RPC response remains
+                // authoritative when a slow client drops an intermediate host update.
+                context.broadcastToConnIds(
+                  "sessions.catalog.host",
+                  {
+                    progressId,
+                    agentId: resolvedAgent.agentId,
+                    catalog: catalogResult(provider, [host], undefined, createSession),
+                  },
+                  new Set([progressConnId]),
+                  { dropIfSlow: true },
+                );
+              }
+            : undefined;
+          try {
+            const hosts = await listProviderHosts(provider, request, {
+              search,
+              agentId: resolvedAgent.agentId,
+              onHost,
+            });
+            return catalogResult(provider, hosts, undefined, createSession);
+          } catch (error) {
+            if (error instanceof SessionCatalogListBusyError) {
+              throw error;
             }
-          : undefined;
-        try {
-          const hosts = await listProviderHosts(provider, request, { search, onHost });
-          return catalogResult(provider, hosts, undefined, createSession);
-        } catch (error) {
-          return catalogResult(provider, [], catalogError(error), createSession);
-        }
-      }),
-    );
-    respond(true, { catalogs: catalogList });
+            return catalogResult(provider, [], catalogError(error), createSession);
+          }
+        }),
+      );
+      respond(true, { catalogs: catalogList });
+    } catch (error) {
+      if (error instanceof SessionCatalogListBusyError) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
+        return;
+      }
+      throw error;
+    }
   },
 
   "sessions.catalog.read": async ({ params, respond }) => {
