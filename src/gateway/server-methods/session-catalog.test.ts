@@ -144,6 +144,42 @@ describe("session catalog Gateway methods", () => {
     });
   });
 
+  it("coalesces concurrent identical list calls", async () => {
+    let resolveList:
+      | ((value: Awaited<ReturnType<SessionCatalogProvider["list"]>>) => void)
+      | undefined;
+    const host = {
+      hostId: "node:fast",
+      label: "Fast node",
+      kind: "node" as const,
+      connected: true,
+      nodeId: "fast",
+      sessions: [],
+    };
+    const list = vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<SessionCatalogProvider["list"]>>>((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+    hoisted.activeRegistry.sessionCatalogs = [{ provider: provider("codex", { list }) }];
+
+    const first = call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 });
+    const second = call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 });
+
+    await vi.waitFor(() => expect(list).toHaveBeenCalledOnce());
+    resolveList?.([host]);
+    const [firstRespond, secondRespond] = await Promise.all([first, second]);
+
+    expect(list).toHaveBeenCalledOnce();
+    expect(firstRespond).toHaveBeenCalledWith(true, {
+      catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
+    });
+    expect(secondRespond).toHaveBeenCalledWith(true, {
+      catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
+    });
+  });
+
   it("uses the pinned Gateway catalog runtime after active registry churn", async () => {
     const previousNodesRuntime = gatewaySubagentState.nodes;
     const listNodes = vi.fn(async () => ({ nodes: [] }));
@@ -361,6 +397,18 @@ describe("session catalog Gateway methods", () => {
       message: "unknown session catalog: missing",
       unknownCatalog: true,
     });
+  });
+
+  it("does not coalesce different list parameters", async () => {
+    hoisted.activeRegistry.sessionCatalogs = [{ provider: provider("codex") }];
+
+    await Promise.all([
+      call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 }),
+      call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 10 }),
+    ]);
+
+    const catalog = hoisted.activeRegistry.sessionCatalogs[0] as { provider: SessionCatalogProvider };
+    expect(catalog.provider.list).toHaveBeenCalledTimes(2);
   });
 
   it("dispatches continue by catalog id with the caller's scopes", async () => {

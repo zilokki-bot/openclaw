@@ -2839,6 +2839,80 @@ describe("WorkboardStore", () => {
     });
   });
 
+  it("replays opt-in status_changed events from card move history", async () => {
+    const store = new WorkboardStore(createMemoryStore(), {
+      subscriptions: createMemoryStore<PersistedWorkboardNotificationSubscription>(),
+    });
+    const card = await store.create({ title: "Status event", boardId: "ops", status: "todo" });
+    const subscription = await store.subscribeNotifications({
+      boardId: "ops",
+      cardId: card.id,
+      target: "session:operator",
+      eventKinds: ["status_changed"],
+    });
+
+    await store.update(card.id, { status: "ready" });
+
+    await expect(store.notificationEvents({ subscriptionId: subscription.id })).resolves.toEqual({
+      subscription: expect.objectContaining({ id: subscription.id }),
+      events: [
+        expect.objectContaining({
+          kind: "status_changed",
+          cardId: card.id,
+          fromStatus: "todo",
+          toStatus: "ready",
+          revision: 1,
+        }),
+      ],
+    });
+  });
+
+  it("keeps status_changed out of unfiltered legacy subscriptions", async () => {
+    const store = new WorkboardStore(createMemoryStore(), {
+      subscriptions: createMemoryStore<PersistedWorkboardNotificationSubscription>(),
+    });
+    const card = await store.create({ title: "Legacy notification", boardId: "ops" });
+    const subscription = await store.subscribeNotifications({
+      boardId: "ops",
+      cardId: card.id,
+      target: "session:operator",
+    });
+
+    await store.update(card.id, { status: "ready" });
+
+    await expect(store.notificationEvents({ subscriptionId: subscription.id })).resolves.toEqual({
+      subscription: expect.objectContaining({ id: subscription.id }),
+      events: [],
+    });
+  });
+
+  it("advances status_changed cursors without replaying delivered transitions", async () => {
+    const store = new WorkboardStore(createMemoryStore(), {
+      subscriptions: createMemoryStore<PersistedWorkboardNotificationSubscription>(),
+    });
+    const card = await store.create({ title: "Cursor status event", boardId: "ops" });
+    const subscription = await store.subscribeNotifications({
+      boardId: "ops",
+      cardId: card.id,
+      target: "session:operator",
+      eventKinds: ["status_changed"],
+    });
+
+    await store.update(card.id, { status: "ready" });
+    const first = await store.advanceNotificationEvents({ subscriptionId: subscription.id });
+    expect(first.events).toEqual([expect.objectContaining({ toStatus: "ready" })]);
+    await expect(store.notificationEvents({ subscriptionId: subscription.id })).resolves.toEqual({
+      subscription: expect.objectContaining({ id: subscription.id }),
+      events: [],
+    });
+
+    await store.update(card.id, { status: "running" });
+    await expect(store.notificationEvents({ subscriptionId: subscription.id })).resolves.toEqual({
+      subscription: expect.objectContaining({ id: subscription.id }),
+      events: [expect.objectContaining({ fromStatus: "ready", toStatus: "running" })],
+    });
+  });
+
   it("marks triage cards as orchestration candidates during dispatch", async () => {
     const boards = createMemoryStore<PersistedWorkboardBoard>();
     const store = new WorkboardStore(createMemoryStore(), { boards });

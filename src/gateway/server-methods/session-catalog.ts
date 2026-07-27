@@ -4,6 +4,7 @@ import {
   ErrorCodes,
   errorShape,
   type SessionCatalog,
+  type SessionCatalogHost,
   type SessionsCatalogArchiveParams,
   type SessionsCatalogContinueParams,
   type SessionsCatalogListParams,
@@ -155,6 +156,80 @@ function catalogResult(
   return result;
 }
 
+type PendingCatalogList = {
+  promise: Promise<SessionCatalogHost[]>;
+};
+
+const pendingCatalogLists = new Map<string, PendingCatalogList>();
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .toSorted()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function catalogListKey(
+  provider: SessionCatalogProvider,
+  request: SessionsCatalogListParams,
+  search: string | undefined,
+) {
+  return stableJson({
+    providerId: provider.id,
+    search,
+    limitPerHost: request.limitPerHost,
+    hostIds: request.hostIds,
+    cursors: "cursors" in request ? request.cursors : undefined,
+  });
+}
+
+async function listProviderHosts(
+  provider: SessionCatalogProvider,
+  request: SessionsCatalogListParams,
+  options: {
+    search?: string;
+    onHost?: (host: SessionCatalogHost) => void;
+  } = {},
+): Promise<SessionCatalogHost[]> {
+  if (options.onHost) {
+    return provider.list({
+      search: options.search,
+      limitPerHost: request.limitPerHost,
+      hostIds: request.hostIds,
+      ...("cursors" in request ? { cursors: request.cursors } : {}),
+      onHost: options.onHost,
+    });
+  }
+  const search = options.search ?? request.search;
+  const key = catalogListKey(provider, request, search);
+  const pending = pendingCatalogLists.get(key);
+  if (pending) {
+    return pending.promise;
+  }
+  const promise = provider.list({
+    search,
+    limitPerHost: request.limitPerHost,
+    hostIds: request.hostIds,
+    ...("cursors" in request ? { cursors: request.cursors } : {}),
+  });
+  pendingCatalogLists.set(key, { promise });
+  try {
+    return await promise;
+  } finally {
+    if (pendingCatalogLists.get(key)?.promise === promise) {
+      pendingCatalogLists.delete(key);
+    }
+  }
+}
+
 export const sessionCatalogHandlers: GatewayRequestHandlers = {
   "sessions.catalog.list": async ({ params, respond, context, client }) => {
     if (
@@ -212,13 +287,7 @@ export const sessionCatalogHandlers: GatewayRequestHandlers = {
             }
           : undefined;
         try {
-          const hosts = await provider.list({
-            search,
-            limitPerHost: request.limitPerHost,
-            hostIds: request.hostIds,
-            ...("cursors" in request ? { cursors: request.cursors } : {}),
-            ...(onHost ? { onHost } : {}),
-          });
+          const hosts = await listProviderHosts(provider, request, { search, onHost });
           return catalogResult(provider, hosts, undefined, createSession);
         } catch (error) {
           return catalogResult(provider, [], catalogError(error), createSession);
