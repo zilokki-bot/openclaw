@@ -72,7 +72,12 @@ export const WORKBOARD_DIAGNOSTIC_KINDS = [
   "orphaned_session",
 ] as const;
 export const WORKBOARD_DIAGNOSTIC_SEVERITIES = ["warning", "error", "critical"] as const;
-export const WORKBOARD_NOTIFICATION_KINDS = ["completed", "failed", "stale"] as const;
+export const WORKBOARD_NOTIFICATION_KINDS = [
+  "completed",
+  "failed",
+  "stale",
+  "status_changed",
+] as const;
 
 export type WorkboardStatus = (typeof WORKBOARD_STATUSES)[number];
 export type WorkboardPriority = (typeof WORKBOARD_PRIORITIES)[number];
@@ -222,6 +227,10 @@ export type WorkboardNotification = {
   message: string;
   sessionKey?: string;
   runId?: string;
+  cardId?: string;
+  fromStatus?: WorkboardStatus;
+  toStatus?: WorkboardStatus;
+  revision?: number;
 };
 
 export type WorkboardWorkspace = {
