@@ -156,6 +156,11 @@ function buildWorkerPrompt(params: {
     "When done, call workboard_complete with the card id, token, summary, and proof.",
     "If blocked, call workboard_block with the card id, token, and reason.",
     "",
+    "Your card's full context is included below. To re-read this one card, call",
+    "workboard_read with the card id. Do NOT call workboard_list to work your own",
+    "card: it loads the entire board and is never required when you already have",
+    "your card id.",
+    "",
     params.context,
   ].join("\n");
 }
