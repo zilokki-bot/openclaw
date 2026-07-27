@@ -217,7 +217,8 @@ describe("dispatchAndStartWorkboardCards", () => {
     expect(result.startFailures).toEqual([
       expect.objectContaining({
         cardId: card.id,
-        error: "target agent workspace is unavailable for restricted dispatch",
+        error:
+          "card workspace authority is read-only; manual movement is allowed but worker dispatch requires write access.",
       }),
     ]);
     expect(run).not.toHaveBeenCalled();
