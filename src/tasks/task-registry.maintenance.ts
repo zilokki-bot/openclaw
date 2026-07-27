@@ -616,12 +616,11 @@ function shouldPruneTerminalTask(
   if (!isTerminalTask(task)) {
     return false;
   }
-  if (
-    task.runtime === "cron" &&
-    task.status !== "lost" &&
-    now - resolveCronTaskRecordTimestamp(task) >= CRON_HISTORY_RETENTION_MS
-  ) {
-    return true;
+  if (task.runtime === "cron" && task.status !== "lost") {
+    return (
+      now - resolveCronTaskRecordTimestamp(task) >= CRON_HISTORY_RETENTION_MS ||
+      cronHistoryOverflowTaskIds.has(task.taskId)
+    );
   }
   if (cronHistoryOverflowTaskIds.has(task.taskId)) {
     return true;
@@ -634,7 +633,11 @@ function shouldPruneTerminalTask(
 }
 
 function shouldStampCleanupAfter(task: TaskRecord): boolean {
-  return isTerminalTask(task) && typeof task.cleanupAfter !== "number";
+  return (
+    isTerminalTask(task) &&
+    typeof task.cleanupAfter !== "number" &&
+    !(task.runtime === "cron" && task.status !== "lost")
+  );
 }
 
 function resolveCleanupAfter(task: TaskRecord): number {
