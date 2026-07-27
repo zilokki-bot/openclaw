@@ -2436,6 +2436,48 @@ function compareNotifications(a: WorkboardNotification, b: WorkboardNotification
   return a.id.localeCompare(b.id);
 }
 
+function synthesizeStatusChangedNotifications(card: WorkboardCard): WorkboardNotification[] {
+  const events = card.events;
+  if (!events?.length) {
+    return [];
+  }
+  const result: WorkboardNotification[] = [];
+  const sessionKey = cardSessionKey(card);
+  const runId = cardRunId(card);
+  let revision = 0;
+  for (const event of events) {
+    if (event.kind !== "moved" && event.kind !== "created") {
+      continue;
+    }
+    const fromStatus = event.fromStatus;
+    const toStatus = event.toStatus;
+    if (!toStatus || fromStatus === toStatus) {
+      continue;
+    }
+    if (event.kind === "created" && toStatus === "todo") {
+      continue;
+    }
+    if (typeof event.at !== "number" || !Number.isFinite(event.at)) {
+      continue;
+    }
+    revision += 1;
+    result.push({
+      id: `status:${card.id}:${event.id}`,
+      kind: "status_changed",
+      createdAt: event.at,
+      sequence: event.at * 1000 + revision,
+      message: `Status changed ${fromStatus ?? "(new)"} -> ${toStatus}.`,
+      cardId: card.id,
+      ...(fromStatus ? { fromStatus } : {}),
+      toStatus,
+      revision,
+      ...((event.sessionKey ?? sessionKey) ? { sessionKey: event.sessionKey ?? sessionKey } : {}),
+      ...((event.runId ?? runId) ? { runId: event.runId ?? runId } : {}),
+    });
+  }
+  return result;
+}
+
 export class WorkboardStore {
   private mutationQueue: Promise<unknown> = Promise.resolve();
   private lastNotificationSequence = 0;
@@ -4191,6 +4233,7 @@ export class WorkboardStore {
     const effectiveBoardId = effectiveCardId ? undefined : (subscription?.boardId ?? boardId);
     const effectiveSessionKey = subscription?.sessionKey;
     const effectiveRunId = subscription?.runId;
+    const wantsStatusChanged = subscription?.eventKinds?.includes("status_changed") ?? false;
     const events: WorkboardNotification[] = [];
     for (const card of await this.list({ boardId: effectiveBoardId })) {
       if (effectiveCardId && card.id !== effectiveCardId) {
@@ -4199,6 +4242,7 @@ export class WorkboardStore {
       const stale = card.metadata?.stale;
       const notifications = [
         ...(card.metadata?.notifications ?? []),
+        ...(wantsStatusChanged ? synthesizeStatusChangedNotifications(card) : []),
         ...(stale
           ? [
               {

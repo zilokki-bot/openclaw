@@ -66,6 +66,45 @@ function redactDiagnosticsRows(result: Awaited<ReturnType<WorkboardStore["diagno
   };
 }
 
+type WorkboardDispatchResult = Awaited<ReturnType<typeof dispatchAndStartWorkboardCards>>;
+
+const pendingDispatches = new Map<string, Promise<WorkboardDispatchResult>>();
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .toSorted()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
+  const key = stableJson({
+    boardId: params.options?.boardId,
+    allowManagedWorktrees: params.options?.allowManagedWorktrees,
+  });
+  const pending = pendingDispatches.get(key);
+  if (pending) {
+    return pending;
+  }
+  const promise = dispatchAndStartWorkboardCards(params);
+  pendingDispatches.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (pendingDispatches.get(key) === promise) {
+      pendingDispatches.delete(key);
+    }
+  }
+}
+
 export function registerWorkboardGatewayMethods(params: {
   api: OpenClawPluginApi;
   store?: WorkboardStore;
@@ -389,7 +428,7 @@ export function registerWorkboardGatewayMethods(params: {
           requestParams && typeof requestParams === "object" && "boardId" in requestParams
             ? requestParams.boardId
             : undefined;
-        const result = await dispatchAndStartWorkboardCards({
+        const result = await dispatchOnce({
           store,
           subagent: api.runtime.subagent,
           worktrees: api.runtime.worktrees,

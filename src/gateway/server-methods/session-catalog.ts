@@ -2,6 +2,7 @@ import {
   ErrorCodes,
   errorShape,
   type SessionCatalog,
+  type SessionCatalogHost,
   type SessionsCatalogArchiveParams,
   type SessionsCatalogContinueParams,
   type SessionsCatalogListParams,
@@ -68,6 +69,62 @@ function catalogResult(
   return result;
 }
 
+type PendingCatalogList = {
+  promise: Promise<SessionCatalogHost[]>;
+};
+
+const pendingCatalogLists = new Map<string, PendingCatalogList>();
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .toSorted()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function catalogListKey(provider: SessionCatalogProvider, request: SessionsCatalogListParams) {
+  return stableJson({
+    providerId: provider.id,
+    search: request.search,
+    limitPerHost: request.limitPerHost,
+    hostIds: request.hostIds,
+    cursors: "cursors" in request ? request.cursors : undefined,
+  });
+}
+
+async function listProviderHosts(
+  provider: SessionCatalogProvider,
+  request: SessionsCatalogListParams,
+): Promise<SessionCatalogHost[]> {
+  const key = catalogListKey(provider, request);
+  const pending = pendingCatalogLists.get(key);
+  if (pending) {
+    return pending.promise;
+  }
+  const promise = provider.list({
+    search: request.search,
+    limitPerHost: request.limitPerHost,
+    hostIds: request.hostIds,
+    ...("cursors" in request ? { cursors: request.cursors } : {}),
+  });
+  pendingCatalogLists.set(key, { promise });
+  try {
+    return await promise;
+  } finally {
+    if (pendingCatalogLists.get(key)?.promise === promise) {
+      pendingCatalogLists.delete(key);
+    }
+  }
+}
+
 export const sessionCatalogHandlers: GatewayRequestHandlers = {
   "sessions.catalog.list": async ({ params, respond }) => {
     if (
@@ -94,12 +151,7 @@ export const sessionCatalogHandlers: GatewayRequestHandlers = {
     const catalogList = await Promise.all(
       selected.map(async (provider): Promise<SessionCatalog> => {
         try {
-          const hosts = await provider.list({
-            search: request.search,
-            limitPerHost: request.limitPerHost,
-            hostIds: request.hostIds,
-            ...("cursors" in request ? { cursors: request.cursors } : {}),
-          });
+          const hosts = await listProviderHosts(provider, request);
           return catalogResult(provider, hosts);
         } catch (error) {
           return catalogResult(provider, [], catalogError(error));
