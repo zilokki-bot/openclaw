@@ -478,8 +478,12 @@ describe("openclaw channel mcp server", () => {
           arguments: { session_key: "agent:main:claude-coord", text: "claude note" },
         });
 
-        expect(codexResult.content?.[0]?.text).toBe("sent");
-        expect(claudeResult.content?.[0]?.text).toBe("sent");
+        expect((codexResult.content as Array<{ text?: string }> | undefined)?.[0]?.text).toBe(
+          "sent",
+        );
+        expect((claudeResult.content as Array<{ text?: string }> | undefined)?.[0]?.text).toBe(
+          "sent",
+        );
         expect(gatewayRequest).toHaveBeenCalledTimes(2);
         expect(gatewayRequest.mock.calls[0]?.[0]).toBe("coord.messages.send");
         expect(gatewayRequest.mock.calls[0]?.[1]).toMatchObject({
