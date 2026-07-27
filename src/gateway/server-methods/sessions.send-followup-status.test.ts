@@ -9,6 +9,7 @@ import type { GatewayRequestContext, RespondFn } from "./types.js";
 
 const loadSessionEntryMock = vi.fn();
 const readSessionMessagesMock = vi.fn();
+const readSessionMessageCountAsyncMock = vi.fn();
 const loadGatewaySessionRowMock = vi.fn();
 const getLatestSubagentRunByChildSessionKeyMock = vi.fn();
 const replaceSubagentRunAfterSteerMock = vi.fn();
@@ -21,6 +22,16 @@ vi.mock("../session-utils.js", async () => {
     loadSessionEntry: (...args: unknown[]) => loadSessionEntryMock(...args),
     readSessionMessages: (...args: unknown[]) => readSessionMessagesMock(...args),
     loadGatewaySessionRow: (...args: unknown[]) => loadGatewaySessionRowMock(...args),
+  };
+});
+
+vi.mock("../session-transcript-readers.js", async () => {
+  const actual = await vi.importActual<typeof import("../session-transcript-readers.js")>(
+    "../session-transcript-readers.js",
+  );
+  return {
+    ...actual,
+    readSessionMessageCountAsync: (...args: unknown[]) => readSessionMessageCountAsyncMock(...args),
   };
 });
 
@@ -51,10 +62,62 @@ describe("sessions.send completed subagent follow-up status", () => {
   beforeEach(() => {
     loadSessionEntryMock.mockReset();
     readSessionMessagesMock.mockReset();
+    readSessionMessageCountAsyncMock.mockReset();
+    readSessionMessageCountAsyncMock.mockResolvedValue(0);
     loadGatewaySessionRowMock.mockReset();
     getLatestSubagentRunByChildSessionKeyMock.mockReset();
     replaceSubagentRunAfterSteerMock.mockReset();
     chatSendMock.mockReset();
+  });
+
+  it("coord.messages.send routes canonical coordination messages with provenance", async () => {
+    const coordSessionKey = "agent:main:codex-coord";
+    loadSessionEntryMock.mockReturnValue({
+      cfg: {},
+      canonicalKey: coordSessionKey,
+      storePath: "/tmp/sessions.json",
+      entry: { sessionId: "sess-coord" },
+    });
+    chatSendMock.mockImplementation(
+      async ({ params, respond }: { params: unknown; respond: RespondFn }) => {
+        respond(true, { runId: "run-coord", status: "started", params }, undefined, undefined);
+      },
+    );
+
+    const respondMock = vi.fn();
+    const respond = respondMock as unknown as RespondFn;
+    const context = {
+      chatAbortControllers: new Map(),
+      broadcastToConnIds: vi.fn(),
+      getSessionEventSubscriberConnIds: () => new Set<string>(),
+      getRuntimeConfig: () => ({}),
+    } as unknown as GatewayRequestContext;
+
+    await expectDefined(
+      sessionsHandlers["coord.messages.send"],
+      'sessionsHandlers["coord.messages.send"] test invariant',
+    )({
+      req: { id: "req-coord" } as never,
+      params: {
+        sessionKey: coordSessionKey,
+        message: "  coord payload  ",
+        idempotencyKey: "coord-key",
+      },
+      respond,
+      context,
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(chatSendMock).toHaveBeenCalledOnce();
+    const forwarded = chatSendMock.mock.calls[0]?.[0]?.params as Record<string, unknown>;
+    expect(forwarded.sessionKey).toBe(coordSessionKey);
+    expect(forwarded.idempotencyKey).toBe("coord-key");
+    expect(forwarded.message).toContain("sourceTool=coord_messages_send");
+    expect(forwarded.message).toContain(`targetSession=${coordSessionKey}`);
+    expect(forwarded.message).toContain("coord payload");
+    expect(forwarded.message).not.toContain("  coord payload  ");
+    expect(respondMock.mock.calls[0]?.[0]).toBe(true);
   });
 
   it("reactivates completed subagent sessions before broadcasting sessions.changed", async () => {

@@ -123,6 +123,9 @@ describe("workboard gateway methods", () => {
       respond: createRespond,
     } as never);
     expect(createRespond.mock.calls[0]?.[0]).toBe(true);
+    expect(
+      createRespond.mock.calls[0]?.[1]?.card?.metadata?.automation?.workspaceAccess,
+    ).toBeUndefined();
 
     const listRespond = vi.fn();
     await listHandler?.({ params: {}, respond: listRespond } as never);
@@ -281,6 +284,7 @@ describe("workboard gateway methods", () => {
       title: "Ready worker",
       status: "ready",
       priority: "urgent",
+      workspace: { kind: "dir", path: "/workspace/ready" },
     });
 
     registerWorkboardGatewayMethods({ api, store });
@@ -331,6 +335,7 @@ describe("workboard gateway methods", () => {
       status: "ready",
       priority: "urgent",
       boardId: "coalesce",
+      workspace: { kind: "dir", path: "/workspace/coalesce" },
     });
 
     registerWorkboardGatewayMethods({ api, store });

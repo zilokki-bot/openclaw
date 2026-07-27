@@ -216,6 +216,15 @@ function selectStartableCards(
   return selected;
 }
 
+function assertKnownDispatchWorkspace(card: WorkboardCard): void {
+  const workspace = card.metadata?.automation?.workspace;
+  if (!workspace || workspace.kind === "scratch") {
+    throw new Error(
+      "card workspace authority is unknown; provide an agent workspace to scope a hostless card before dispatch.",
+    );
+  }
+}
+
 export async function dispatchAndStartWorkboardCards(params: {
   store: WorkboardStore;
   subagent: WorkboardSubagentRuntime;
@@ -253,6 +262,7 @@ export async function dispatchAndStartWorkboardCards(params: {
       continue;
     }
     try {
+      assertKnownDispatchWorkspace(card);
       const claimed = await params.store.claim(card.id, {
         ownerId,
         ttlSeconds: card.metadata?.automation?.maxRuntimeSeconds,

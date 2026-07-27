@@ -61,6 +61,7 @@ import { SessionUnreadPatchGuard } from "../../lib/sessions/unread.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { PollController } from "../../lit/poll-controller.ts";
 import { refreshChatAvatar } from "./chat-avatar.ts";
+import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
 import {
   applyChatAgentsList,
   clearChatHistory,
@@ -68,7 +69,6 @@ import {
   loadOlderChatHistoryPage,
   resolveChatHistoryPagination,
   syncSelectedSessionMessageSubscription,
-  type ChatHistoryPagination,
 } from "./chat-history.ts";
 import { markQueuedChatSendsWaitingForReconnect } from "./chat-queue.ts";
 import { dismissRealtimeTalkError } from "./chat-realtime.ts";

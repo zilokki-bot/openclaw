@@ -670,6 +670,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
       "sessions.create",
       "sessions.compaction.branch",
       "sessions.compaction.restore",
+      "coord.messages.send",
       "sessions.send",
       "sessions.steer",
       "sessions.abort",
