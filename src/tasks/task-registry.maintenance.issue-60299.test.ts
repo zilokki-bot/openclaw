@@ -6,6 +6,7 @@ import type { ParsedAgentSessionKey } from "../routing/session-key.js";
 import { getDetachedTaskLifecycleRuntime } from "./detached-task-runtime.js";
 import {
   CRON_HISTORY_KEEP_PER_JOB,
+  CRON_HISTORY_RETENTION_MS,
   getInspectableActiveTaskRestartBlockers,
   getTaskRegistryMaintenanceDiagnostics,
   previewTaskRegistryMaintenance,
@@ -899,7 +900,7 @@ describe("task-registry maintenance issue #60299", () => {
         status: "succeeded",
         endedAt: now + index + 1,
         lastEventAt: now + index + 1,
-        cleanupAfter: 0,
+        cleanupAfter: undefined,
       }),
     );
     const lostTask = makeStaleTask({
@@ -933,7 +934,7 @@ describe("task-registry maintenance issue #60299", () => {
         status: "succeeded",
         endedAt: now + index + 2,
         lastEventAt: now + index + 2,
-        cleanupAfter: 0,
+        cleanupAfter: undefined,
         detail: { storeKey: "store:a" },
       }),
     );
@@ -944,7 +945,7 @@ describe("task-registry maintenance issue #60299", () => {
       status: "succeeded",
       endedAt: now + 1,
       lastEventAt: now + 1,
-      cleanupAfter: 0,
+      cleanupAfter: undefined,
       detail: { storeKey: "store:b" },
     });
     const { currentTasks } = createTaskRegistryMaintenanceHarness({
@@ -956,6 +957,39 @@ describe("task-registry maintenance issue #60299", () => {
     expect(result.pruned).toBe(0);
     expect(currentTasks.size).toBe(CRON_HISTORY_KEEP_PER_JOB + 1);
     expect(currentTasks.has(storeBTask.taskId)).toBe(true);
+  });
+
+  it("prunes terminal cron history older than the cron retention window", async () => {
+    const now = Date.now();
+    const oldEndedAt = now - CRON_HISTORY_RETENTION_MS - 1;
+    const freshEndedAt = now - CRON_HISTORY_RETENTION_MS + 60_000;
+    const oldTask = makeStaleTask({
+      taskId: "cron-history-old-age",
+      runtime: "cron",
+      sourceId: "cron-history-age-job",
+      status: "succeeded",
+      endedAt: oldEndedAt,
+      lastEventAt: oldEndedAt,
+      cleanupAfter: undefined,
+    });
+    const freshTask = makeStaleTask({
+      taskId: "cron-history-fresh-age",
+      runtime: "cron",
+      sourceId: "cron-history-age-job",
+      status: "failed",
+      endedAt: freshEndedAt,
+      lastEventAt: freshEndedAt,
+      cleanupAfter: undefined,
+    });
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [oldTask, freshTask],
+    });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.pruned).toBe(1);
+    expect(currentTasks.has(oldTask.taskId)).toBe(false);
+    expect(currentTasks.has(freshTask.taskId)).toBe(true);
   });
 
   it("still stamps non-cron terminal rows with default retention", async () => {

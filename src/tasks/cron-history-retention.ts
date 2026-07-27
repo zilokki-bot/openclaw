@@ -5,6 +5,7 @@ import { resolveEffectiveTaskCleanupAfter } from "./task-retention.js";
 
 // Replaces configurable cron.runLog.keepLines with one ledger-owned bound.
 export const CRON_HISTORY_KEEP_PER_JOB = 2000;
+export const CRON_HISTORY_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 function isTerminalTask(task: TaskRecord): boolean {
   return task.status !== "queued" && task.status !== "running";
@@ -54,6 +55,12 @@ export function shouldPruneTerminalTask(
 ): boolean {
   if (!isTerminalTask(task)) {
     return false;
+  }
+  if (task.runtime === "cron" && task.status !== "lost") {
+    return (
+      resolveCronTaskRecordTimestamp(task) <= now - CRON_HISTORY_RETENTION_MS ||
+      cronHistoryOverflowTaskIds.has(task.taskId)
+    );
   }
   if (cronHistoryOverflowTaskIds.has(task.taskId)) {
     return true;

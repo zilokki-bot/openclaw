@@ -40,7 +40,7 @@ import {
   collectCronHistoryOverflowTaskIds,
   shouldPruneTerminalTask,
 } from "./cron-history-retention.js";
-export { CRON_HISTORY_KEEP_PER_JOB } from "./cron-history-retention.js";
+export { CRON_HISTORY_KEEP_PER_JOB, CRON_HISTORY_RETENTION_MS } from "./cron-history-retention.js";
 import {
   getDetachedTaskLifecycleRuntime,
   tryRecoverTaskBeforeMarkLost,
@@ -500,7 +500,8 @@ function shouldStampCleanupAfter(task: TaskRecord): boolean {
   return (
     isTerminalTask(task) &&
     typeof task.cleanupAfter !== "number" &&
-    resolveTaskCleanupAfter(task) !== undefined
+    resolveTaskCleanupAfter(task) !== undefined &&
+    !(task.runtime === "cron" && task.status !== "lost")
   );
 }
 
