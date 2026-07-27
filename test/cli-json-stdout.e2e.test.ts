@@ -5,7 +5,85 @@ import path from "node:path";
 import { withTempHome } from "openclaw/plugin-sdk/test-env";
 import { describe, expect, it } from "vitest";
 
+function runSourceCli(tempHome: string, args: string[], envOverrides: NodeJS.ProcessEnv = {}) {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: tempHome,
+    USERPROFILE: tempHome,
+    OPENCLAW_TEST_FAST: "1",
+  };
+  delete env.OPENCLAW_HOME;
+  delete env.OPENCLAW_STATE_DIR;
+  delete env.OPENCLAW_CONFIG_PATH;
+  delete env.VITEST;
+  Object.assign(env, envOverrides);
+
+  const entry = path.resolve(process.cwd(), "src/entry.ts");
+  return spawnSync(process.execPath, ["--import", "tsx", entry, ...args], {
+    cwd: process.cwd(),
+    env,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 60_000,
+  });
+}
+
 describe("cli json stdout contract", () => {
+  it.each([
+    { name: "default service", inheritedProfile: undefined, inheritedStateName: ".openclaw" },
+    { name: "named service", inheritedProfile: "main", inheritedStateName: ".openclaw-main" },
+  ])("resolves the requested profile from inherited $name state", async (inherited) => {
+    await withTempHome(
+      async (tempHome) => {
+        const inheritedStateDir = path.join(tempHome, inherited.inheritedStateName);
+        const result = runSourceCli(tempHome, ["--profile", "work", "config", "file"], {
+          OPENCLAW_PROFILE: inherited.inheritedProfile,
+          OPENCLAW_STATE_DIR: inheritedStateDir,
+          OPENCLAW_CONFIG_PATH: path.join(inheritedStateDir, "openclaw.json"),
+        });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout.trim()).toBe(path.join(tempHome, ".openclaw-work", "openclaw.json"));
+        await expect(fs.access(path.join(tempHome, ".openclaw-work"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      },
+      { prefix: "openclaw-profile-isolation-e2e-" },
+    );
+  });
+
+  it("keeps default-profile exec approvals untouched for a scratch-state config query", async () => {
+    await withTempHome(
+      async (tempHome) => {
+        const defaultStateDir = path.join(tempHome, ".openclaw");
+        const scratchStateDir = path.join(tempHome, "scratch-state");
+        const approvalsPath = path.join(defaultStateDir, "exec-approvals.json");
+        const approvals = '{"version":1,"approvals":{"demo":true}}\n';
+        await fs.mkdir(defaultStateDir, { recursive: true });
+        await fs.mkdir(scratchStateDir, { recursive: true });
+        await fs.writeFile(approvalsPath, approvals, "utf8");
+
+        const result = runSourceCli(tempHome, ["config", "file"], {
+          OPENCLAW_STATE_DIR: scratchStateDir,
+        });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout.trim()).toBe(path.join(scratchStateDir, "openclaw.json"));
+        await expect(fs.readFile(approvalsPath, "utf8")).resolves.toBe(approvals);
+        await expect(fs.access(`${approvalsPath}.migrated`)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+        await expect(
+          fs.access(path.join(scratchStateDir, "exec-approvals.json")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(
+          fs.access(path.join(scratchStateDir, "state", "openclaw.sqlite")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      },
+      { prefix: "openclaw-read-only-state-e2e-" },
+    );
+  });
+
   it("keeps `update status --json` stdout parseable even with legacy doctor preflight inputs", async () => {
     await withTempHome(
       async (tempHome) => {
