@@ -195,6 +195,36 @@ describe("dispatchAndStartWorkboardCards", () => {
     });
   });
 
+  it("fails closed for a restricted hostless ready card without claiming or dispatching", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const card = await store.create({
+      title: "Restricted hostless worker",
+      status: "ready",
+      agentId: "codex-main",
+    });
+    const run = vi.fn();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run },
+      options: {
+        maxStarts: 1,
+        workspaceAccess: { unrestricted: false, roots: ["/workspace"] },
+      },
+    });
+
+    expect(result.started).toEqual([]);
+    expect(result.startFailures).toEqual([
+      expect.objectContaining({
+        cardId: card.id,
+        error: "target agent workspace is unavailable for restricted dispatch",
+      }),
+    ]);
+    expect(run).not.toHaveBeenCalled();
+    await expect(store.get(card.id)).resolves.toMatchObject({ status: "ready" });
+    expect((await store.get(card.id))?.metadata?.claim).toBeUndefined();
+  });
+
   it("does not claim a card whose workspace authority changed after preflight", async () => {
     const store = new WorkboardStore(createMemoryStore());
     const card = await store.create({
