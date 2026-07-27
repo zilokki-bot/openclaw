@@ -56,6 +56,57 @@ describe("diagnostic memory", () => {
     resetDiagnosticStabilityRecorderForTest();
     setLoggerOverride(null);
     resetLogger();
+    for (const key of [
+      "OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES",
+      "OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES",
+      "OPENCLAW_DIAGNOSTIC_HEAP_WARNING_BYTES",
+      "OPENCLAW_DIAGNOSTIC_HEAP_CRITICAL_BYTES",
+      "OPENCLAW_DIAGNOSTIC_RSS_GROWTH_WARNING_BYTES",
+      "OPENCLAW_DIAGNOSTIC_RSS_GROWTH_CRITICAL_BYTES",
+      "OPENCLAW_DIAGNOSTIC_GROWTH_WINDOW_MS",
+      "OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS",
+    ]) {
+      delete process.env[key];
+    }
+  });
+
+  it("applies RSS pressure thresholds from env vars when no explicit thresholds are given", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "1000";
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES = "3000";
+    process.env.OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS = "60000";
+
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
+
+    emitDiagnosticMemorySample({
+      now: 1000,
+      uptimeMs: 0,
+      memoryUsage: memoryUsage({ rss: 2000 }),
+    });
+    stop();
+
+    const pressure = events.filter((event) => event.type === "diagnostic.memory.pressure");
+    expect(pressure).toMatchObject([
+      { type: "diagnostic.memory.pressure", level: "warning", thresholdBytes: 1000 },
+    ]);
+  });
+
+  it("ignores invalid RSS env thresholds and keeps the default (no false pressure)", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "abc";
+
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
+
+    // 2000 bytes is far below the default 1.5GiB warning; an invalid env value
+    // must fall through to that default and emit no pressure.
+    emitDiagnosticMemorySample({
+      now: 1000,
+      uptimeMs: 0,
+      memoryUsage: memoryUsage({ rss: 2000 }),
+    });
+    stop();
+
+    expect(events.some((event) => event.type === "diagnostic.memory.pressure")).toBe(false);
   });
 
   it("emits memory samples with byte counts", () => {
