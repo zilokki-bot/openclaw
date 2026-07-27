@@ -162,6 +162,13 @@ OpenClaw subagent sessions still own execution. One dispatch pass:
 Workers get bounded card context plus the claim token needed to heartbeat,
 complete, or block the card through the Workboard tools.
 
+The worker prompt steers execution to card-scoped reads: the dispatched card's
+full context is embedded in the prompt, and the worker is told to re-read its own
+card with `workboard_read` (which already returns bounded per-card context) and
+to avoid `workboard_list`. `workboard_list` materializes every card on the board;
+on a large board that full-board read runs on the Gateway's single event loop and
+is never required to work one card whose id the worker already holds.
+
 ### Worker selection
 
 Each pass starts **at most 3 workers by default**. Ready cards are ordered by

@@ -11,6 +11,8 @@ import {
   getDetachedTaskLifecycleRuntime,
 } from "./detached-task-runtime.js";
 import {
+  CRON_HISTORY_KEEP_PER_JOB,
+  CRON_HISTORY_RETENTION_MS,
   getInspectableActiveTaskRestartBlockers,
   getTaskRegistryMaintenanceDiagnostics,
   previewTaskRegistryMaintenance,
@@ -865,5 +867,108 @@ describe("task-registry maintenance issue #60299", () => {
       throw new Error("Expected task recovery hook now timestamp");
     }
     expect(hookNow).toBeGreaterThanOrEqual(beforeMaintenance);
+  });
+
+  it("keeps the newest 2000 terminal cron rows per source", async () => {
+    const now = Date.now();
+    const tasks = Array.from({ length: CRON_HISTORY_KEEP_PER_JOB + 1 }, (_, index) =>
+      makeStaleTask({
+        taskId: `cron-history-${index}`,
+        runtime: "cron",
+        sourceId: "cron-history-job",
+        status: "succeeded",
+        endedAt: now + index + 1,
+        lastEventAt: now + index + 1,
+        cleanupAfter: undefined,
+      }),
+    );
+    const lostTask = makeStaleTask({
+      taskId: "cron-history-lost",
+      runtime: "cron",
+      sourceId: "cron-history-job",
+      status: "lost",
+      endedAt: now - 60 * 60_000,
+      lastEventAt: now - 60 * 60_000,
+      cleanupAfter: undefined,
+    });
+    tasks.push(lostTask);
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({ tasks });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.pruned).toBe(1);
+    expect(currentTasks.size).toBe(CRON_HISTORY_KEEP_PER_JOB + 1);
+    expect(currentTasks.has("cron-history-0")).toBe(false);
+    expect(currentTasks.has("cron-history-1")).toBe(true);
+    expect(currentTasks.has(lostTask.taskId)).toBe(true);
+  });
+
+  it("prunes terminal cron history older than the cron retention window", async () => {
+    const now = Date.now();
+    const oldEndedAt = now - CRON_HISTORY_RETENTION_MS - 1;
+    const freshEndedAt = now - CRON_HISTORY_RETENTION_MS + 60_000;
+    const oldTask = makeStaleTask({
+      taskId: "cron-history-old-age",
+      runtime: "cron",
+      sourceId: "cron-history-age-job",
+      status: "succeeded",
+      endedAt: oldEndedAt,
+      lastEventAt: oldEndedAt,
+      cleanupAfter: undefined,
+    });
+    const freshTask = makeStaleTask({
+      taskId: "cron-history-fresh-age",
+      runtime: "cron",
+      sourceId: "cron-history-age-job",
+      status: "failed",
+      endedAt: freshEndedAt,
+      lastEventAt: freshEndedAt,
+      cleanupAfter: undefined,
+    });
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [oldTask, freshTask],
+    });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.pruned).toBe(1);
+    expect(currentTasks.has(oldTask.taskId)).toBe(false);
+    expect(currentTasks.has(freshTask.taskId)).toBe(true);
+  });
+
+  it("still stamps non-cron terminal rows with default retention", async () => {
+    const endedAt = Date.now();
+    const task = makeStaleTask({
+      runtime: "subagent",
+      status: "succeeded",
+      endedAt,
+      lastEventAt: endedAt,
+      cleanupAfter: undefined,
+    });
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({ tasks: [task] });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.cleanupStamped).toBe(1);
+    expect(requireTaskRecord(currentTasks, task.taskId).cleanupAfter).toBe(
+      endedAt + 7 * 24 * 60 * 60_000,
+    );
+  });
+
+  it("still prunes lost cron rows after 24 hours", async () => {
+    const endedAt = Date.now() - 25 * 60 * 60_000;
+    const task = makeStaleTask({
+      sourceId: "lost-cron-job",
+      status: "lost",
+      endedAt,
+      lastEventAt: endedAt,
+      cleanupAfter: undefined,
+    });
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({ tasks: [task] });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.pruned).toBe(1);
+    expect(currentTasks.has(task.taskId)).toBe(false);
   });
 });
