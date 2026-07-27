@@ -13,6 +13,7 @@ import {
   ErrorCodes,
   errorShape,
   type SessionOperationEvent,
+  validateCoordMessagesSendParams,
   validateSessionsAbortParams,
   validateSessionsCleanupParams,
   validateSessionsCompactParams,
@@ -167,6 +168,16 @@ import type {
   RespondFn,
 } from "./types.js";
 import { assertValidParams } from "./validation.js";
+
+const INTERNAL_COORD_SOURCE_TOOL = "coord_messages_send";
+
+function annotateInternalCoordMessage(message: string, sessionKey: string): string {
+  return [
+    `[Inter-session message] sourceTool=${INTERNAL_COORD_SOURCE_TOOL} targetSession=${sessionKey} isUser=false`,
+    "This content was routed by OpenClaw through a canonical internal coordination route.",
+    message,
+  ].join("\n");
+}
 
 const log = createSubsystemLogger("gateway/sessions");
 
@@ -2118,6 +2129,28 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       method: "sessions.send",
       req,
       params,
+      respond,
+      context,
+      client,
+      isWebchatConnect,
+      interruptIfActive: false,
+    });
+  },
+  "coord.messages.send": async ({ req, params, respond, context, client, isWebchatConnect }) => {
+    if (
+      !assertValidParams(params, validateCoordMessagesSendParams, "coord.messages.send", respond)
+    ) {
+      return;
+    }
+    const p = params as { sessionKey: string; message: string; idempotencyKey?: string };
+    await handleSessionSend({
+      method: "sessions.send",
+      req,
+      params: {
+        key: p.sessionKey,
+        message: annotateInternalCoordMessage(p.message.trim(), p.sessionKey),
+        idempotencyKey: p.idempotencyKey,
+      },
       respond,
       context,
       client,

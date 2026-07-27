@@ -146,18 +146,21 @@ describe("dispatchAndStartWorkboardCards", () => {
       status: "ready",
       priority: "urgent",
       agentId: "codex-main",
+      workspace: { kind: "dir", path: "/workspace/first" },
     });
     const second = await store.create({
       title: "Second worker",
       status: "ready",
       priority: "normal",
       agentId: "codex-main",
+      workspace: { kind: "dir", path: "/workspace/second" },
     });
     const otherAgent = await store.create({
       title: "Other worker",
       status: "ready",
       priority: "high",
       agentId: "codex-side",
+      workspace: { kind: "dir", path: "/workspace/other" },
     });
     const run = vi
       .fn()
@@ -215,6 +218,7 @@ describe("dispatchAndStartWorkboardCards", () => {
       status: "ready",
       priority: "high",
       agentId: "codex-main",
+      workspace: { kind: "dir", path: "/workspace/next" },
     });
     const run = vi.fn().mockResolvedValue({ runId: "run-next" });
 
@@ -240,12 +244,14 @@ describe("dispatchAndStartWorkboardCards", () => {
       status: "ready",
       priority: "urgent",
       boardId: "ops",
+      workspace: { kind: "dir", path: "/workspace/ops" },
     });
     const product = await store.create({
       title: "Product worker",
       status: "ready",
       priority: "urgent",
       boardId: "product",
+      workspace: { kind: "dir", path: "/workspace/product" },
     });
     const run = vi.fn().mockResolvedValue({ runId: "run-ops" });
 
@@ -296,7 +302,11 @@ describe("dispatchAndStartWorkboardCards", () => {
 
   it("blocks a card when worker start fails after claim", async () => {
     const store = new WorkboardStore(createMemoryStore());
-    const card = await store.create({ title: "Fail worker", status: "ready" });
+    const card = await store.create({
+      title: "Fail worker",
+      status: "ready",
+      workspace: { kind: "dir", path: "/workspace/fail" },
+    });
     const run = vi.fn().mockRejectedValue(new Error("model unavailable"));
 
     const result = await dispatchAndStartWorkboardCards({
@@ -324,6 +334,30 @@ describe("dispatchAndStartWorkboardCards", () => {
         ],
       },
     });
+    expect((await store.get(card.id))?.metadata?.claim).toBeUndefined();
+  });
+
+  it("fails closed for a hostless ready card without claiming or dispatching", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const card = await store.create({ title: "Hostless worker", status: "ready" });
+    const run = vi.fn();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run },
+      options: { now: 10, maxStarts: 1 },
+    });
+
+    expect(result.started).toEqual([]);
+    expect(result.startFailures).toEqual([
+      expect.objectContaining({
+        cardId: card.id,
+        error:
+          "card workspace authority is unknown; provide an agent workspace to scope a hostless card before dispatch.",
+      }),
+    ]);
+    expect(run).not.toHaveBeenCalled();
+    await expect(store.get(card.id)).resolves.toMatchObject({ status: "ready" });
     expect((await store.get(card.id))?.metadata?.claim).toBeUndefined();
   });
 });

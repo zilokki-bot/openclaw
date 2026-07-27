@@ -682,6 +682,8 @@ import {
   type SessionsCatalogReadParams,
   SessionsCatalogReadParamsSchema,
   SessionsCatalogReadResultSchema,
+  type CoordMessagesSendParams,
+  CoordMessagesSendParamsSchema,
   type SessionsMessagesSubscribeParams,
   SessionsMessagesSubscribeParamsSchema,
   type SessionsMessagesUnsubscribeParams,
@@ -1213,6 +1215,9 @@ export const validateSessionsCreateParams = lazyCompile<SessionsCreateParams>(
   SessionsCreateParamsSchema,
 );
 export const validateSessionsSendParams = lazyCompile<SessionsSendParams>(SessionsSendParamsSchema);
+export const validateCoordMessagesSendParams = lazyCompile<CoordMessagesSendParams>(
+  CoordMessagesSendParamsSchema,
+);
 export const validateSessionsMessagesSubscribeParams = lazyCompile<SessionsMessagesSubscribeParams>(
   SessionsMessagesSubscribeParamsSchema,
 );
@@ -1764,6 +1769,7 @@ export {
   SessionWorktreeInfoSchema,
   SessionsCreateParamsSchema,
   SessionsCreateResultSchema,
+  CoordMessagesSendParamsSchema,
   SessionsSendParamsSchema,
   SessionsAbortParamsSchema,
   SessionsPatchParamsSchema,

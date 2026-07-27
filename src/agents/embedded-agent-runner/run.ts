@@ -2775,7 +2775,9 @@ async function runEmbeddedAgentInternal(
             thinkLevel,
             onToolOutcome: observeToolOutcome,
             allocateToolOutcomeOrdinal,
-            onToolStreamBoundary: maybeAnnounceFastModeAutoOff,
+            onToolStreamBoundary: () => {
+              void maybeAnnounceFastModeAutoOff();
+            },
             onRunProgress: notifyRunProgress,
             fastMode: attemptFastMode,
             fastModeAuto: params.fastMode === "auto",
