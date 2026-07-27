@@ -58,6 +58,54 @@ describe("session catalog Gateway methods", () => {
     });
   });
 
+  it("coalesces concurrent identical list calls", async () => {
+    let resolveList:
+      | ((value: Awaited<ReturnType<SessionCatalogProvider["list"]>>) => void)
+      | undefined;
+    const host = {
+      hostId: "node:fast",
+      label: "Fast node",
+      kind: "node" as const,
+      connected: true,
+      nodeId: "fast",
+      sessions: [],
+    };
+    const list = vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<SessionCatalogProvider["list"]>>>((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+    activeRegistry.sessionCatalogs = [{ provider: provider("codex", { list }) }];
+
+    const first = call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 });
+    const second = call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 });
+
+    await vi.waitFor(() => expect(list).toHaveBeenCalledOnce());
+    resolveList?.([host]);
+    const [firstRespond, secondRespond] = await Promise.all([first, second]);
+
+    expect(list).toHaveBeenCalledOnce();
+    expect(firstRespond).toHaveBeenCalledWith(true, {
+      catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
+    });
+    expect(secondRespond).toHaveBeenCalledWith(true, {
+      catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
+    });
+  });
+
+  it("does not coalesce different list parameters", async () => {
+    activeRegistry.sessionCatalogs = [{ provider: provider("codex") }];
+
+    await Promise.all([
+      call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 }),
+      call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 10 }),
+    ]);
+
+    const catalog = activeRegistry.sessionCatalogs[0] as { provider: SessionCatalogProvider };
+    expect(catalog.provider.list).toHaveBeenCalledTimes(2);
+  });
+
   it("dispatches continue by catalog id", async () => {
     const continueSession = vi.fn(async () => ({ sessionKey: "agent:main:adopted" }));
     activeRegistry.sessionCatalogs = [{ provider: provider("codex", { continueSession }) }];
