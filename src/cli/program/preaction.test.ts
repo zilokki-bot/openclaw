@@ -226,6 +226,7 @@ describe("registerPreActionHooks", () => {
       .argument("<value>")
       .option("--json")
       .action(() => {});
+    config.command("file").action(() => {});
     config
       .command("validate")
       .option("--json")
@@ -707,6 +708,19 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(routeLogsToStderrMock).toHaveBeenCalledOnce();
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["default profile", ["node", "openclaw", "config", "file"]],
+    ["named profile", ["node", "openclaw", "--profile", "work", "config", "file"]],
+  ])("bypasses config guard for a %s config path query", async (_name, processArgv) => {
+    await runPreAction({
+      parseArgv: ["config", "file"],
+      processArgv,
+    });
+
+    expect(ensureConfigReadyMock).not.toHaveBeenCalled();
     expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
