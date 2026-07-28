@@ -1617,6 +1617,54 @@ Some global directive after tasks.
     replySpy.mockReset();
   });
 
+  it("does not inject dispatcher HEARTBEAT.md directives into diagnostic heartbeat prompts", async () => {
+    const tmpDir = await createCaseDir("openclaw-hb-unsafe-dispatcher-context");
+    const storePath = path.join(tmpDir, "sessions.json");
+    const workspaceDir = path.join(tmpDir, "workspace");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, "HEARTBEAT.md"),
+      `# HEARTBEAT — Pulse autonomous cycle
+
+Выполни workboard_list status=ready limit=5.
+Есть карточки в ready?
+- Да → заклейми одну и отправь агента через sessions_spawn.
+`,
+      "utf-8",
+    );
+
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+          heartbeat: { every: "5m", target: "whatsapp" },
+        },
+      },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+      session: { store: storePath },
+    };
+    await seedWhatsAppSession(storePath, resolveMainSessionKey(cfg));
+    const replySpy = vi.fn().mockResolvedValue({ text: "HEARTBEAT_OK" });
+    const sendWhatsApp = vi
+      .fn<
+        (to: string, text: string, opts?: unknown) => Promise<{ messageId: string; toJid: string }>
+      >()
+      .mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+    const res = await runHeartbeatOnce({
+      cfg,
+      deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+    });
+
+    expect(res.status).toBe("ran");
+    expect(replySpy).toHaveBeenCalledTimes(1);
+    const calledCtx = replyBody(replySpy);
+    expect(calledCtx.Body).not.toContain("Additional context from HEARTBEAT.md");
+    expect(calledCtx.Body).not.toContain("заклейми");
+    expect(calledCtx.Body).not.toContain("sessions_spawn");
+    replySpy.mockReset();
+  });
+
   it("strips documented unindented task entries while keeping following top-level bullets", async () => {
     const tmpDir = await createCaseDir("openclaw-hb-unindented-tasks-context");
     const storePath = path.join(tmpDir, "sessions.json");

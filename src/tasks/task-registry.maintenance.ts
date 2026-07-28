@@ -205,7 +205,7 @@ type CronExecutionId = {
 };
 
 type CronTerminalRecovery = {
-  status: Extract<TaskStatus, "succeeded" | "failed" | "timed_out">;
+  status: Extract<TaskStatus, "succeeded" | "failed" | "timed_out" | "cancelled">;
   endedAt: number;
   lastEventAt: number;
   error?: string;
@@ -303,6 +303,39 @@ function findTaskSessionEntry(
   const agentId = taskRegistryMaintenanceRuntime.parseAgentSessionKey(childSessionKey)?.agentId;
   const storePath = taskRegistryMaintenanceRuntime.resolveStorePath(undefined, { agentId });
   return findSessionEntryByKey(getSessionEntryLookup(storePath, context), childSessionKey);
+}
+
+function findSessionEntryForSessionKey(
+  sessionKey: string | undefined,
+  context?: BackingSessionLookupContext,
+): SessionEntry | undefined {
+  const normalized = sessionKey?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const agentId = taskRegistryMaintenanceRuntime.parseAgentSessionKey(normalized)?.agentId;
+  const storePath = taskRegistryMaintenanceRuntime.resolveStorePath(undefined, { agentId });
+  return findSessionEntryByKey(getSessionEntryLookup(storePath, context), normalized);
+}
+
+function findTerminalParentSessionEntry(
+  task: TaskRecord,
+  context?: BackingSessionLookupContext,
+): SessionEntry | undefined {
+  for (const sessionKey of [task.requesterSessionKey, task.ownerKey]) {
+    const entry = findSessionEntryForSessionKey(sessionKey, context);
+    if (mapTerminalSessionStatusToTaskStatus(entry?.status) && typeof entry?.endedAt === "number") {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+function hasTerminalParentSession(
+  task: TaskRecord,
+  context?: BackingSessionLookupContext,
+): boolean {
+  return Boolean(findTerminalParentSessionEntry(task, context));
 }
 
 function isActiveTask(task: TaskRecord): boolean {
@@ -462,6 +495,53 @@ function resolveDurableCronTaskRecovery(
   );
 }
 
+function mapTerminalSessionStatusToTaskStatus(
+  status: SessionEntry["status"] | undefined,
+): CronTerminalRecovery["status"] | undefined {
+  if (status === "done") {
+    return "succeeded";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  if (status === "timeout") {
+    return "timed_out";
+  }
+  if (status === "killed") {
+    return "cancelled";
+  }
+  return undefined;
+}
+
+function resolveTerminalTaskSessionRecovery(
+  task: TaskRecord,
+  context: BackingSessionLookupContext,
+): CronTerminalRecovery | undefined {
+  if (task.status !== "running") {
+    return undefined;
+  }
+  if (task.runtime === "cli") {
+    if (hasActiveCliRun(task)) {
+      return undefined;
+    }
+  } else if (task.runtime !== "subagent") {
+    return undefined;
+  }
+  const entry = findTaskSessionEntry(task, context);
+  const status = mapTerminalSessionStatusToTaskStatus(entry?.status);
+  const endedAt = entry?.endedAt;
+  if (!status || typeof endedAt !== "number") {
+    return undefined;
+  }
+  return {
+    status,
+    endedAt,
+    lastEventAt: Math.max(endedAt, task.lastEventAt ?? endedAt),
+    ...(status === "succeeded" ? { terminalSummary: "completed" } : {}),
+    ...(status !== "succeeded" ? { error: `session ${entry?.status ?? "terminal"}` } : {}),
+  };
+}
+
 function hasActiveCliRun(task: TaskRecord): boolean {
   const candidateRunIds = [task.sourceId, task.runId];
   for (const candidate of candidateRunIds) {
@@ -517,6 +597,9 @@ function hasBackingSession(task: TaskRecord, context?: BackingSessionLookupConte
     if (task.runtime === "subagent" && isSubagentRecoveryWedgedEntry(entry)) {
       return false;
     }
+    if (task.runtime === "subagent" && entry && hasTerminalParentSession(task, context)) {
+      return false;
+    }
     return Boolean(entry);
   }
 
@@ -531,6 +614,9 @@ function resolveTaskLostError(task: TaskRecord, context?: BackingSessionLookupCo
       : "Native subagent stopped reporting progress";
   }
   if (task.runtime === "subagent") {
+    if (hasTerminalParentSession(task, context)) {
+      return "parent session ended while subagent session remained running";
+    }
     const entry = findTaskSessionEntry(task, context);
     if (entry && isSubagentRecoveryWedgedEntry(entry)) {
       return formatSubagentRecoveryWedgedReason(entry);
@@ -919,6 +1005,10 @@ function reconcileTaskRecordForOperatorInspectionWithContexts(
   if (cronRecovery) {
     return projectTaskRecovered(task, cronRecovery);
   }
+  const terminalSessionRecovery = resolveTerminalTaskSessionRecovery(task, backingSessionContext);
+  if (terminalSessionRecovery) {
+    return projectTaskRecovered(task, terminalSessionRecovery);
+  }
   const now = Date.now();
   if (!shouldMarkLost(task, now, backingSessionContext)) {
     return task;
@@ -1036,6 +1126,10 @@ export function previewTaskRegistryMaintenance(): TaskRegistryMaintenanceSummary
       recovered += 1;
       continue;
     }
+    if (resolveTerminalTaskSessionRecovery(task, backingSessionContext)) {
+      recovered += 1;
+      continue;
+    }
     if (shouldMarkLost(task, now, backingSessionContext)) {
       reconciled += 1;
       continue;
@@ -1101,6 +1195,9 @@ export function getTaskRegistryMaintenanceDiagnostics(): TaskRegistryMaintenance
     if (resolveDurableCronTaskRecovery(task, cronRecoveryContext)) {
       continue;
     }
+    if (resolveTerminalTaskSessionRecovery(task, backingSessionContext)) {
+      continue;
+    }
     const decision = explainActiveTaskRetention({ task, now, context: backingSessionContext });
     staleRunningTasks.push({
       taskId: task.taskId,
@@ -1162,6 +1259,21 @@ export async function runTaskRegistryMaintenance(): Promise<TaskRegistryMaintena
     const cronRecovery = resolveDurableCronTaskRecovery(current, cronRecoveryContext);
     if (cronRecovery) {
       const next = markTaskRecovered(current, cronRecovery);
+      if (next.status !== current.status) {
+        recovered += 1;
+      }
+      processed += 1;
+      if (processed % SWEEP_YIELD_BATCH_SIZE === 0) {
+        await yieldToEventLoop();
+      }
+      continue;
+    }
+    const terminalSessionRecovery = resolveTerminalTaskSessionRecovery(
+      current,
+      backingSessionContext,
+    );
+    if (terminalSessionRecovery) {
+      const next = markTaskRecovered(current, terminalSessionRecovery);
       if (next.status !== current.status) {
         recovered += 1;
       }

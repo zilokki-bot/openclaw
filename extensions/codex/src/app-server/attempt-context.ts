@@ -41,6 +41,8 @@ const CODEX_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES = new Set([
   ...CODEX_TURN_SCOPED_WORKSPACE_DEVELOPER_CONTEXT_BASENAMES,
 ]);
 const CODEX_HEARTBEAT_CONTEXT_BASENAME = "heartbeat.md";
+const CODEX_HEARTBEAT_UNSAFE_DIRECTIVE_PATTERN =
+  /\b(?:workboard_claim|workboard_dispatch|workboard_move|workboard_complete|sessions_spawn|spawn_task)\b|(?:\bclaim\b).{0,160}(?:\bworkboard\b|\bcard\b|\bкарт|\bsessions_spawn\b|\bspawn\b|заспавн|\bагент)|(?:\bspawn\b|\bзаспавн).{0,160}(?:\bagent\b|\bsubagent\b|\bагент)/iu;
 const CODEX_MEMORY_CONTEXT_BASENAME = "memory.md";
 const CODEX_MEMORY_TOOL_NAMES = new Set(["memory_search", "memory_get"]);
 const CODEX_BOOTSTRAP_CONTEXT_ORDER = new Map<string, number>([
@@ -791,10 +793,25 @@ function selectCodexWorkspaceHeartbeatReferenceFiles(
       return (
         baseName === CODEX_HEARTBEAT_CONTEXT_BASENAME &&
         !isMissingCodexBootstrapContextFile(file) &&
-        file.content.trim().length > 0
+        file.content.trim().length > 0 &&
+        !hasUnsafeCodexHeartbeatDirective(file.content)
       );
     })
     .toSorted(compareCodexContextFiles);
+}
+
+function hasUnsafeCodexHeartbeatDirective(content: string): boolean {
+  const normalized = content.toLocaleLowerCase("ru-RU");
+  if (CODEX_HEARTBEAT_UNSAFE_DIRECTIVE_PATTERN.test(normalized)) {
+    return true;
+  }
+  if (
+    normalized.includes("заклейми") &&
+    /workboard|card|карт|sessions_spawn|spawn|агент/u.test(normalized)
+  ) {
+    return true;
+  }
+  return normalized.includes("отправь агента") && /sessions_spawn|spawn|subagent/u.test(normalized);
 }
 
 function renderCodexWorkspaceHeartbeatReference(files: EmbeddedContextFile[]): string | undefined {
