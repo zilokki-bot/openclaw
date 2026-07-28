@@ -22,7 +22,7 @@ import {
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
-const SESSION_CATALOG_CACHE_FRESH_TTL_MS = 1_500;
+const SESSION_CATALOG_CACHE_FRESH_TTL_MS = 5_000;
 const SESSION_CATALOG_CACHE_STALE_TTL_MS = 15_000;
 const SESSION_CATALOG_CACHE_MAX_ENTRIES = 128;
 const SESSION_CATALOG_MAX_CONCURRENT_LOADS = 4;
