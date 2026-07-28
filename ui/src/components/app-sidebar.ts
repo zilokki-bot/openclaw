@@ -162,6 +162,8 @@ const SIDEBAR_AGENT_SESSION_LIST_LIMIT = 60;
 const SIDEBAR_SESSION_PAGE_SIZE = 10;
 const SIDEBAR_SESSION_SEE_LESS_THRESHOLD = 30;
 const SESSION_CATALOG_POLL_INTERVAL_MS = 120_000;
+const SESSION_CATALOG_PRESSURE_POLL_INTERVAL_MS = 300_000;
+const SESSION_CATALOG_SLOW_REFRESH_THRESHOLD_MS = 1_000;
 const SIDEBAR_SESSION_COLLAPSED_SECTIONS_STORAGE_KEY =
   "openclaw:sidebar:sessions:collapsed-sections";
 
@@ -260,6 +262,23 @@ function preserveExpandedCatalogHost(
     ...previousDetails,
     ...freshDetails,
     sessions,
+    ...(nextCursor !== undefined ? { nextCursor } : {}),
+  };
+}
+
+function preserveExpandedCatalogHostRows(
+  freshHost: SessionCatalogHost,
+  previous: SessionCatalogHost | undefined,
+): SessionCatalogHost {
+  if (!previous) {
+    return freshHost;
+  }
+  const { sessions, nextCursor, ...previousDetails } = previous;
+  const { sessions: freshSessions, nextCursor: _freshNextCursor, ...freshDetails } = freshHost;
+  return {
+    ...previousDetails,
+    ...freshDetails,
+    sessions: mergeCatalogSessionRows(freshSessions, sessions),
     ...(nextCursor !== undefined ? { nextCursor } : {}),
   };
 }
@@ -463,6 +482,8 @@ class AppSidebar extends OpenClawLightDomContentsElement {
     }
     const generation = this.sessionCatalogGeneration;
     const revision = this.sessionCatalogRevision;
+    const startedAt = Date.now();
+    let skippedExpandedReplay = false;
     if (this.sessionCatalogRequestGeneration === generation) {
       return;
     }
@@ -477,10 +498,14 @@ class AppSidebar extends OpenClawLightDomContentsElement {
       if (generation !== this.sessionCatalogGeneration || client !== this.gatewayClient) {
         return;
       }
+      skippedExpandedReplay =
+        this.hasExpandedSessionCatalogPages(result.catalogs) &&
+        Date.now() - startedAt >= SESSION_CATALOG_SLOW_REFRESH_THRESHOLD_MS;
       const catalogs = await this.refetchSessionCatalogPages({
         catalogs: result.catalogs,
         client,
         generation,
+        skipExpandedPageReplay: skippedExpandedReplay,
       });
       if (
         generation !== this.sessionCatalogGeneration ||
@@ -512,18 +537,38 @@ class AppSidebar extends OpenClawLightDomContentsElement {
         client === this.gatewayClient &&
         this.isConnected
       ) {
-        this.sessionCatalogTimer = globalThis.setTimeout(() => {
-          this.sessionCatalogTimer = null;
-          void this.refreshSessionCatalogs();
-        }, SESSION_CATALOG_POLL_INTERVAL_MS);
+        this.sessionCatalogTimer = globalThis.setTimeout(
+          () => {
+            this.sessionCatalogTimer = null;
+            void this.refreshSessionCatalogs();
+          },
+          this.sessionCatalogPollDelay(Date.now() - startedAt, skippedExpandedReplay),
+        );
       }
     }
+  }
+
+  private sessionCatalogPollDelay(elapsedMs: number, skippedExpandedReplay: boolean): number {
+    return skippedExpandedReplay || elapsedMs >= SESSION_CATALOG_SLOW_REFRESH_THRESHOLD_MS
+      ? SESSION_CATALOG_PRESSURE_POLL_INTERVAL_MS
+      : SESSION_CATALOG_POLL_INTERVAL_MS;
+  }
+
+  private hasExpandedSessionCatalogPages(catalogs: readonly SessionCatalog[]): boolean {
+    return catalogs.some((catalog) =>
+      catalog.hosts.some(
+        (host) =>
+          (this.sessionCatalogPageDepths.get(sessionCatalogHostKey(catalog.id, host.hostId)) ?? 0) >
+          0,
+      ),
+    );
   }
 
   private async refetchSessionCatalogPages(params: {
     catalogs: SessionCatalog[];
     client: GatewayBrowserClient;
     generation: number;
+    skipExpandedPageReplay: boolean;
   }): Promise<SessionCatalog[]> {
     const previousCatalogs = new Map(this.sessionCatalogs.map((catalog) => [catalog.id, catalog]));
     return Promise.all(
@@ -539,6 +584,9 @@ class AppSidebar extends OpenClawLightDomContentsElement {
               return host;
             }
             const previous = previousHosts.get(host.hostId);
+            if (params.skipExpandedPageReplay) {
+              return preserveExpandedCatalogHostRows(host, previous);
+            }
             if (host.error) {
               return preserveExpandedCatalogHost(host, previous);
             }
