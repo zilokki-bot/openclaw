@@ -818,6 +818,71 @@ describe("task-registry maintenance issue #60299", () => {
     expect(recovered.terminalSummary).toBe("completed");
   });
 
+  it("recovers terminal subagent session tasks before treating the backing session as live", async () => {
+    const childSessionKey = "agent:analyst:subagent:terminal-child";
+    const endedAt = Date.now() - 20_000;
+    const task = makeStaleTask({
+      taskId: "task-subagent-terminal-session",
+      runtime: "subagent",
+      sourceId: "run-subagent-terminal-session",
+      runId: "run-subagent-terminal-session",
+      ownerKey: "agent:analyst:main",
+      requesterSessionKey: "agent:analyst:main",
+      childSessionKey,
+      lastEventAt: endedAt - 10_000,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [childSessionKey]: {
+          sessionId: "analyst-terminal-subagent-session",
+          updatedAt: endedAt,
+          startedAt: endedAt - 60_000,
+          endedAt,
+          status: "done",
+        },
+      },
+    });
+
+    expect(previewTaskRegistryMaintenance()).toMatchObject({ recovered: 1, reconciled: 0 });
+    expect(getTaskRegistryMaintenanceDiagnostics().staleRunningTasks).toHaveLength(0);
+    expect(getInspectableActiveTaskRestartBlockers()).toHaveLength(0);
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 0, recovered: 1 });
+    const recovered = requireTaskRecord(currentTasks, task.taskId);
+    expect(recovered.status).toBe("succeeded");
+    expect(recovered.endedAt).toBe(endedAt);
+    expect(recovered.terminalSummary).toBe("completed");
+  });
+
+  it("keeps stale subagent tasks running while their child session entry is still running", async () => {
+    const childSessionKey = "agent:analyst:subagent:still-running-child";
+    const task = makeStaleTask({
+      taskId: "task-subagent-still-running-session",
+      runtime: "subagent",
+      sourceId: "run-subagent-still-running-session",
+      runId: "run-subagent-still-running-session",
+      ownerKey: "agent:analyst:main",
+      requesterSessionKey: "agent:analyst:main",
+      childSessionKey,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [childSessionKey]: {
+          sessionId: "analyst-running-subagent-session",
+          updatedAt: Date.now(),
+          startedAt: Date.now() - 60_000,
+          status: "running",
+        },
+      },
+    });
+
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 0, recovered: 0 });
+    expectTaskStatus(currentTasks, task.taskId, "running");
+  });
+
   it("keeps detached media cli tasks live while their tool run context is active", async () => {
     const channelKey = "agent:main:discord:channel:1456744319972282449";
     const runId = "tool:video_generate:ac88dfc5-c2a9-4630-ab48-384e6450a12b";

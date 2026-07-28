@@ -480,11 +480,18 @@ function mapTerminalSessionStatusToTaskStatus(
   return undefined;
 }
 
-function resolveTerminalCliSessionRecovery(
+function resolveTerminalTaskSessionRecovery(
   task: TaskRecord,
   context: BackingSessionLookupContext,
 ): CronTerminalRecovery | undefined {
-  if (task.runtime !== "cli" || task.status !== "running" || hasActiveCliRun(task)) {
+  if (task.status !== "running") {
+    return undefined;
+  }
+  if (task.runtime === "cli") {
+    if (hasActiveCliRun(task)) {
+      return undefined;
+    }
+  } else if (task.runtime !== "subagent") {
     return undefined;
   }
   const entry = findTaskSessionEntry(task, context);
@@ -959,6 +966,10 @@ function reconcileTaskRecordForOperatorInspectionWithContexts(
   if (cronRecovery) {
     return projectTaskRecovered(task, cronRecovery);
   }
+  const terminalSessionRecovery = resolveTerminalTaskSessionRecovery(task, backingSessionContext);
+  if (terminalSessionRecovery) {
+    return projectTaskRecovered(task, terminalSessionRecovery);
+  }
   const now = Date.now();
   if (!shouldMarkLost(task, now, backingSessionContext)) {
     return task;
@@ -1076,6 +1087,10 @@ export function previewTaskRegistryMaintenance(): TaskRegistryMaintenanceSummary
       recovered += 1;
       continue;
     }
+    if (resolveTerminalTaskSessionRecovery(task, backingSessionContext)) {
+      recovered += 1;
+      continue;
+    }
     if (shouldMarkLost(task, now, backingSessionContext)) {
       reconciled += 1;
       continue;
@@ -1139,6 +1154,9 @@ export function getTaskRegistryMaintenanceDiagnostics(): TaskRegistryMaintenance
       continue;
     }
     if (resolveDurableCronTaskRecovery(task, cronRecoveryContext)) {
+      continue;
+    }
+    if (resolveTerminalTaskSessionRecovery(task, backingSessionContext)) {
       continue;
     }
     const decision = explainActiveTaskRetention({ task, now, context: backingSessionContext });
@@ -1211,9 +1229,12 @@ export async function runTaskRegistryMaintenance(): Promise<TaskRegistryMaintena
       }
       continue;
     }
-    const cliSessionRecovery = resolveTerminalCliSessionRecovery(current, backingSessionContext);
-    if (cliSessionRecovery) {
-      const next = markTaskRecovered(current, cliSessionRecovery);
+    const terminalSessionRecovery = resolveTerminalTaskSessionRecovery(
+      current,
+      backingSessionContext,
+    );
+    if (terminalSessionRecovery) {
+      const next = markTaskRecovered(current, terminalSessionRecovery);
       if (next.status !== current.status) {
         recovered += 1;
       }
