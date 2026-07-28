@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
 import type { SessionCatalogProvider } from "../../plugins/session-catalog.js";
 
@@ -32,6 +32,10 @@ async function call(method: keyof typeof sessionCatalogHandlers, params: unknown
 describe("session catalog Gateway methods", () => {
   beforeEach(() => {
     activeRegistry.sessionCatalogs = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("sorts catalogs and isolates provider failures", async () => {
@@ -90,6 +94,29 @@ describe("session catalog Gateway methods", () => {
       catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
     });
     expect(secondRespond).toHaveBeenCalledWith(true, {
+      catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
+    });
+  });
+
+  it("caches repeated identical list calls across control UI polling intervals", async () => {
+    vi.useFakeTimers({ now: 1_000 });
+    const host = {
+      hostId: "node:fast",
+      label: "Fast node",
+      kind: "node" as const,
+      connected: true,
+      nodeId: "fast",
+      sessions: [],
+    };
+    const list = vi.fn(async () => [host]);
+    activeRegistry.sessionCatalogs = [{ provider: provider("codex", { list }) }];
+
+    await call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 });
+    vi.setSystemTime(3_000);
+    const repeated = await call("sessions.catalog.list", { catalogId: "codex", limitPerHost: 5 });
+
+    expect(list).toHaveBeenCalledOnce();
+    expect(repeated).toHaveBeenCalledWith(true, {
       catalogs: [expect.objectContaining({ id: "codex", hosts: [host] })],
     });
   });
