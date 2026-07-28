@@ -205,7 +205,7 @@ type CronExecutionId = {
 };
 
 type CronTerminalRecovery = {
-  status: Extract<TaskStatus, "succeeded" | "failed" | "timed_out">;
+  status: Extract<TaskStatus, "succeeded" | "failed" | "timed_out" | "cancelled">;
   endedAt: number;
   lastEventAt: number;
   error?: string;
@@ -460,6 +460,46 @@ function resolveDurableCronTaskRecovery(
   return (
     resolveCronRunLogRecovery(execution, context) ?? resolveCronJobStateRecovery(execution, context)
   );
+}
+
+function mapTerminalSessionStatusToTaskStatus(
+  status: SessionEntry["status"] | undefined,
+): CronTerminalRecovery["status"] | undefined {
+  if (status === "done") {
+    return "succeeded";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  if (status === "timeout") {
+    return "timed_out";
+  }
+  if (status === "killed") {
+    return "cancelled";
+  }
+  return undefined;
+}
+
+function resolveTerminalCliSessionRecovery(
+  task: TaskRecord,
+  context: BackingSessionLookupContext,
+): CronTerminalRecovery | undefined {
+  if (task.runtime !== "cli" || task.status !== "running" || hasActiveCliRun(task)) {
+    return undefined;
+  }
+  const entry = findTaskSessionEntry(task, context);
+  const status = mapTerminalSessionStatusToTaskStatus(entry?.status);
+  const endedAt = entry?.endedAt;
+  if (!status || typeof endedAt !== "number") {
+    return undefined;
+  }
+  return {
+    status,
+    endedAt,
+    lastEventAt: Math.max(endedAt, task.lastEventAt ?? endedAt),
+    ...(status === "succeeded" ? { terminalSummary: "completed" } : {}),
+    ...(status !== "succeeded" ? { error: `session ${entry?.status ?? "terminal"}` } : {}),
+  };
 }
 
 function hasActiveCliRun(task: TaskRecord): boolean {
@@ -1162,6 +1202,18 @@ export async function runTaskRegistryMaintenance(): Promise<TaskRegistryMaintena
     const cronRecovery = resolveDurableCronTaskRecovery(current, cronRecoveryContext);
     if (cronRecovery) {
       const next = markTaskRecovered(current, cronRecovery);
+      if (next.status !== current.status) {
+        recovered += 1;
+      }
+      processed += 1;
+      if (processed % SWEEP_YIELD_BATCH_SIZE === 0) {
+        await yieldToEventLoop();
+      }
+      continue;
+    }
+    const cliSessionRecovery = resolveTerminalCliSessionRecovery(current, backingSessionContext);
+    if (cliSessionRecovery) {
+      const next = markTaskRecovered(current, cliSessionRecovery);
       if (next.status !== current.status) {
         recovered += 1;
       }

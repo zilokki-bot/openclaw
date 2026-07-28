@@ -784,6 +784,40 @@ describe("task-registry maintenance issue #60299", () => {
     expectTaskStatus(currentTasks, task.taskId, "running");
   });
 
+  it("recovers terminal cli session tasks before marking them lost", async () => {
+    const childSessionKey = "agent:strazh:main";
+    const endedAt = Date.now() - 20_000;
+    const task = makeStaleTask({
+      taskId: "task-cli-terminal-session",
+      runtime: "cli",
+      sourceId: "run-cli-terminal-session",
+      runId: "run-cli-terminal-session",
+      ownerKey: childSessionKey,
+      requesterSessionKey: childSessionKey,
+      childSessionKey,
+      lastEventAt: endedAt - 10_000,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [childSessionKey]: {
+          sessionId: "strazh-terminal-session",
+          updatedAt: endedAt,
+          startedAt: endedAt - 60_000,
+          endedAt,
+          status: "done",
+        },
+      },
+    });
+
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 0, recovered: 1 });
+    const recovered = requireTaskRecord(currentTasks, task.taskId);
+    expect(recovered.status).toBe("succeeded");
+    expect(recovered.endedAt).toBe(endedAt);
+    expect(recovered.terminalSummary).toBe("completed");
+  });
+
   it("keeps detached media cli tasks live while their tool run context is active", async () => {
     const channelKey = "agent:main:discord:channel:1456744319972282449";
     const runId = "tool:video_generate:ac88dfc5-c2a9-4630-ab48-384e6450a12b";

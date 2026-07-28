@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
   HEARTBEAT_RESPONSE_TOOL_PROMPT,
+  hasUnsafeHeartbeatDiagnosticDirective,
   isHeartbeatContentEffectivelyEmpty,
   parseHeartbeatTasks,
   resolveHeartbeatPromptForResponseTool,
@@ -297,6 +298,39 @@ Check the server logs
 ### Subsection
 `;
     expect(isHeartbeatContentEffectivelyEmpty(content)).toBe(true);
+  });
+});
+
+describe("hasUnsafeHeartbeatDiagnosticDirective", () => {
+  it("flags dispatcher instructions that would turn heartbeat into a writer", () => {
+    expect(
+      hasUnsafeHeartbeatDiagnosticDirective(`
+# HEARTBEAT
+
+Есть карточки в ready?
+- Да → заклейми одну и отправь агента:
+  - developer — для кода
+
+Один цикл = один spawn.
+`),
+    ).toBe(true);
+    expect(
+      hasUnsafeHeartbeatDiagnosticDirective(
+        "Use workboard_claim on one ready card and then sessions_spawn a developer.",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag read-only diagnostic checklists", () => {
+    expect(
+      hasUnsafeHeartbeatDiagnosticDirective(`
+# HEARTBEAT
+
+- Check gateway health.
+- Summarize blockers without changing config.
+- Reply HEARTBEAT_OK if nothing needs attention.
+`),
+    ).toBe(false);
   });
 });
 

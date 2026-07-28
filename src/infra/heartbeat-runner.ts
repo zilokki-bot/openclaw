@@ -35,6 +35,7 @@ import {
 } from "../auto-reply/heartbeat-tool-response.js";
 import {
   DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+  hasUnsafeHeartbeatDiagnosticDirective,
   isHeartbeatContentEffectivelyEmpty,
   isTaskDue,
   parseHeartbeatTasks,
@@ -1268,6 +1269,9 @@ function stripHeartbeatTasksBlock(content: string): string {
  */
 function appendHeartbeatFileDirectives(prompt: string, heartbeatFileContent?: string): string {
   if (!heartbeatFileContent) {
+    return prompt;
+  }
+  if (hasUnsafeHeartbeatDiagnosticDirective(heartbeatFileContent)) {
     return prompt;
   }
   const directives = stripHeartbeatTasksBlock(heartbeatFileContent).trim();

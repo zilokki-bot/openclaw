@@ -3376,6 +3376,49 @@ describe("runCodexAppServerAttempt", () => {
     expect(collaborationInstructions).not.toContain("HEARTBEAT.md exists");
   });
 
+  it("omits heartbeat Codex workspace pointers for dispatcher HEARTBEAT.md files", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const heartbeatPath = path.join(workspaceDir, "HEARTBEAT.md");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(
+      heartbeatPath,
+      `# HEARTBEAT
+
+Есть карточки в ready?
+- Да → заклейми одну и отправь агента через sessions_spawn.
+`,
+    );
+    const harness = createStartedThreadHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    params.trigger = "heartbeat";
+    params.bootstrapContextMode = "lightweight";
+    params.bootstrapContextRunKind = "heartbeat";
+
+    const run = runCodexAppServerAttempt(params);
+    await harness.waitForMethod("turn/start");
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    await run;
+
+    const turnStart = harness.requests.find((request) => request.method === "turn/start");
+    const turnStartParams = turnStart?.params as {
+      collaborationMode?: {
+        settings?: {
+          developer_instructions?: string | null;
+        };
+      };
+    };
+    const collaborationInstructions =
+      turnStartParams.collaborationMode?.settings?.developer_instructions ?? "";
+
+    expect(collaborationInstructions).toContain("This is an OpenClaw heartbeat turn");
+    expect(collaborationInstructions).not.toContain("HEARTBEAT.md exists");
+    expect(collaborationInstructions).not.toContain(heartbeatPath);
+  });
+
   it("keeps lightweight cron Codex turns out of OpenClaw bootstrap context", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");

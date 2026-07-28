@@ -24,6 +24,9 @@ export const HEARTBEAT_TRANSCRIPT_PROMPT = "[OpenClaw heartbeat poll]";
 export const DEFAULT_HEARTBEAT_EVERY = "30m";
 export const DEFAULT_HEARTBEAT_ACK_MAX_CHARS = 300;
 
+const HEARTBEAT_DIAGNOSTIC_UNSAFE_DIRECTIVE_PATTERN =
+  /\b(?:workboard_claim|workboard_dispatch|workboard_move|workboard_complete|sessions_spawn|spawn_task)\b|(?:\bclaim\b).{0,160}(?:\bworkboard\b|\bcard\b|\bкарт|\bsessions_spawn\b|\bspawn\b|заспавн|\bагент)|(?:\bspawn\b|\bзаспавн).{0,160}(?:\bagent\b|\bsubagent\b|\bагент)/iu;
+
 function stripLeadingHtmlCommentScaffolding(
   line: string,
   state: { inHtmlComment: boolean },
@@ -110,6 +113,29 @@ export function isHeartbeatContentEffectivelyEmpty(content: string | undefined |
   }
   // All lines were either empty or comments
   return true;
+}
+
+/**
+ * Heartbeat is a diagnostic/awareness route. If a user-editable HEARTBEAT.md
+ * accidentally contains dispatcher/write instructions, keep the file out of
+ * heartbeat prompts instead of turning a health tick into a worker launcher.
+ * This does not change tool policy; dispatcher flows must use their own route.
+ */
+export function hasUnsafeHeartbeatDiagnosticDirective(content: string | undefined | null): boolean {
+  if (typeof content !== "string") {
+    return false;
+  }
+  const normalized = content.toLocaleLowerCase("ru-RU");
+  if (HEARTBEAT_DIAGNOSTIC_UNSAFE_DIRECTIVE_PATTERN.test(normalized)) {
+    return true;
+  }
+  if (
+    normalized.includes("заклейми") &&
+    /workboard|card|карт|sessions_spawn|spawn|агент/u.test(normalized)
+  ) {
+    return true;
+  }
+  return normalized.includes("отправь агента") && /sessions_spawn|spawn|subagent/u.test(normalized);
 }
 
 /** Resolves configured heartbeat prompt text with the built-in default fallback. */
