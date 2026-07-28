@@ -305,6 +305,39 @@ function findTaskSessionEntry(
   return findSessionEntryByKey(getSessionEntryLookup(storePath, context), childSessionKey);
 }
 
+function findSessionEntryForSessionKey(
+  sessionKey: string | undefined,
+  context?: BackingSessionLookupContext,
+): SessionEntry | undefined {
+  const normalized = sessionKey?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const agentId = taskRegistryMaintenanceRuntime.parseAgentSessionKey(normalized)?.agentId;
+  const storePath = taskRegistryMaintenanceRuntime.resolveStorePath(undefined, { agentId });
+  return findSessionEntryByKey(getSessionEntryLookup(storePath, context), normalized);
+}
+
+function findTerminalParentSessionEntry(
+  task: TaskRecord,
+  context?: BackingSessionLookupContext,
+): SessionEntry | undefined {
+  for (const sessionKey of [task.requesterSessionKey, task.ownerKey]) {
+    const entry = findSessionEntryForSessionKey(sessionKey, context);
+    if (mapTerminalSessionStatusToTaskStatus(entry?.status) && typeof entry?.endedAt === "number") {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+function hasTerminalParentSession(
+  task: TaskRecord,
+  context?: BackingSessionLookupContext,
+): boolean {
+  return Boolean(findTerminalParentSessionEntry(task, context));
+}
+
 function isActiveTask(task: TaskRecord): boolean {
   return task.status === "queued" || task.status === "running";
 }
@@ -564,6 +597,9 @@ function hasBackingSession(task: TaskRecord, context?: BackingSessionLookupConte
     if (task.runtime === "subagent" && isSubagentRecoveryWedgedEntry(entry)) {
       return false;
     }
+    if (task.runtime === "subagent" && entry && hasTerminalParentSession(task, context)) {
+      return false;
+    }
     return Boolean(entry);
   }
 
@@ -578,6 +614,9 @@ function resolveTaskLostError(task: TaskRecord, context?: BackingSessionLookupCo
       : "Native subagent stopped reporting progress";
   }
   if (task.runtime === "subagent") {
+    if (hasTerminalParentSession(task, context)) {
+      return "parent session ended while subagent session remained running";
+    }
     const entry = findTaskSessionEntry(task, context);
     if (entry && isSubagentRecoveryWedgedEntry(entry)) {
       return formatSubagentRecoveryWedgedReason(entry);

@@ -883,6 +883,46 @@ describe("task-registry maintenance issue #60299", () => {
     expectTaskStatus(currentTasks, task.taskId, "running");
   });
 
+  it("marks a stale subagent task lost when its parent session ended but the child row is still running", async () => {
+    const parentSessionKey = "agent:analyst:main";
+    const childSessionKey = "agent:analyst:subagent:still-running-after-parent-ended";
+    const endedAt = Date.now() - 20_000;
+    const task = makeStaleTask({
+      taskId: "task-subagent-running-after-parent-ended",
+      runtime: "subagent",
+      sourceId: "run-subagent-running-after-parent-ended",
+      runId: "run-subagent-running-after-parent-ended",
+      ownerKey: parentSessionKey,
+      requesterSessionKey: parentSessionKey,
+      childSessionKey,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [parentSessionKey]: {
+          sessionId: "analyst-terminal-parent-session",
+          updatedAt: endedAt,
+          startedAt: endedAt - 60_000,
+          endedAt,
+          status: "done",
+        },
+        [childSessionKey]: {
+          sessionId: "analyst-running-subagent-session",
+          updatedAt: Date.now(),
+          startedAt: Date.now() - 60_000,
+          status: "running",
+        },
+      },
+    });
+
+    expect(previewTaskRegistryMaintenance()).toMatchObject({ recovered: 0, reconciled: 1 });
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 1, recovered: 0 });
+    const reconciled = requireTaskRecord(currentTasks, task.taskId);
+    expect(reconciled.status).toBe("lost");
+    expect(reconciled.error).toBe("parent session ended while subagent session remained running");
+  });
+
   it("keeps detached media cli tasks live while their tool run context is active", async () => {
     const channelKey = "agent:main:discord:channel:1456744319972282449";
     const runId = "tool:video_generate:ac88dfc5-c2a9-4630-ab48-384e6450a12b";
