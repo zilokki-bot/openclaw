@@ -468,17 +468,29 @@ describe("handleModeCommand", () => {
   it("enables light mode on the target session", async () => {
     const params = buildUsageParams();
     params.command.commandBodyNormalized = "/mode light";
+    params.sessionEntry = {
+      sessionId: "session-1",
+      updatedAt: Date.now(),
+      thinkingLevel: "medium",
+      providerOverride: "openai",
+      modelOverride: "gpt-5.5",
+      modelOverrideSource: "session",
+    };
     params.sessionStore = { [params.sessionKey]: params.sessionEntry! };
 
     const result = await handleModeCommand(params, true);
 
     expect(result?.shouldContinue).toBe(false);
-    expect(result?.reply?.text).toBe("⚙️ Light mode enabled. Thinking off, fast on.");
-    expect(params.sessionEntry?.thinkingLevel).toBe("off");
+    expect(result?.reply?.text).toBe(
+      "⚙️ Light mode enabled. Fast mode on; model and thinking unchanged.",
+    );
+    expect(params.sessionEntry?.thinkingLevel).toBe("medium");
+    expect(params.sessionEntry?.providerOverride).toBe("openai");
+    expect(params.sessionEntry?.modelOverride).toBe("gpt-5.5");
     expect(params.sessionEntry?.fastMode).toBe(true);
   });
 
-  it("restores normal mode by clearing session thinking and fast overrides", async () => {
+  it("restores normal mode by clearing only the session fast override", async () => {
     const params = buildUsageParams();
     params.command.commandBodyNormalized = "/mode normal";
     params.sessionEntry = {
@@ -492,9 +504,33 @@ describe("handleModeCommand", () => {
     const result = await handleModeCommand(params, true);
 
     expect(result?.shouldContinue).toBe(false);
-    expect(result?.reply?.text).toBe("⚙️ Normal mode restored. Thinking/fast reset to defaults.");
-    expect(params.sessionEntry.thinkingLevel).toBeUndefined();
+    expect(result?.reply?.text).toBe(
+      "⚙️ Normal mode restored. Fast mode reset; model and thinking unchanged.",
+    );
+    expect(params.sessionEntry.thinkingLevel).toBe("off");
     expect(params.sessionEntry.fastMode).toBeUndefined();
+  });
+
+  it("rejects model arguments without mutating model or thinking fields", async () => {
+    const params = buildUsageParams();
+    params.command.commandBodyNormalized = "/mode light openai/gpt-5.5";
+    params.sessionEntry = {
+      sessionId: "session-1",
+      updatedAt: Date.now(),
+      thinkingLevel: "medium",
+    };
+    params.sessionStore = { [params.sessionKey]: params.sessionEntry };
+
+    const result = await handleModeCommand(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toBe(
+      "⚙️ /mode does not change models or thinking. Use an approved model command.",
+    );
+    expect(params.sessionEntry.thinkingLevel).toBe("medium");
+    expect(params.sessionEntry.fastMode).toBeUndefined();
+    expect(params.sessionEntry.providerOverride).toBeUndefined();
+    expect(params.sessionEntry.modelOverride).toBeUndefined();
   });
 
   it("reports mode status without mutating the session", async () => {
