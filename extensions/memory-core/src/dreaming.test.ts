@@ -2532,6 +2532,7 @@ describe("short-term dreaming trigger", () => {
     const narrativeMessages = [{ role: "assistant", content: "A diary entry." }];
     const subagent = {
       run: vi.fn(async (_params: { model?: string }) => ({ runId: "narrative-run-1" })),
+      spawnSafe: vi.fn(async () => ({ status: "accepted" as const, runId: "narrative-run-1" })),
       waitForRun: vi.fn(async () => ({ status: "ok" as const })),
       getSessionMessages: vi.fn(async () => ({
         messages: narrativeMessages,
@@ -2540,6 +2541,7 @@ describe("short-term dreaming trigger", () => {
         messages: narrativeMessages,
       })),
       deleteSession: vi.fn(async () => {}),
+      getToolReceipts: vi.fn(async () => ({ receipts: [] })),
     };
 
     const result = await runShortTermDreamingPromotionIfTriggered({

@@ -223,6 +223,52 @@ describe("workboard tools", () => {
     ).rejects.toThrow(/active child/);
   });
 
+  it("records sandbox workspace access on tool-created cards", async () => {
+    const keyed = createMemoryStore();
+    const api = {
+      runtime: {
+        state: {
+          openKeyedStore: vi.fn(() => keyed),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+    const store = new WorkboardStore(keyed);
+    const tools = new Map(
+      createWorkboardTools({
+        api,
+        store,
+        context: {
+          agentId: "workboard-worker",
+          sessionKey: "agent:workboard-worker:safe-create",
+          sessionId: "session-safe-create",
+          sandboxed: true,
+        } as never,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    const payload = readPayload(
+      await tools.get("workboard_create")?.execute("call-safe-create", {
+        title: "Safe pilot card",
+        idempotencyKey: "br-wb:v1:test-safe-create",
+      }),
+    );
+
+    expect(payload.card).toMatchObject({
+      metadata: {
+        automation: {
+          idempotencyKey: "br-wb:v1:test-safe-create",
+          workspaceAccess: {
+            unrestricted: false,
+            sandboxed: true,
+            agentId: "workboard-worker",
+            sessionKey: "agent:workboard-worker:safe-create",
+            sessionId: "session-safe-create",
+          },
+        },
+      },
+    });
+  });
+
   it("creates dependent cards and completes claimed work through tools", async () => {
     const keyed = createMemoryStore();
     const api = {

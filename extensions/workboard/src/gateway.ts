@@ -36,6 +36,29 @@ function readPatch(params: Record<string, unknown>): Record<string, unknown> {
   return params;
 }
 
+function readObjectParam(params: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = params[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw new Error(`${key} is required.`);
+}
+
+function readOptionalString(params: Record<string, unknown>, key: string): string | undefined {
+  const value = params[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function assertNoSafeChildCreateEscapeHatches(params: Record<string, unknown>) {
+  const agentId = readOptionalString(params, "agentId");
+  if (agentId && agentId !== "workboard-worker") {
+    throw new Error("safe child create only supports agentId=workboard-worker.");
+  }
+  if (readOptionalString(params, "cwd") || readOptionalString(params, "workspaceDir")) {
+    throw new Error("safe child create does not accept caller-provided workspace paths.");
+  }
+}
+
 function assertNoCursorAdvance(params: Record<string, unknown>) {
   if (params.advance === true) {
     throw new Error("notification cursor advancement requires workboard.notifications.advance.");
@@ -85,6 +108,73 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+async function argsHash(value: unknown): Promise<string> {
+  const { createHash } = await import("node:crypto");
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function readRestrictedWorkboardReceipt(receipts: unknown[]): {
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  toolCallId?: string;
+  toolResult: { card: { id: string; workspaceAccess: Record<string, unknown> } };
+} {
+  const restrictedReceipts: Array<{
+    agentId?: string;
+    sessionKey?: string;
+    sessionId?: string;
+    toolCallId?: string;
+    toolResult: { card: { id: string; workspaceAccess: Record<string, unknown> } };
+  }> = [];
+
+  for (const receipt of receipts) {
+    if (!receipt || typeof receipt !== "object") {
+      continue;
+    }
+    const record = receipt as Record<string, unknown>;
+    const toolResult = record.toolResult as Record<string, unknown> | undefined;
+    const card = toolResult?.card as Record<string, unknown> | undefined;
+    const workspaceAccess = card?.workspaceAccess as Record<string, unknown> | undefined;
+    if (
+      typeof card?.id === "string" &&
+      card.id.trim() &&
+      workspaceAccess &&
+      workspaceAccess.unrestricted === false
+    ) {
+      restrictedReceipts.push({
+        ...(typeof record.agentId === "string" ? { agentId: record.agentId } : {}),
+        ...(typeof record.sessionKey === "string" ? { sessionKey: record.sessionKey } : {}),
+        ...(typeof record.sessionId === "string" ? { sessionId: record.sessionId } : {}),
+        ...(typeof record.toolCallId === "string" ? { toolCallId: record.toolCallId } : {}),
+        toolResult: {
+          card: {
+            id: card.id.trim(),
+            workspaceAccess,
+          },
+        },
+      });
+    }
+  }
+
+  if (restrictedReceipts.length === 0) {
+    throw new Error("safe child create did not return a restricted workboard_create receipt.");
+  }
+  if (restrictedReceipts.length > 1) {
+    throw new Error("safe child create returned multiple restricted workboard_create receipts.");
+  }
+  return restrictedReceipts[0]!;
+}
+
+function buildSafeChildCreateTask(cardParams: Record<string, unknown>): string {
+  return [
+    "Call the workboard_create tool exactly once with the JSON arguments below.",
+    "Do not call any other tool. After the tool call, reply with one short receipt sentence.",
+    "",
+    stableJson(cardParams),
+  ].join("\n");
+}
+
 async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
   const key = stableJson({
     boardId: params.options?.boardId,
@@ -132,6 +222,79 @@ export function registerWorkboardGatewayMethods(params: {
     async ({ params: requestParams, respond }) => {
       try {
         respond(true, { card: redactClaimToken(await store.create(requestParams)) });
+      } catch (error) {
+        respondError(respond, error);
+      }
+    },
+    { scope: WRITE_SCOPE },
+  );
+
+  api.registerGatewayMethod(
+    "workboard.cards.safeChildCreate",
+    async ({ params: requestParams, respond }) => {
+      try {
+        assertNoSafeChildCreateEscapeHatches(requestParams);
+        const cardParams = readObjectParam(requestParams, "card");
+        const hash = await argsHash(cardParams);
+        const sandboxPosture = {
+          sandbox: "require",
+          context: "isolated",
+          mode: "run",
+          cleanup: "keep",
+          inheritedToolAllowlist: ["workboard_create"],
+          singleRequest: true,
+        };
+        const spawn = await api.runtime.subagent.spawnSafe({
+          task: buildSafeChildCreateTask(cardParams),
+          taskName: readOptionalString(requestParams, "taskName") ?? "workboard-safe-child-create",
+          label: readOptionalString(requestParams, "label") ?? "workboard safe child create",
+          agentId: "workboard-worker",
+          runTimeoutSeconds: 600,
+          lightContext: true,
+          expectsCompletionMessage: false,
+        });
+        if (spawn.status !== "accepted" || !spawn.runId || !spawn.childSessionKey) {
+          throw new Error(spawn.error ?? "safe child create spawn was not accepted.");
+        }
+        const wait = await api.runtime.subagent.waitForRun({
+          runId: spawn.runId,
+          timeoutMs: 600_000,
+        });
+        if (wait.status !== "ok") {
+          throw new Error(wait.error ?? `safe child create run ended with status ${wait.status}.`);
+        }
+        const receipt = readRestrictedWorkboardReceipt(
+          (
+            await api.runtime.subagent.getToolReceipts({
+              runId: spawn.runId,
+              toolName: "workboard_create",
+            })
+          ).receipts,
+        );
+        const cardId = receipt.toolResult.card.id;
+        const readback = await store.get(cardId);
+        const readbackAccess = readback?.metadata?.automation?.workspaceAccess;
+        if (!readback || readbackAccess?.unrestricted !== false) {
+          throw new Error(
+            "safe child create Workboard readback did not confirm restricted access.",
+          );
+        }
+        respond(true, {
+          receipt: {
+            taskId: spawn.runId,
+            runId: spawn.runId,
+            childSessionKey: spawn.childSessionKey,
+            agentId: receipt.agentId ?? "workboard-worker",
+            argsHash: hash,
+            sandboxPosture,
+            toolCallId: receipt.toolCallId,
+            toolResult: receipt.toolResult,
+            readback: {
+              card: redactClaimToken(readback),
+              workspaceAccess: readbackAccess,
+            },
+          },
+        });
       } catch (error) {
         respondError(respond, error);
       }

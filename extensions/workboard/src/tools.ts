@@ -16,6 +16,22 @@ function contextOwner(ctx: OpenClawPluginToolContext | undefined): string {
   );
 }
 
+function contextWorkspaceAccess(ctx: OpenClawPluginToolContext | undefined) {
+  const record = (ctx ?? {}) as Record<string, unknown>;
+  const sandboxed = record.sandboxed === true;
+  return {
+    unrestricted: !sandboxed,
+    sandboxed,
+    ...(typeof record.agentId === "string" && record.agentId ? { agentId: record.agentId } : {}),
+    ...(typeof record.sessionKey === "string" && record.sessionKey
+      ? { sessionKey: record.sessionKey }
+      : {}),
+    ...(typeof record.sessionId === "string" && record.sessionId
+      ? { sessionId: record.sessionId }
+      : {}),
+  };
+}
+
 function canMutateCard(card: WorkboardCard, ownerId: string, token?: string): boolean {
   const claim = card.metadata?.claim;
   if (!claim) {
@@ -308,7 +324,10 @@ export function createWorkboardTools(params: {
         readParentIds(record.parents);
         return jsonResult({
           card: redactClaimToken(
-            await store.create(record, { ownerId, token: record.token as string | undefined }),
+            await store.create(
+              { ...record, workspaceAccess: contextWorkspaceAccess(params.context) },
+              { ownerId, token: record.token as string | undefined },
+            ),
           ),
         });
       },
