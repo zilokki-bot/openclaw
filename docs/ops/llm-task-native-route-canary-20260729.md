@@ -73,6 +73,8 @@ It must prove:
 - Pulse can spawn one sandbox child with `sessions_spawn`.
 - The child returns through `sessions_yield`.
 - The parent records a concise result.
+- The result is visible to the parent TaskFlow/Pulse route; it is not left only
+  in the child sandbox transcript.
 
 Do not use `sessions_spawn` directly through `/tools/invoke`. The Gateway HTTP
 tools API denies remote session orchestration by default because it is a remote
@@ -94,6 +96,10 @@ For `main:telegram`, prove each layer separately:
 - Child work completes with `sessions_yield`.
 - A rich Telegram response or Workboard receipt is sent only when the task needs
   a user-visible result.
+- If the response includes buttons, verify callback handling and the resulting
+  server-side state transition or explicit no-op receipt.
+- Read back the outbound message or delivery record; route acceptance alone is
+  not enough.
 
 Do not use Telegram smoke tests, restart the gateway, change config, change
 model routing, edit auth, or mutate Workboard from this runbook without an
