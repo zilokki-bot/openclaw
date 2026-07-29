@@ -6,6 +6,7 @@ import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { Type } from "typebox";
 import { redactClaimToken } from "./card-redaction.js";
+import { executeWorkboardSafeChildCreate } from "./safe-child-create.js";
 import { WorkboardStore } from "./store.js";
 import { cardIdField, claimTokenField, createWorkboardMoveTool } from "./tools-card-mutations.js";
 
@@ -297,6 +298,56 @@ export function createWorkboardTools(params: {
             await store.create(record, { ownerId, token: record.token as string | undefined }),
           ),
         });
+      },
+    },
+    {
+      name: "workboard_safe_child_create",
+      label: "Workboard Safe Child Create",
+      description:
+        "Create one Workboard card through a sandboxed workboard-worker, returning a native restricted receipt and readback.",
+      parameters: Type.Object(
+        {
+          title: Type.String({ description: "Card title." }),
+          notes: Type.Optional(Type.String({ description: "Card notes or acceptance criteria." })),
+          status: Type.Optional(Type.String({ description: "Initial status." })),
+          priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
+          labels: Type.Optional(Type.Array(Type.String(), { description: "Card labels." })),
+          agentId: Type.Optional(Type.String({ description: "Assigned agent id." })),
+          parents: Type.Optional(Type.Array(Type.String(), { description: "Parent card ids." })),
+          tenant: Type.Optional(Type.String({ description: "Soft tenant namespace." })),
+          boardId: Type.Optional(Type.String({ description: "Soft board namespace." })),
+          createdByCardId: Type.Optional(
+            Type.String({ description: "Parent card that created this card." }),
+          ),
+          idempotencyKey: Type.Optional(Type.String({ description: "Idempotent create key." })),
+          skills: Type.Optional(Type.Array(Type.String(), { description: "Suggested skills." })),
+          workspace: Type.Optional(
+            Type.Object(
+              {
+                kind: Type.String({ description: "scratch, dir, or worktree." }),
+                path: Type.Optional(Type.String({ description: "Absolute dir/worktree path." })),
+                branch: Type.Optional(Type.String({ description: "Suggested branch." })),
+              },
+              { additionalProperties: false },
+            ),
+          ),
+          maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Run timeout seconds." })),
+          maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
+          scheduledAt: Type.Optional(Type.Number({ description: "Unix epoch milliseconds." })),
+        },
+        { additionalProperties: false },
+      ),
+      execute: async (_toolCallId, rawParams) => {
+        const record = rawParams as Record<string, unknown>;
+        readParentIds(record.parents);
+        return jsonResult(
+          await executeWorkboardSafeChildCreate({
+            runtime: params.api.runtime.subagent,
+            store,
+            cardParams: record,
+            redactCard: redactClaimToken,
+          }),
+        );
       },
     },
     {
