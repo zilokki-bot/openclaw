@@ -319,6 +319,68 @@ describe("workboard gateway methods", () => {
     expect(respond.mock.calls[0]?.[2]?.message).toContain("restricted workboard_create receipt");
   });
 
+  it("rejects safe child-create when multiple restricted native receipts are returned", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const methods = new Map<string, RegisteredMethod>();
+    const api = {
+      runtime: {
+        subagent: {
+          spawnSafe: vi.fn(async () => ({
+            status: "accepted" as const,
+            runId: "run-safe-create",
+            childSessionKey: "agent:workboard-worker:subagent:create",
+          })),
+          waitForRun: vi.fn(async () => ({ status: "ok" as const })),
+          getToolReceipts: vi.fn(async () => ({
+            receipts: [
+              {
+                runId: "run-safe-create",
+                toolName: "workboard_create",
+                toolResult: {
+                  card: {
+                    id: "safe-card-one",
+                    workspaceAccess: { unrestricted: false, sandboxed: true },
+                  },
+                },
+              },
+              {
+                runId: "run-safe-create",
+                toolName: "workboard_create",
+                toolResult: {
+                  card: {
+                    id: "safe-card-two",
+                    workspaceAccess: { unrestricted: false, sandboxed: true },
+                  },
+                },
+              },
+            ],
+          })),
+        },
+      },
+      registerGatewayMethod: vi.fn(
+        (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
+          methods.set(method, { handler, opts });
+        },
+      ),
+    } as unknown as OpenClawPluginApi;
+
+    registerWorkboardGatewayMethods({ api, store: new WorkboardStore(createMemoryStore()) });
+
+    const respond = vi.fn();
+    await methods.get("workboard.cards.safeChildCreate")?.handler({
+      params: { card: { title: "No hidden fanout" } },
+      respond,
+    } as never);
+
+    expect(respond.mock.calls[0]?.[0]).toBe(false);
+    expect(respond.mock.calls[0]?.[2]?.message).toContain(
+      "multiple restricted workboard_create receipts",
+    );
+  });
+
   it("rejects safe child-create when spawn is not accepted", async () => {
     type RegisteredMethod = {
       handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];

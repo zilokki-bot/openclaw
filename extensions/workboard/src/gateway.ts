@@ -120,6 +120,14 @@ function readRestrictedWorkboardReceipt(receipts: unknown[]): {
   toolCallId?: string;
   toolResult: { card: { id: string; workspaceAccess: Record<string, unknown> } };
 } {
+  const restrictedReceipts: Array<{
+    agentId?: string;
+    sessionKey?: string;
+    sessionId?: string;
+    toolCallId?: string;
+    toolResult: { card: { id: string; workspaceAccess: Record<string, unknown> } };
+  }> = [];
+
   for (const receipt of receipts) {
     if (!receipt || typeof receipt !== "object") {
       continue;
@@ -134,7 +142,7 @@ function readRestrictedWorkboardReceipt(receipts: unknown[]): {
       workspaceAccess &&
       workspaceAccess.unrestricted === false
     ) {
-      return {
+      restrictedReceipts.push({
         ...(typeof record.agentId === "string" ? { agentId: record.agentId } : {}),
         ...(typeof record.sessionKey === "string" ? { sessionKey: record.sessionKey } : {}),
         ...(typeof record.sessionId === "string" ? { sessionId: record.sessionId } : {}),
@@ -145,10 +153,17 @@ function readRestrictedWorkboardReceipt(receipts: unknown[]): {
             workspaceAccess,
           },
         },
-      };
+      });
     }
   }
-  throw new Error("safe child create did not return a restricted workboard_create receipt.");
+
+  if (restrictedReceipts.length === 0) {
+    throw new Error("safe child create did not return a restricted workboard_create receipt.");
+  }
+  if (restrictedReceipts.length > 1) {
+    throw new Error("safe child create returned multiple restricted workboard_create receipts.");
+  }
+  return restrictedReceipts[0]!;
 }
 
 function buildSafeChildCreateTask(cardParams: Record<string, unknown>): string {
