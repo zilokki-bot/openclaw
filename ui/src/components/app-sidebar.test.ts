@@ -841,6 +841,59 @@ describe("AppSidebar session catalog pagination", () => {
     }
   });
 
+  it("backs off instead of replaying expanded catalog pages after a slow refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi
+        .fn()
+        .mockResolvedValueOnce(catalogPage([{ threadId: "thread-1", name: "Initial" }], "page-2"))
+        .mockResolvedValueOnce(catalogPage([{ threadId: "thread-2", name: "Older" }], "page-3"))
+        .mockImplementationOnce(async () => {
+          await new Promise((resolve) => {
+            globalThis.setTimeout(resolve, 1_001);
+          });
+          return catalogPage([{ threadId: "thread-1", name: "Refreshed" }], "page-2");
+        });
+      const gateway = createGatewayHarness({ request } as unknown as GatewayBrowserClient);
+      gateway.publish({
+        hello: {
+          features: { methods: ["sessions.catalog.list"] },
+        } as ApplicationGatewaySnapshot["hello"],
+      });
+      const { sidebar } = await mountSidebar(
+        gateway.gateway,
+        createSessions("main", ["agent:main:main"]),
+      );
+      sidebar.connected = true;
+      await sidebar.updateComplete;
+      await vi.advanceTimersByTimeAsync(0);
+      await sidebar.updateComplete;
+
+      sidebar.querySelector<HTMLButtonElement>('[data-session-catalog-load-more="codex"]')?.click();
+      await vi.advanceTimersByTimeAsync(0);
+      await sidebar.updateComplete;
+      expect(
+        sidebar.sessionCatalogs[0]?.hosts[0]?.sessions.map((session) => session.threadId),
+      ).toEqual(["thread-1", "thread-2"]);
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      await vi.advanceTimersByTimeAsync(1_001);
+      await sidebar.updateComplete;
+
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(sidebar.sessionCatalogs[0]?.hosts[0]?.sessions.map((session) => session.name)).toEqual(
+        ["Refreshed", "Older"],
+      );
+      expect(sidebar.sessionCatalogs[0]?.hosts[0]?.nextCursor).toBe("page-3");
+
+      await vi.advanceTimersByTimeAsync(119_999);
+      await sidebar.updateComplete;
+      expect(request).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("discards a load-more response after a poll refreshes the same cursor", async () => {
     vi.useFakeTimers();
     try {
