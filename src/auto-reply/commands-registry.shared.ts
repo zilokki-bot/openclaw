@@ -905,6 +905,27 @@ export function buildBuiltinChatCommands(
       argsMenu: "auto",
     }),
     defineChatCommand({
+      key: "mode",
+      nativeName: "mode",
+      description: "Switch session mode.",
+      textAlias: "/mode",
+      category: "options",
+      tier: "essential",
+      args: [
+        {
+          name: "mode",
+          description: "light, normal, or status",
+          type: "string",
+          choices: ["light", "normal", "status"],
+        },
+        {
+          name: "model",
+          description: "Optional provider/model",
+          type: "string",
+        },
+      ],
+    }),
+    defineChatCommand({
       key: "reasoning",
       nativeName: "reasoning",
       description: "Toggle reasoning visibility.",

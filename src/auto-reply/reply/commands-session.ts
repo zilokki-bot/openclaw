@@ -11,6 +11,14 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { formatFastModeCurrentStatus, resolveFastModeState } from "../../agents/fast-mode.js";
+import { loadModelCatalog } from "../../agents/model-catalog.js";
+import {
+  buildModelAliasIndex,
+  modelKey,
+  resolveDefaultModelForAgent,
+  resolveModelRefFromString,
+} from "../../agents/model-selection.js";
+import { createModelVisibilityPolicy } from "../../agents/model-visibility-policy.js";
 import {
   setChannelConversationBindingIdleTimeoutBySessionKey,
   setChannelConversationBindingMaxAgeBySessionKey,
@@ -32,6 +40,10 @@ import {
 } from "../../infra/restart-sentinel.js";
 import { scheduleGatewaySigusr1Restart, triggerOpenClawRestart } from "../../infra/restart.js";
 import { loadCostUsageSummary, loadSessionCostSummary } from "../../infra/session-cost-usage.js";
+import {
+  applyModelOverrideToSessionEntry,
+  ModelSelectionLockedError,
+} from "../../sessions/model-overrides.js";
 import {
   asDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
@@ -59,6 +71,94 @@ const SESSION_COMMAND_PREFIX = "/session";
 const SESSION_DURATION_OFF_VALUES = new Set(["off", "disable", "disabled", "none", "0"]);
 const SESSION_ACTION_IDLE = "idle";
 const SESSION_ACTION_MAX_AGE = "max-age";
+const MODE_COMMAND_ALIASES = new Set(["/mode", "/режим"]);
+
+function parseModeCommand(normalized: string): string | null {
+  for (const alias of MODE_COMMAND_ALIASES) {
+    if (normalized === alias) {
+      return "";
+    }
+    if (normalized.startsWith(`${alias} `)) {
+      return normalized.slice(alias.length).trim();
+    }
+  }
+  return null;
+}
+
+function normalizeModeName(raw: string): "light" | "normal" | "status" | undefined {
+  switch (normalizeLowercaseStringOrEmpty(raw)) {
+    case "":
+    case "status":
+    case "статус":
+      return "status";
+    case "light":
+    case "lite":
+    case "low":
+    case "лайт":
+    case "легкий":
+    case "лёгкий":
+      return "light";
+    case "normal":
+    case "default":
+    case "обычный":
+    case "норм":
+    case "дефолт":
+      return "normal";
+    default:
+      return undefined;
+  }
+}
+
+async function resolveModeModelSelection(params: {
+  cfg: HandleCommandsParams["cfg"];
+  agentId?: string;
+  currentProvider: string;
+  currentModel: string;
+  rawModel: string;
+}) {
+  const defaultModel = resolveDefaultModelForAgent({
+    cfg: params.cfg,
+    agentId: params.agentId,
+  });
+  if (isSessionDefaultDirectiveValue(params.rawModel)) {
+    return {
+      provider: defaultModel.provider,
+      model: defaultModel.model,
+      isDefault: true,
+    };
+  }
+  const catalog = await loadModelCatalog({ config: params.cfg, readOnly: true });
+  const aliasIndex = buildModelAliasIndex({
+    cfg: params.cfg,
+    defaultProvider: params.currentProvider,
+  });
+  const resolved = resolveModelRefFromString({
+    cfg: params.cfg,
+    raw: params.rawModel,
+    defaultProvider: params.currentProvider,
+    aliasIndex,
+  });
+  if (!resolved) {
+    return { errorText: `⚙️ Unknown model: ${params.rawModel}` };
+  }
+  const policy = createModelVisibilityPolicy({
+    cfg: params.cfg,
+    catalog,
+    defaultProvider: params.currentProvider,
+    defaultModel: params.currentModel,
+    agentId: params.agentId,
+  });
+  const resolvedKey = modelKey(resolved.ref.provider, resolved.ref.model);
+  if (!policy.allowsKey(resolvedKey)) {
+    return { errorText: `⚙️ Model is not allowed: ${resolvedKey}` };
+  }
+  return {
+    provider: resolved.ref.provider,
+    model: resolved.ref.model,
+    isDefault:
+      resolved.ref.provider === defaultModel.provider && resolved.ref.model === defaultModel.model,
+  };
+}
 
 function buildRestartCommandSentinel(params: HandleCommandsParams): RestartSentinelPayload | null {
   const sessionKey = normalizeOptionalString(params.sessionKey);
@@ -506,6 +606,137 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
         nextMode === "auto"
           ? "⚙️ Fast mode set to auto."
           : `⚙️ Fast mode ${nextMode ? "enabled" : "disabled"}.`,
+    },
+  };
+};
+
+export const handleModeCommand: CommandHandler = async (params, allowTextCommands) => {
+  if (!allowTextCommands) {
+    return null;
+  }
+  const rawArgs = parseModeCommand(params.command.commandBodyNormalized);
+  if (rawArgs === null) {
+    return null;
+  }
+  if (!params.command.isAuthorizedSender) {
+    logVerbose(
+      `Ignoring /mode from unauthorized sender: ${params.command.senderId || "<unknown>"}`,
+    );
+    return { shouldContinue: false };
+  }
+
+  const [rawMode = "", rawModel] = rawArgs.split(/\s+/, 2);
+  const mode = normalizeModeName(rawMode);
+  if (!mode) {
+    return {
+      shouldContinue: false,
+      reply: { text: "⚙️ Usage: /mode status|light [provider/model]|normal [default]" },
+    };
+  }
+
+  const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
+  if (mode === "status") {
+    const fastState = resolveFastModeState({
+      cfg: params.cfg,
+      provider: params.provider,
+      model: params.model,
+      agentId: params.agentId,
+      sessionEntry: targetSessionEntry,
+    });
+    const thinkingLevel = normalizeOptionalString(targetSessionEntry?.thinkingLevel) ?? "default";
+    const selectedModel =
+      targetSessionEntry?.providerOverride && targetSessionEntry.modelOverride
+        ? `${targetSessionEntry.providerOverride}/${targetSessionEntry.modelOverride}`
+        : `${params.provider}/${params.model}`;
+    return {
+      shouldContinue: false,
+      reply: {
+        text:
+          `⚙️ Current mode\n` +
+          `Model: ${selectedModel}\n` +
+          `Thinking: ${thinkingLevel}\n` +
+          formatFastModeCurrentStatus({
+            mode: fastState.mode,
+            source: fastState.source,
+            fastAutoOnSeconds: fastState.fastAutoOnSeconds,
+            label: "Fast",
+          }),
+      },
+    };
+  }
+
+  if (!targetSessionEntry || !params.sessionStore || !params.sessionKey) {
+    return {
+      shouldContinue: false,
+      reply: { text: "⚙️ Mode change needs an active session. Send one normal message first." },
+    };
+  }
+
+  const touchedFields = new Set<keyof typeof targetSessionEntry>();
+  try {
+    if (mode === "light") {
+      targetSessionEntry.thinkingLevel = "off";
+      targetSessionEntry.fastMode = true;
+      touchedFields.add("thinkingLevel");
+      touchedFields.add("fastMode");
+    } else {
+      delete targetSessionEntry.thinkingLevel;
+      delete targetSessionEntry.fastMode;
+      touchedFields.add("thinkingLevel");
+      touchedFields.add("fastMode");
+    }
+
+    if (rawModel) {
+      const selection = await resolveModeModelSelection({
+        cfg: params.cfg,
+        agentId: params.agentId,
+        currentProvider: params.provider,
+        currentModel: params.model,
+        rawModel,
+      });
+      if ("errorText" in selection) {
+        return { shouldContinue: false, reply: { text: selection.errorText } };
+      }
+      applyModelOverrideToSessionEntry({
+        entry: targetSessionEntry,
+        selection,
+        markLiveSwitchPending: true,
+      });
+      touchedFields.add("providerOverride");
+      touchedFields.add("modelOverride");
+      touchedFields.add("modelOverrideSource");
+      touchedFields.add("liveModelSwitchPending");
+    }
+  } catch (err) {
+    if (err instanceof ModelSelectionLockedError) {
+      return { shouldContinue: false, reply: { text: `⚙️ ${err.message}` } };
+    }
+    throw err;
+  }
+
+  if (
+    !(await persistSessionEntry({
+      ...params,
+      sessionEntry: targetSessionEntry,
+      touchedFields: [...touchedFields],
+    }))
+  ) {
+    return sessionEntryPersistenceConflictReply();
+  }
+
+  const modelText =
+    targetSessionEntry.providerOverride && targetSessionEntry.modelOverride
+      ? ` Model: ${targetSessionEntry.providerOverride}/${targetSessionEntry.modelOverride}.`
+      : rawModel && mode === "normal"
+        ? " Model reset to default."
+        : "";
+  return {
+    shouldContinue: false,
+    reply: {
+      text:
+        mode === "light"
+          ? `⚙️ Light mode enabled. Thinking off, fast on.${modelText}`
+          : `⚙️ Normal mode restored. Thinking/fast reset to defaults.${modelText}`,
     },
   };
 };

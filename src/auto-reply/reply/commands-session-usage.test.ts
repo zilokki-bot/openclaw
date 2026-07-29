@@ -6,7 +6,7 @@ import type {
   CostUsageTotals,
   SessionCostSummary,
 } from "../../infra/session-cost-usage.js";
-import { handleFastCommand, handleUsageCommand } from "./commands-session.js";
+import { handleFastCommand, handleModeCommand, handleUsageCommand } from "./commands-session.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 
 const resolveSessionAgentIdMock = vi.hoisted(() => vi.fn(() => "main"));
@@ -452,5 +452,68 @@ describe("handleFastCommand", () => {
     expect(result?.reply?.text).toBe("⚙️ Fast mode reset to default.");
     expect(params.sessionEntry.fastMode).toBe(false);
     expect(params.sessionStore[params.sessionKey]?.fastMode).toBeUndefined();
+  });
+});
+
+describe("handleModeCommand", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveFastModeStateMock.mockReturnValue({
+      mode: true,
+      enabled: true,
+      source: "session",
+    });
+  });
+
+  it("enables light mode on the target session", async () => {
+    const params = buildUsageParams();
+    params.command.commandBodyNormalized = "/mode light";
+    params.sessionStore = { [params.sessionKey]: params.sessionEntry! };
+
+    const result = await handleModeCommand(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toBe("⚙️ Light mode enabled. Thinking off, fast on.");
+    expect(params.sessionEntry?.thinkingLevel).toBe("off");
+    expect(params.sessionEntry?.fastMode).toBe(true);
+  });
+
+  it("restores normal mode by clearing session thinking and fast overrides", async () => {
+    const params = buildUsageParams();
+    params.command.commandBodyNormalized = "/mode normal";
+    params.sessionEntry = {
+      sessionId: "session-1",
+      updatedAt: Date.now(),
+      thinkingLevel: "off",
+      fastMode: true,
+    };
+    params.sessionStore = { [params.sessionKey]: params.sessionEntry };
+
+    const result = await handleModeCommand(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toBe("⚙️ Normal mode restored. Thinking/fast reset to defaults.");
+    expect(params.sessionEntry.thinkingLevel).toBeUndefined();
+    expect(params.sessionEntry.fastMode).toBeUndefined();
+  });
+
+  it("reports mode status without mutating the session", async () => {
+    const params = buildUsageParams();
+    params.command.commandBodyNormalized = "/режим статус";
+    params.provider = "openai";
+    params.model = "gpt-5.5";
+    params.sessionEntry = {
+      sessionId: "session-1",
+      updatedAt: Date.now(),
+      thinkingLevel: "off",
+      fastMode: true,
+    };
+
+    const result = await handleModeCommand(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("Current mode");
+    expect(result?.reply?.text).toContain("Model: openai/gpt-5.5");
+    expect(result?.reply?.text).toContain("Thinking: off");
   });
 });
