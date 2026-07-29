@@ -183,6 +183,11 @@ vi.mock("../agents/openclaw-tools.js", () => {
       execute: async () => ({ ok: true, identity: getGatewayToolCallerIdentity() }),
     },
     {
+      name: "plugin_identity_test",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true, identity: getGatewayToolCallerIdentity() }),
+    },
+    {
       name: "tools_invoke_test",
       parameters: {
         type: "object",
@@ -570,6 +575,27 @@ describe("POST /tools/invoke", () => {
       agentId: "main",
       sessionKey: "agent:main:main",
     });
+  });
+
+  it("propagates requested agent identity into plugin tool execution", async () => {
+    setMainAllowedTools({ allow: ["plugin_identity_test"] });
+    pluginToolMetaState.set("plugin_identity_test", { pluginId: "test-plugin", optional: true });
+
+    const res = await invokeToolAuthed({
+      tool: "plugin_identity_test",
+      sessionKey: "main",
+      agentId: "main",
+    });
+
+    const body = await expectOkInvokeResponse(res);
+    expect(body.result?.identity).toEqual({
+      agentId: "main",
+      sessionKey: "agent:main:main",
+    });
+    expect(lastCreateOpenClawToolsContext?.requesterAgentIdOverride).toBe("main");
+    const hookCtx = firstHookCallArg().ctx;
+    expect(hookCtx?.agentId).toBe("main");
+    expect(hookCtx?.sessionKey).toBe("agent:main:main");
   });
 
   it("opts direct gateway tool invocation into gateway subagent binding", async () => {
