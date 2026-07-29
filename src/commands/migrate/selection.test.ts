@@ -4,6 +4,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it } from "vitest";
 import type { MigrationItem, MigrationPlan } from "../../plugins/types.js";
 import {
+  applyExplicitMigrationSelectionBoundary,
   applyMigrationPluginSelection,
   applyMigrationSelectedPluginItemIds,
   applyMigrationSelectedSkillItemIds,
@@ -23,6 +24,8 @@ import {
   resolveInteractiveMigrationPluginSelection,
   resolveInteractiveMigrationSkillSelection,
 } from "./selection.js";
+
+const MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON = "outside explicit migration selection";
 
 function skillItem(params: {
   id: string;
@@ -236,6 +239,83 @@ describe("applyMigrationSkillSelection", () => {
 
     expect(selected.items).toHaveLength(1);
     expectItemStatus(selected.items, "skill:alpha", "planned");
+  });
+
+  it("treats generated command skills as selectable skill items", () => {
+    const selected = applyMigrationSkillSelection(
+      plan([
+        skillItem({
+          id: "skill:claude-command-ship",
+          name: "claude-command-ship",
+          action: "create",
+        }),
+        skillItem({ id: "skill:review", name: "review", action: "copy" }),
+      ]),
+      ["claude-command-ship"],
+    );
+
+    expectItemStatus(selected.items, "skill:claude-command-ship", "planned");
+    expectItemStatus(
+      selected.items,
+      "skill:review",
+      "skipped",
+      MIGRATION_SKILL_NOT_SELECTED_REASON,
+    );
+    expectSummaryFields(selected.summary, { planned: 1, skipped: 1 });
+  });
+
+  it("skips non-skill planned items outside explicit skill selection", () => {
+    const selected = applyExplicitMigrationSelectionBoundary(
+      applyMigrationSkillSelection(
+        plan([
+          skillItem({ id: "skill:alpha", name: "alpha" }),
+          skillItem({ id: "skill:beta", name: "beta" }),
+          {
+            id: "memory:codex:notes.md",
+            kind: "memory",
+            action: "copy",
+            status: "planned",
+          },
+          {
+            id: "config:mcp-server:codex",
+            kind: "config",
+            action: "merge",
+            status: "planned",
+          },
+          {
+            id: "archive:config.toml",
+            kind: "archive",
+            action: "archive",
+            status: "planned",
+          },
+          {
+            id: "workspace:USER.md",
+            kind: "workspace",
+            action: "append",
+            status: "planned",
+          },
+        ]),
+        ["alpha"],
+      ),
+      { skills: ["alpha"] },
+    );
+
+    expectItemStatus(selected.items, "skill:alpha", "planned");
+    expectItemStatus(selected.items, "skill:beta", "skipped", MIGRATION_SKILL_NOT_SELECTED_REASON);
+    for (const id of [
+      "memory:codex:notes.md",
+      "config:mcp-server:codex",
+      "archive:config.toml",
+      "workspace:USER.md",
+    ]) {
+      expectItemStatus(
+        selected.items,
+        id,
+        "skipped",
+        MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON,
+      );
+    }
+    expectSummaryFields(selected.summary, { planned: 1, skipped: 5 });
   });
 
   it("can skip conflicting skills before apply conflict checks run", () => {

@@ -170,6 +170,42 @@ function codexSkillPlan(overrides: Partial<MigrationPlan> = {}): MigrationPlan {
   };
 }
 
+function codexSkillPlanWithRootItems(): MigrationPlan {
+  const base = codexSkillPlan();
+  const items: MigrationPlan["items"] = [
+    ...base.items,
+    {
+      id: "memory:codex:notes.md",
+      kind: "memory",
+      action: "copy",
+      status: "planned",
+    },
+    {
+      id: "config:mcp-server:codex",
+      kind: "config",
+      action: "merge",
+      status: "planned",
+      target: "mcp.servers.codex",
+    },
+    {
+      id: "workspace:USER.md",
+      kind: "workspace",
+      action: "append",
+      status: "planned",
+      target: "/tmp/openclaw/workspace/USER.md",
+    },
+  ];
+  return {
+    ...base,
+    summary: {
+      ...base.summary,
+      total: items.length,
+      planned: items.length,
+    },
+    items,
+  };
+}
+
 function codexPluginPlan(overrides: Partial<MigrationPlan> = {}): MigrationPlan {
   const items: MigrationPlan["items"] = [
     {
@@ -389,6 +425,55 @@ describe("migrateApplyCommand", () => {
     expect(mocks.withProgress).toHaveBeenCalledWith(
       expect.objectContaining({ indeterminate: true, label: "Scanning codex migration…" }),
       expect.any(Function),
+    );
+  });
+
+  it("filters explicit skills in non-interactive plan output", async () => {
+    const planned = codexSkillPlanWithRootItems();
+    mocks.provider.plan.mockResolvedValue(planned);
+
+    const result = await migratePlanCommand(runtime, {
+      provider: "codex",
+      skills: ["alpha"],
+    });
+
+    expect(result.summary).toMatchObject({ total: 6, planned: 1, skipped: 5, conflicts: 0 });
+    const itemsById = new Map(result.items.map((item) => [item.id, item]));
+    expect(itemsById.get("skill:alpha")?.status).toBe("planned");
+    expect(itemsById.get("skill:beta")?.status).toBe("skipped");
+    expect(itemsById.get("skill:beta")?.reason).toBe("not selected for migration");
+    expect(itemsById.get("archive:config.toml")?.status).toBe("skipped");
+    expect(itemsById.get("memory:codex:notes.md")?.status).toBe("skipped");
+    expect(itemsById.get("config:mcp-server:codex")?.status).toBe("skipped");
+    expect(itemsById.get("workspace:USER.md")?.status).toBe("skipped");
+  });
+
+  it("filters explicit skills in JSON dry-run output", async () => {
+    const planned = codexSkillPlanWithRootItems();
+    mocks.provider.plan.mockResolvedValue(planned);
+
+    const result = await migrateDefaultCommand(runtime, {
+      provider: "codex",
+      dryRun: true,
+      json: true,
+      skills: ["alpha"],
+    });
+
+    expect(result.summary).toMatchObject({ total: 6, planned: 1, skipped: 5, conflicts: 0 });
+    const itemsById = new Map(result.items.map((item) => [item.id, item]));
+    expect(itemsById.get("skill:alpha")?.status).toBe("planned");
+    expect(itemsById.get("skill:beta")?.status).toBe("skipped");
+    expect(itemsById.get("archive:config.toml")?.status).toBe("skipped");
+    expect(itemsById.get("memory:codex:notes.md")?.status).toBe("skipped");
+    expect(itemsById.get("config:mcp-server:codex")?.status).toBe("skipped");
+    expect(itemsById.get("workspace:USER.md")?.status).toBe("skipped");
+    expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining('"planned": 1'));
+    expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining('"skipped": 5'));
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining('"reason": "not selected for migration"'),
+    );
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining('"reason": "outside explicit migration selection"'),
     );
   });
 
@@ -1194,8 +1279,8 @@ describe("migrateApplyCommand", () => {
   it("filters explicit Codex skills before apply conflict checks", async () => {
     const planned = codexSkillPlan({
       summary: {
-        total: 3,
-        planned: 2,
+        total: 6,
+        planned: 5,
         migrated: 0,
         skipped: 0,
         conflicts: 1,
@@ -1224,6 +1309,26 @@ describe("migrateApplyCommand", () => {
           action: "archive",
           status: "planned",
         },
+        {
+          id: "memory:codex:notes.md",
+          kind: "memory",
+          action: "copy",
+          status: "planned",
+        },
+        {
+          id: "config:mcp-server:codex",
+          kind: "config",
+          action: "merge",
+          status: "planned",
+          target: "mcp.servers.codex",
+        },
+        {
+          id: "workspace:USER.md",
+          kind: "workspace",
+          action: "append",
+          status: "planned",
+          target: "/tmp/openclaw/workspace/USER.md",
+        },
       ],
     });
     mocks.provider.plan.mockResolvedValue(planned);
@@ -1238,13 +1343,20 @@ describe("migrateApplyCommand", () => {
     await migrateApplyCommand(runtime, { provider: "codex", yes: true, skills: ["alpha"] });
 
     const appliedPlan = firstAppliedPlan();
-    expect(appliedPlan.summary.planned).toBe(2);
-    expect(appliedPlan.summary.skipped).toBe(1);
+    expect(appliedPlan.summary.planned).toBe(1);
+    expect(appliedPlan.summary.skipped).toBe(5);
     expect(appliedPlan.summary.conflicts).toBe(0);
     const itemsById = new Map(appliedPlan.items.map((item) => [item.id, item]));
     expect(itemsById.get("skill:alpha")?.status).toBe("planned");
     expect(itemsById.get("skill:beta")?.status).toBe("skipped");
     expect(itemsById.get("skill:beta")?.reason).toBe("not selected for migration");
+    expect(itemsById.get("archive:config.toml")?.status).toBe("skipped");
+    expect(itemsById.get("archive:config.toml")?.reason).toBe(
+      "outside explicit migration selection",
+    );
+    expect(itemsById.get("memory:codex:notes.md")?.status).toBe("skipped");
+    expect(itemsById.get("config:mcp-server:codex")?.status).toBe("skipped");
+    expect(itemsById.get("workspace:USER.md")?.status).toBe("skipped");
     expect(mocks.backupCreateCommand).toHaveBeenCalled();
   });
 
