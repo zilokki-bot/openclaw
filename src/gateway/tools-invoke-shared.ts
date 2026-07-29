@@ -9,6 +9,7 @@ import { resolveToolLoopDetectionConfig } from "../agents/agent-tools.js";
 import { getChannelAgentToolMeta } from "../agents/channel-tools.js";
 import { isKnownCoreToolId } from "../agents/tool-catalog.js";
 import { ToolInputError, type AnyAgentTool } from "../agents/tools/common.js";
+import { wrapToolWithGatewayCallerIdentity } from "../agents/tools/gateway-caller-context.js";
 import {
   normalizeConversationReadInvocationOrigin,
   type ConversationReadInvocationOrigin,
@@ -273,7 +274,19 @@ export async function invokeGatewayTool(params: {
   }
 
   try {
-    const gatewayTool: AnyAgentTool = tool;
+    const gatewayTool: AnyAgentTool = wrapToolWithGatewayCallerIdentity(
+      tool,
+      agentId
+        ? {
+            agentId,
+            sessionKey,
+            turnSourceChannel: params.messageChannel,
+            turnSourceTo: params.agentTo,
+            turnSourceAccountId: params.accountId,
+            turnSourceThreadId: params.agentThreadId,
+          }
+        : undefined,
+    );
     const idempotencyKey = normalizeOptionalString(params.input.idempotencyKey);
     const toolCallId = idempotencyKey
       ? `${params.toolCallIdPrefix}-${conversationReadOrigin}-${idempotencyKey}`
