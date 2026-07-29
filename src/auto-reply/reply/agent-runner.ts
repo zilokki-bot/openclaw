@@ -2593,6 +2593,15 @@ export async function runReplyAgent(params: {
         runtimePolicySessionKey,
         opts,
       });
+      if (
+        responseUsageLine &&
+        completedSourceReplyDelivery &&
+        sourceReplyPolicy.sourceReplyDeliveryMode === "message_tool_only" &&
+        finalPayloads.length === 1 &&
+        finalPayloads[0]?.text === responseUsageLine
+      ) {
+        finalPayloads = [markReplyPayloadForSourceSuppressionDelivery(finalPayloads[0])];
+      }
       const finalDeliveryText = buildPendingFinalDeliveryText(finalPayloads);
       // #85714: warn only for unusually substantive private final text. In
       // message_tool_only, no tool call can be intentional silence, and
