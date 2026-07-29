@@ -1,5 +1,4 @@
 // Workboard plugin module implements gateway behavior.
-import { createHash } from "node:crypto";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { OpenClawPluginApi } from "../api.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
@@ -109,7 +108,8 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function argsHash(value: unknown): string {
+async function argsHash(value: unknown): Promise<string> {
+  const { createHash } = await import("node:crypto");
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
@@ -220,7 +220,7 @@ export function registerWorkboardGatewayMethods(params: {
       try {
         assertNoSafeChildCreateEscapeHatches(requestParams);
         const cardParams = readObjectParam(requestParams, "card");
-        const hash = argsHash(cardParams);
+        const hash = await argsHash(cardParams);
         const sandboxPosture = {
           sandbox: "require",
           context: "isolated",
