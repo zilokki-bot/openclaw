@@ -1,6 +1,10 @@
 // Gateway plugin tests cover plugin loading, auto-enable, runtime registry setup,
 // request-scope injection, diagnostics, and handler dispatch integration.
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  clearSubagentToolReceiptsForTests,
+  recordSubagentToolReceipt,
+} from "../agents/subagent-tool-receipts.js";
 import { createPluginRecord } from "../plugins/loader-records.js";
 import type { PluginLookUpTable } from "../plugins/plugin-lookup-table.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
@@ -383,6 +387,7 @@ beforeEach(() => {
   pluginRuntimeLoaderLogger.debug.mockClear();
   handleGatewayRequest.mockReset();
   clearGatewaySubagentRuntime();
+  clearSubagentToolReceiptsForTests();
   handleGatewayRequest.mockImplementation(async (opts: HandleGatewayRequestOptions) => {
     switch (opts.req.method) {
       case "agent":
@@ -406,6 +411,7 @@ beforeEach(() => {
 afterEach(() => {
   serverPluginsModule.clearFallbackGatewayContext();
   clearGatewaySubagentRuntime();
+  clearSubagentToolReceiptsForTests();
   runtimeRegistryModule.resetPluginRuntimeStateForTest();
 });
 
@@ -819,6 +825,60 @@ describe("loadGatewayPlugins", () => {
       }),
     ).resolves.toEqual({
       messages: [{ id: "m-3" }],
+    });
+  });
+
+  test("provides subagent runtime read access to whitelisted tool receipts", async () => {
+    const runtime = await createSubagentRuntime(serverPluginsModule);
+    recordSubagentToolReceipt({
+      runId: "run-safe-create",
+      toolName: "workboard_create",
+      toolCallId: "tool-call-1",
+      agentId: "workboard-worker",
+      sessionKey: "agent:workboard-worker:subagent:create",
+      result: {
+        details: {
+          card: {
+            id: "card-1",
+            metadata: {
+              automation: {
+                workspaceAccess: {
+                  unrestricted: false,
+                  sandboxed: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      now: 123,
+    });
+
+    await expect(
+      runtime.getToolReceipts({
+        runId: "run-safe-create",
+        toolName: "workboard_create",
+      }),
+    ).resolves.toEqual({
+      receipts: [
+        {
+          runId: "run-safe-create",
+          toolName: "workboard_create",
+          recordedAt: 123,
+          toolCallId: "tool-call-1",
+          agentId: "workboard-worker",
+          sessionKey: "agent:workboard-worker:subagent:create",
+          toolResult: {
+            card: {
+              id: "card-1",
+              workspaceAccess: {
+                unrestricted: false,
+                sandboxed: true,
+              },
+            },
+          },
+        },
+      ],
     });
   });
 

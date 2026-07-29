@@ -53,6 +53,15 @@ type SubagentGetSessionMessagesResult = {
   messages: unknown[];
 };
 
+type SubagentToolReceiptsParams = {
+  runId: string;
+  toolName?: string;
+};
+
+type SubagentToolReceiptsResult = {
+  receipts: unknown[];
+};
+
 /** @deprecated Use SubagentGetSessionMessagesParams. */
 type SubagentGetSessionParams = SubagentGetSessionMessagesParams;
 
@@ -117,6 +126,7 @@ export type PluginRuntime = PluginRuntimeCore & {
     /** @deprecated Use getSessionMessages. */
     getSession: (params: SubagentGetSessionParams) => Promise<SubagentGetSessionResult>;
     deleteSession: (params: SubagentDeleteSessionParams) => Promise<void>;
+    getToolReceipts: (params: SubagentToolReceiptsParams) => Promise<SubagentToolReceiptsResult>;
   };
   nodes: {
     list: (params?: RuntimeNodeListParams) => Promise<RuntimeNodeListResult>;

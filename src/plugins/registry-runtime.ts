@@ -732,6 +732,8 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
               assertStoredSessionEntryOwned({ action: "delete", sessionKey: params.sessionKey });
               await subagent.deleteSession(params);
             }),
+          getToolReceipts: (params) =>
+            withPluginRuntimePluginIdScope(pluginId, () => subagent.getToolReceipts(params)),
         } satisfies PluginRuntime["subagent"];
       },
     });

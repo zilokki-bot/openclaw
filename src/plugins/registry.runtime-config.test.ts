@@ -431,6 +431,7 @@ describe("plugin registry runtime config scope", () => {
       getSessionMessages: vi.fn(async () => ({ messages: [] })),
       getSession: vi.fn(async () => ({ messages: [] })),
       deleteSession: vi.fn(async () => {}),
+      getToolReceipts: vi.fn(async () => ({ receipts: [] })),
     } satisfies PluginRuntime["subagent"];
     const runtime = createPluginRuntime({ subagent });
     const session = runtime.agent.session;

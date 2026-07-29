@@ -12,6 +12,7 @@ import {
 import type { ErrorShape } from "../../packages/gateway-protocol/src/schema/frames.js";
 import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/version.js";
 import { normalizeModelRef, parseModelRef } from "../agents/model-selection.js";
+import { listSubagentToolReceipts } from "../agents/subagent-tool-receipts.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
@@ -665,6 +666,9 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
         },
         pluginOwnedCleanupOptions,
       );
+    },
+    async getToolReceipts(params) {
+      return { receipts: listSubagentToolReceipts(params) };
     },
   };
 }

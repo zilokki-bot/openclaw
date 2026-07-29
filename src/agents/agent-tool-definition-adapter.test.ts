@@ -8,7 +8,7 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { AgentTool } from "openclaw/plugin-sdk/agent-core";
 import { Type } from "typebox";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createClientToolNameConflictError,
   findClientToolNameConflicts,
@@ -19,6 +19,10 @@ import {
 import { wrapToolWithBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
 import { createExecTool } from "./bash-tools.exec.js";
 import type { ClientToolDefinition } from "./embedded-agent-runner/run/params.js";
+import {
+  clearSubagentToolReceiptsForTests,
+  listSubagentToolReceipts,
+} from "./subagent-tool-receipts.js";
 
 type ToolExecute = ReturnType<typeof toToolDefinitions>[number]["execute"];
 const extensionContext = {} as Parameters<ToolExecute>[4];
@@ -53,6 +57,10 @@ async function executeTool(tool: AgentTool, callId: string) {
 }
 
 describe("agent tool definition adapter", () => {
+  beforeEach(() => {
+    clearSubagentToolReceiptsForTests();
+  });
+
   it("preserves argument preparation and execution mode contracts", () => {
     const prepareArguments = vi.fn((args: unknown) => args as Record<string, never>);
     const tool = {
@@ -95,6 +103,131 @@ describe("agent tool definition adapter", () => {
     expect(details?.status).toBe("error");
     expect(details?.tool).toBe("exec");
     expect(details?.error).toBe("nope");
+  });
+
+  it("records restricted workboard_create receipts by run id", async () => {
+    const tool = {
+      name: "workboard_create",
+      label: "Workboard Create",
+      description: "creates a card",
+      parameters: Type.Object({}),
+      execute: async () => ({
+        content: [{ type: "text", text: "created" }],
+        details: {
+          card: {
+            id: "card-1",
+            metadata: {
+              automation: {
+                workspaceAccess: {
+                  unrestricted: false,
+                  sandboxed: true,
+                  writable: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    } satisfies AgentTool;
+
+    const [definition] = toToolDefinitions([tool], {
+      agentId: "workboard-worker",
+      sessionKey: "agent:workboard-worker:subagent:create",
+      sessionId: "session-1",
+      runId: "run-safe-create",
+    });
+
+    await expectDefined(definition, "definition").execute(
+      "tool-call-1",
+      {},
+      undefined,
+      undefined,
+      extensionContext,
+    );
+
+    expect(listSubagentToolReceipts({ runId: "run-safe-create" })).toEqual([
+      expect.objectContaining({
+        runId: "run-safe-create",
+        toolName: "workboard_create",
+        toolCallId: "tool-call-1",
+        agentId: "workboard-worker",
+        sessionKey: "agent:workboard-worker:subagent:create",
+        sessionId: "session-1",
+        toolResult: {
+          card: {
+            id: "card-1",
+            workspaceAccess: {
+              unrestricted: false,
+              sandboxed: true,
+              writable: true,
+            },
+          },
+        },
+      }),
+    ]);
+  });
+
+  it("does not record assistant-like or unrestricted tool results as safe receipts", async () => {
+    const unrestrictedWorkboard = {
+      name: "workboard_create",
+      label: "Workboard Create",
+      description: "creates an unrestricted card",
+      parameters: Type.Object({}),
+      execute: async () => ({
+        content: [{ type: "text", text: "created" }],
+        details: {
+          card: {
+            id: "card-unsafe",
+            metadata: {
+              automation: {
+                workspaceAccess: {
+                  unrestricted: true,
+                  sandboxed: false,
+                },
+              },
+            },
+          },
+        },
+      }),
+    } satisfies AgentTool;
+    const assistantJson = {
+      name: "message",
+      label: "Message",
+      description: "plain assistant JSON",
+      parameters: Type.Object({}),
+      execute: async () => ({
+        content: [{ type: "text", text: '{"card":{"id":"fake"}}' }],
+        details: {
+          card: {
+            id: "fake",
+            metadata: {
+              automation: {
+                workspaceAccess: {
+                  unrestricted: false,
+                  sandboxed: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    } satisfies AgentTool;
+
+    for (const tool of [unrestrictedWorkboard, assistantJson]) {
+      const [definition] = toToolDefinitions([tool], {
+        runId: "run-unsafe",
+        sessionKey: "agent:workboard-worker:subagent:create",
+      });
+      await expectDefined(definition, "definition").execute(
+        `call-${tool.name}`,
+        {},
+        undefined,
+        undefined,
+        extensionContext,
+      );
+    }
+
+    expect(listSubagentToolReceipts({ runId: "run-unsafe" })).toEqual([]);
   });
 
   it("preserves exec deny before prepared workdir failures", async () => {
