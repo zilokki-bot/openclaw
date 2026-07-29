@@ -68,6 +68,10 @@
     "target": "OpenAI provider"
   },
   {
+    "source": "LLM Task Native Route Canary",
+    "target": "LLM Task 原生路由金丝雀"
+  },
+  {
     "source": "Mantis",
     "target": "Mantis"
   },

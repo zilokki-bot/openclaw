@@ -4964,6 +4964,17 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: References
   - H2: Related
 
+## ops/llm-task-native-route-canary-20260729.md
+
+- Route: /ops/llm-task-native-route-canary-20260729
+- Headings:
+  - H1: LLM Task Native Route Canary
+  - H2: Source gate
+  - H2: Server uptake gate
+  - H2: Route canary
+  - H2: main:telegram route gate
+  - H2: Failure classification
+
 ## ops/workboard-background-admission-reserve-20260720.md
 
 - Route: /ops/workboard-background-admission-reserve-20260720
