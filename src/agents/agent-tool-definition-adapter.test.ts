@@ -8,7 +8,7 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { AgentTool } from "openclaw/plugin-sdk/agent-core";
 import { Type } from "typebox";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createClientToolNameConflictError,
   findClientToolNameConflicts,
@@ -19,10 +19,7 @@ import {
 import { wrapToolWithBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
 import { createExecTool } from "./bash-tools.exec.js";
 import type { ClientToolDefinition } from "./embedded-agent-runner/run/params.js";
-import {
-  clearSubagentToolReceiptsForTests,
-  listSubagentToolReceipts,
-} from "./subagent-tool-receipts.js";
+import { listSubagentToolReceipts, recordSubagentToolReceipt } from "./subagent-tool-receipts.js";
 
 type ToolExecute = ReturnType<typeof toToolDefinitions>[number]["execute"];
 const extensionContext = {} as Parameters<ToolExecute>[4];
@@ -57,10 +54,6 @@ async function executeTool(tool: AgentTool, callId: string) {
 }
 
 describe("agent tool definition adapter", () => {
-  beforeEach(() => {
-    clearSubagentToolReceiptsForTests();
-  });
-
   it("preserves argument preparation and execution mode contracts", () => {
     const prepareArguments = vi.fn((args: unknown) => args as Record<string, never>);
     const tool = {
@@ -106,6 +99,7 @@ describe("agent tool definition adapter", () => {
   });
 
   it("records restricted workboard_create receipts by run id", async () => {
+    const runId = `run-safe-create-${Date.now()}-${Math.random()}`;
     const tool = {
       name: "workboard_create",
       label: "Workboard Create",
@@ -134,7 +128,7 @@ describe("agent tool definition adapter", () => {
       agentId: "workboard-worker",
       sessionKey: "agent:workboard-worker:subagent:create",
       sessionId: "session-1",
-      runId: "run-safe-create",
+      runId,
     });
 
     await expectDefined(definition, "definition").execute(
@@ -145,9 +139,9 @@ describe("agent tool definition adapter", () => {
       extensionContext,
     );
 
-    expect(listSubagentToolReceipts({ runId: "run-safe-create" })).toEqual([
+    expect(listSubagentToolReceipts({ runId })).toEqual([
       expect.objectContaining({
-        runId: "run-safe-create",
+        runId,
         toolName: "workboard_create",
         toolCallId: "tool-call-1",
         agentId: "workboard-worker",
@@ -168,6 +162,7 @@ describe("agent tool definition adapter", () => {
   });
 
   it("does not record assistant-like or unrestricted tool results as safe receipts", async () => {
+    const runId = `run-unsafe-${Date.now()}-${Math.random()}`;
     const unrestrictedWorkboard = {
       name: "workboard_create",
       label: "Workboard Create",
@@ -215,7 +210,7 @@ describe("agent tool definition adapter", () => {
 
     for (const tool of [unrestrictedWorkboard, assistantJson]) {
       const [definition] = toToolDefinitions([tool], {
-        runId: "run-unsafe",
+        runId,
         sessionKey: "agent:workboard-worker:subagent:create",
       });
       await expectDefined(definition, "definition").execute(
@@ -227,7 +222,47 @@ describe("agent tool definition adapter", () => {
       );
     }
 
-    expect(listSubagentToolReceipts({ runId: "run-unsafe" })).toEqual([]);
+    expect(listSubagentToolReceipts({ runId })).toEqual([]);
+  });
+
+  it("bounds retained workboard_create receipts by run id and age", () => {
+    const prefix = `retention-${Date.now()}-${Math.random()}`;
+    const validResult = (id: string) => ({
+      details: {
+        card: {
+          id,
+          metadata: {
+            automation: {
+              workspaceAccess: {
+                unrestricted: false,
+                sandboxed: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    const baseTime = Date.now();
+
+    recordSubagentToolReceipt({
+      runId: `${prefix}-expired`,
+      toolName: "workboard_create",
+      result: validResult("card-expired"),
+      now: baseTime - 3 * 24 * 60 * 60 * 1000,
+    });
+    expect(listSubagentToolReceipts({ runId: `${prefix}-expired` })).toEqual([]);
+
+    for (let index = 0; index < 520; index += 1) {
+      recordSubagentToolReceipt({
+        runId: `${prefix}-${index}`,
+        toolName: "workboard_create",
+        result: validResult(`card-${index}`),
+        now: baseTime + index,
+      });
+    }
+
+    expect(listSubagentToolReceipts({ runId: `${prefix}-0` })).toEqual([]);
+    expect(listSubagentToolReceipts({ runId: `${prefix}-519` })).toHaveLength(1);
   });
 
   it("preserves exec deny before prepared workdir failures", async () => {

@@ -721,6 +721,8 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
               });
               return await subagent.run(params);
             }),
+          spawnSafe: (params) =>
+            withPluginRuntimePluginIdScope(pluginId, () => subagent.spawnSafe(params)),
           waitForRun: (params) =>
             withPluginRuntimePluginIdScope(pluginId, () => subagent.waitForRun(params)),
           getSessionMessages: (params) =>

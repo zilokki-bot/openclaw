@@ -3,10 +3,12 @@ import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 
 const SUBAGENT_TOOL_RECEIPTS_SYMBOL = Symbol.for("openclaw.subagentToolReceipts");
 const RECEIPTS_PER_RUN_LIMIT = 20;
+const RECEIPT_RUN_LIMIT = 512;
+const RECEIPT_TTL_MS = 24 * 60 * 60 * 1000;
 
 type JsonRecord = Record<string, unknown>;
 
-export type SubagentToolReceipt = {
+type SubagentToolReceipt = {
   runId: string;
   toolName: "workboard_create";
   recordedAt: number;
@@ -67,6 +69,37 @@ function extractSafeWorkboardCreateCard(result: unknown):
   return { id, workspaceAccess: { ...workspaceAccess } };
 }
 
+function pruneReceiptState(now: number): void {
+  const expiresBefore = now - RECEIPT_TTL_MS;
+  for (const [runId, receipts] of state.byRunId) {
+    const freshReceipts = receipts.filter((receipt) => receipt.recordedAt >= expiresBefore);
+    if (freshReceipts.length === 0) {
+      state.byRunId.delete(runId);
+      continue;
+    }
+    if (freshReceipts.length !== receipts.length) {
+      state.byRunId.set(runId, freshReceipts);
+    }
+  }
+
+  while (state.byRunId.size > RECEIPT_RUN_LIMIT) {
+    let oldestRunId: string | undefined;
+    let oldestRecordedAt = Number.POSITIVE_INFINITY;
+    for (const [runId, receipts] of state.byRunId) {
+      const newestReceipt = receipts[receipts.length - 1];
+      const recordedAt = newestReceipt?.recordedAt ?? 0;
+      if (recordedAt < oldestRecordedAt) {
+        oldestRunId = runId;
+        oldestRecordedAt = recordedAt;
+      }
+    }
+    if (!oldestRunId) {
+      return;
+    }
+    state.byRunId.delete(oldestRunId);
+  }
+}
+
 export function recordSubagentToolReceipt(params: {
   runId?: string;
   toolName: string;
@@ -77,6 +110,8 @@ export function recordSubagentToolReceipt(params: {
   result: unknown;
   now?: number;
 }): void {
+  const now = params.now ?? Date.now();
+  pruneReceiptState(now);
   const runId = normalizeOptionalString(params.runId);
   const toolName = normalizeOptionalString(params.toolName);
   if (!runId || toolName !== "workboard_create") {
@@ -93,7 +128,7 @@ export function recordSubagentToolReceipt(params: {
   const receipt: SubagentToolReceipt = {
     runId,
     toolName: "workboard_create",
-    recordedAt: params.now ?? Date.now(),
+    recordedAt: now,
     ...(toolCallId ? { toolCallId } : {}),
     ...(agentId ? { agentId } : {}),
     ...(sessionKey ? { sessionKey } : {}),
@@ -103,6 +138,7 @@ export function recordSubagentToolReceipt(params: {
   const receipts = state.byRunId.get(runId) ?? [];
   receipts.push(receipt);
   state.byRunId.set(runId, receipts.slice(-RECEIPTS_PER_RUN_LIMIT));
+  pruneReceiptState(now);
 }
 
 export function listSubagentToolReceipts(params: {
@@ -114,11 +150,8 @@ export function listSubagentToolReceipts(params: {
   if (!runId) {
     return [];
   }
+  pruneReceiptState(Date.now());
   return (state.byRunId.get(runId) ?? [])
     .filter((receipt) => !toolName || receipt.toolName === toolName)
     .map(cloneReceipt);
-}
-
-export function clearSubagentToolReceiptsForTests(): void {
-  state.byRunId.clear();
 }

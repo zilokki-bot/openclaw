@@ -427,6 +427,11 @@ describe("plugin registry runtime config scope", () => {
     };
     const subagent = {
       run: vi.fn(async () => ({ runId: "subagent-run" })),
+      spawnSafe: vi.fn(async () => ({
+        status: "accepted" as const,
+        runId: "subagent-run",
+        childSessionKey: "agent:main:subagent:child",
+      })),
       waitForRun: vi.fn(async () => ({ status: "ok" as const })),
       getSessionMessages: vi.fn(async () => ({ messages: [] })),
       getSession: vi.fn(async () => ({ messages: [] })),

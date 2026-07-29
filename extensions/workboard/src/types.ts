@@ -246,14 +246,6 @@ export type WorkboardWorkspace = {
   sourceBranch?: string;
 };
 
-export type WorkboardWorkspaceAccess = {
-  unrestricted?: boolean;
-  sandboxed?: boolean;
-  agentId?: string;
-  sessionKey?: string;
-  sessionId?: string;
-};
-
 export type WorkboardAutomation = {
   tenant?: string;
   boardId?: string;
@@ -261,7 +253,13 @@ export type WorkboardAutomation = {
   idempotencyKey?: string;
   skills?: string[];
   workspace?: WorkboardWorkspace;
-  workspaceAccess?: WorkboardWorkspaceAccess;
+  workspaceAccess?: {
+    unrestricted?: boolean;
+    sandboxed?: boolean;
+    agentId?: string;
+    sessionKey?: string;
+    sessionId?: string;
+  };
   maxRuntimeSeconds?: number;
   maxRetries?: number;
   scheduledAt?: number;
