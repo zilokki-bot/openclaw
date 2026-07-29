@@ -716,9 +716,7 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
       );
     },
     async getToolReceipts(params) {
-      const { listSubagentToolReceipts } = await import(
-        "../agents/subagent-tool-receipts.js"
-      );
+      const { listSubagentToolReceipts } = await import("../agents/subagent-tool-receipts.js");
       return { receipts: listSubagentToolReceipts(params) };
     },
   };
