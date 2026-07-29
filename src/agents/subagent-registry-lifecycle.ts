@@ -122,6 +122,18 @@ function shouldPreservePublishedExplicitRunTimeout(params: { entry: SubagentRunR
   return false;
 }
 
+function resolveTerminalTaskResultText(task: DetachedTaskFindResult["task"]): string | null {
+  const progressSummary = task?.progressSummary?.trim();
+  if (progressSummary) {
+    return progressSummary;
+  }
+  const terminalSummary = task?.terminalSummary?.trim();
+  if (!terminalSummary || /^completed$/i.test(terminalSummary)) {
+    return null;
+  }
+  return terminalSummary;
+}
+
 function resolveExpiredExplicitRunDeadlineMs(params: {
   entry: SubagentRunRecord;
   nextEndedAt: number;
@@ -591,7 +603,8 @@ export function createSubagentRegistryLifecycleController(params: {
     if (completion.resultText !== undefined) {
       return false;
     }
-    completion.resultText = resultText;
+    completion.resultText =
+      resultText ?? resolveTerminalTaskResultText(params.resolveSubagentTask(entry).task);
     completion.capturedAt = Date.now();
     return true;
   };
