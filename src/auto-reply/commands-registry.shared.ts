@@ -918,6 +918,11 @@ export function buildBuiltinChatCommands(
           type: "string",
           choices: ["light", "normal", "status"],
         },
+        {
+          name: "model",
+          description: "Optional provider/model",
+          type: "string",
+        },
       ],
     }),
     defineChatCommand({

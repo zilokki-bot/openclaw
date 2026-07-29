@@ -11,6 +11,14 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { formatFastModeCurrentStatus, resolveFastModeState } from "../../agents/fast-mode.js";
+import { loadModelCatalog } from "../../agents/model-catalog.js";
+import {
+  buildModelAliasIndex,
+  modelKey,
+  resolveDefaultModelForAgent,
+  resolveModelRefFromString,
+} from "../../agents/model-selection.js";
+import { createModelVisibilityPolicy } from "../../agents/model-visibility-policy.js";
 import {
   setChannelConversationBindingIdleTimeoutBySessionKey,
   setChannelConversationBindingMaxAgeBySessionKey,
@@ -32,6 +40,10 @@ import {
 } from "../../infra/restart-sentinel.js";
 import { scheduleGatewaySigusr1Restart, triggerOpenClawRestart } from "../../infra/restart.js";
 import { loadCostUsageSummary, loadSessionCostSummary } from "../../infra/session-cost-usage.js";
+import {
+  applyModelOverrideToSessionEntry,
+  ModelSelectionLockedError,
+} from "../../sessions/model-overrides.js";
 import {
   asDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
@@ -95,6 +107,57 @@ function normalizeModeName(raw: string): "light" | "normal" | "status" | undefin
     default:
       return undefined;
   }
+}
+
+async function resolveModeModelSelection(params: {
+  cfg: HandleCommandsParams["cfg"];
+  agentId?: string;
+  currentProvider: string;
+  currentModel: string;
+  rawModel: string;
+}) {
+  const defaultModel = resolveDefaultModelForAgent({
+    cfg: params.cfg,
+    agentId: params.agentId,
+  });
+  if (isSessionDefaultDirectiveValue(params.rawModel)) {
+    return {
+      provider: defaultModel.provider,
+      model: defaultModel.model,
+      isDefault: true,
+    };
+  }
+  const catalog = await loadModelCatalog({ config: params.cfg, readOnly: true });
+  const aliasIndex = buildModelAliasIndex({
+    cfg: params.cfg,
+    defaultProvider: params.currentProvider,
+  });
+  const resolved = resolveModelRefFromString({
+    cfg: params.cfg,
+    raw: params.rawModel,
+    defaultProvider: params.currentProvider,
+    aliasIndex,
+  });
+  if (!resolved) {
+    return { errorText: `⚙️ Unknown model: ${params.rawModel}` };
+  }
+  const policy = createModelVisibilityPolicy({
+    cfg: params.cfg,
+    catalog,
+    defaultProvider: params.currentProvider,
+    defaultModel: params.currentModel,
+    agentId: params.agentId,
+  });
+  const resolvedKey = modelKey(resolved.ref.provider, resolved.ref.model);
+  if (!policy.allowsKey(resolvedKey)) {
+    return { errorText: `⚙️ Model is not allowed: ${resolvedKey}` };
+  }
+  return {
+    provider: resolved.ref.provider,
+    model: resolved.ref.model,
+    isDefault:
+      resolved.ref.provider === defaultModel.provider && resolved.ref.model === defaultModel.model,
+  };
 }
 
 function buildRestartCommandSentinel(params: HandleCommandsParams): RestartSentinelPayload | null {
@@ -562,20 +625,12 @@ export const handleModeCommand: CommandHandler = async (params, allowTextCommand
     return { shouldContinue: false };
   }
 
-  const [rawMode = "", extraArg] = rawArgs.split(/\s+/, 2);
+  const [rawMode = "", rawModel] = rawArgs.split(/\s+/, 2);
   const mode = normalizeModeName(rawMode);
   if (!mode) {
     return {
       shouldContinue: false,
-      reply: { text: "⚙️ Usage: /mode status|light|normal" },
-    };
-  }
-  if (extraArg) {
-    return {
-      shouldContinue: false,
-      reply: {
-        text: "⚙️ /mode does not change models or thinking. Use an approved model command.",
-      },
+      reply: { text: "⚙️ Usage: /mode status|light [provider/model]|normal [default]" },
     };
   }
 
@@ -618,12 +673,45 @@ export const handleModeCommand: CommandHandler = async (params, allowTextCommand
   }
 
   const touchedFields = new Set<keyof typeof targetSessionEntry>();
-  if (mode === "light") {
-    targetSessionEntry.fastMode = true;
-    touchedFields.add("fastMode");
-  } else {
-    delete targetSessionEntry.fastMode;
-    touchedFields.add("fastMode");
+  try {
+    if (mode === "light") {
+      targetSessionEntry.thinkingLevel = "off";
+      targetSessionEntry.fastMode = true;
+      touchedFields.add("thinkingLevel");
+      touchedFields.add("fastMode");
+    } else {
+      delete targetSessionEntry.thinkingLevel;
+      delete targetSessionEntry.fastMode;
+      touchedFields.add("thinkingLevel");
+      touchedFields.add("fastMode");
+    }
+
+    if (rawModel) {
+      const selection = await resolveModeModelSelection({
+        cfg: params.cfg,
+        agentId: params.agentId,
+        currentProvider: params.provider,
+        currentModel: params.model,
+        rawModel,
+      });
+      if ("errorText" in selection) {
+        return { shouldContinue: false, reply: { text: selection.errorText } };
+      }
+      applyModelOverrideToSessionEntry({
+        entry: targetSessionEntry,
+        selection,
+        markLiveSwitchPending: true,
+      });
+      touchedFields.add("providerOverride");
+      touchedFields.add("modelOverride");
+      touchedFields.add("modelOverrideSource");
+      touchedFields.add("liveModelSwitchPending");
+    }
+  } catch (err) {
+    if (err instanceof ModelSelectionLockedError) {
+      return { shouldContinue: false, reply: { text: `⚙️ ${err.message}` } };
+    }
+    throw err;
   }
 
   if (
@@ -636,13 +724,19 @@ export const handleModeCommand: CommandHandler = async (params, allowTextCommand
     return sessionEntryPersistenceConflictReply();
   }
 
+  const modelText =
+    targetSessionEntry.providerOverride && targetSessionEntry.modelOverride
+      ? ` Model: ${targetSessionEntry.providerOverride}/${targetSessionEntry.modelOverride}.`
+      : rawModel && mode === "normal"
+        ? " Model reset to default."
+        : "";
   return {
     shouldContinue: false,
     reply: {
       text:
         mode === "light"
-          ? "⚙️ Light mode enabled. Fast mode on; model and thinking unchanged."
-          : "⚙️ Normal mode restored. Fast mode reset; model and thinking unchanged.",
+          ? `⚙️ Light mode enabled. Thinking off, fast on.${modelText}`
+          : `⚙️ Normal mode restored. Thinking/fast reset to defaults.${modelText}`,
     },
   };
 };

@@ -199,7 +199,7 @@ plugins.
     | `/verbose on\|off\|full` | Toggle verbose output. Alias: `/v` |
     | `/trace on\|off` | Toggle plugin trace output for the current session |
     | `/fast [status\|auto\|on\|off\|default]` | Show, set, or clear fast mode |
-    | `/mode [status\|light\|normal]` | Show or switch the current session between light and normal mode. Light mode enables fast mode only; model and thinking stay unchanged |
+    | `/mode [status\|light [provider/model]\|normal [default]]` | Show or switch the current session between light and normal mode. Light mode turns thinking off, enables fast mode, and can pin a session model |
     | `/reasoning [on\|off\|stream]` | Toggle reasoning visibility. Alias: `/reason` |
     | `/elevated [on\|off\|ask\|full]` | Toggle elevated mode. Alias: `/elev` |
     | `/exec host=<auto\|sandbox\|gateway\|node> security=<deny\|allowlist\|full> ask=<off\|on-miss\|always> node=<id>` | Show or set exec defaults |
