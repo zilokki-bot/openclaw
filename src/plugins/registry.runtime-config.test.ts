@@ -497,9 +497,15 @@ describe("plugin registry runtime config scope", () => {
     const typedEntries = entries as unknown as Record<string, SessionEntry>;
     const subagent = {
       run: vi.fn(async () => ({ runId: "subagent-run" })),
+      spawnSafe: vi.fn(async () => ({
+        status: "accepted" as const,
+        runId: "subagent-run",
+        childSessionKey: "agent:main:subagent:child",
+      })),
       waitForRun: vi.fn(async () => ({ status: "ok" as const })),
       getSessionMessages: vi.fn(async () => ({ messages: [] })),
       deleteSession: vi.fn(async () => {}),
+      getToolReceipts: vi.fn(async () => ({ receipts: [] })),
     } satisfies PluginRuntime["subagent"];
     const runtime = createPluginRuntime({ subagent });
     const session = runtime.agent.session;

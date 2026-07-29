@@ -453,6 +453,55 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
       const runtime = normalizeSubagentRunRuntime(payload?.runtime);
       return { runId, ...(runtime ? { runtime } : {}) };
     },
+    async spawnSafe(params) {
+      const scope = getPluginRuntimeGatewayRequestScope();
+      if (!canTrustedOfficialPluginRequestScopes(scope ?? {})) {
+        throw new Error(
+          "Safe subagent spawn is only available to bundled or trusted official plugins.",
+        );
+      }
+      const controllerIdentity = scope?.client?.internal?.agentRuntimeIdentity;
+      const controllerSessionKey = controllerIdentity?.sessionKey?.trim();
+      const controllerAgentId = controllerIdentity?.agentId?.trim();
+      if (!controllerSessionKey || !controllerAgentId) {
+        throw new Error("safe subagent spawn requires authenticated agent runtime identity.");
+      }
+      const targetAgentId = params.agentId?.trim() || "workboard-worker";
+      if (targetAgentId !== "workboard-worker") {
+        throw new Error("safe subagent spawn only supports agentId=workboard-worker.");
+      }
+      const { spawnSubagentDirect } = await import("../agents/subagent-spawn.js");
+      const result = await spawnSubagentDirect(
+        {
+          task: params.task,
+          label: params.label,
+          agentId: targetAgentId,
+          taskName: params.taskName,
+          runTimeoutSeconds: params.runTimeoutSeconds,
+          mode: "run",
+          cleanup: "keep",
+          sandbox: "require",
+          context: "isolated",
+          lightContext: params.lightContext ?? true,
+          expectsCompletionMessage: params.expectsCompletionMessage ?? false,
+        },
+        {
+          agentSessionKey: controllerSessionKey,
+          completionOwnerKey: controllerSessionKey,
+          requesterAgentIdOverride: controllerAgentId,
+          inheritedToolAllowlist: ["workboard_create"],
+        },
+      );
+      return {
+        status: result.status,
+        ...(result.childSessionKey ? { childSessionKey: result.childSessionKey } : {}),
+        ...(result.runId ? { runId: result.runId } : {}),
+        ...(result.mode ? { mode: result.mode } : {}),
+        ...(result.taskName ? { taskName: result.taskName } : {}),
+        ...(result.note ? { note: result.note } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      };
+    },
     async waitForRun(params) {
       const payload = await dispatchGatewayMethodInProcess<{ status?: string; error?: string }>(
         "agent.wait",
@@ -503,6 +552,10 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
         },
         pluginOwnedCleanupOptions,
       );
+    },
+    async getToolReceipts(params) {
+      const { listSubagentToolReceipts } = await import("../agents/subagent-tool-receipts.js");
+      return { receipts: listSubagentToolReceipts(params) };
     },
   };
 }

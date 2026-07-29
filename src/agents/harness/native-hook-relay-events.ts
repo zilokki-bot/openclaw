@@ -6,7 +6,6 @@ import {
   runBeforeToolCallHook,
 } from "../agent-tools.before-tool-call.js";
 import { stableStringify } from "../stable-stringify.js";
-import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { payloadTextResult } from "../tools/common.js";
 import { runAgentHarnessAfterToolCallHook } from "./hook-helpers.js";
 import { runAgentHarnessBeforeAgentFinalizeHook } from "./lifecycle-hook-helpers.js";
@@ -29,27 +28,16 @@ import type {
 } from "./native-hook-relay-types.js";
 import { createAgentToolResultMiddlewareRunner } from "./tool-result-middleware.js";
 
-function nativePreToolUseMayRunLoopDetection(
-  registration: ActiveNativeHookRelayRegistration,
-): boolean {
-  if (!registration.preToolUseLoopDetection || !registration.sessionKey) {
-    return false;
-  }
-  const loopDetection = resolveToolLoopDetectionConfig({
-    cfg: registration.config,
-    agentId: registration.agentId,
-  });
-  return loopDetection?.enabled !== false;
-}
-
 export function nativeHookRelayEventHasLocalWork(
-  registration: ActiveNativeHookRelayRegistration,
+  _registration: ActiveNativeHookRelayRegistration,
   event: NativeHookRelayEvent,
 ): boolean {
   if (event === "pre_tool_use") {
     // Avoid spawning a native hook relay for every Codex tool call when there
-    // is no before_tool_call hook, trusted-tool policy, or loop detector work.
-    return hasBeforeToolCallPolicy() || nativePreToolUseMayRunLoopDetection(registration);
+    // is no before_tool_call hook or trusted-tool policy. Loop detection for
+    // Codex command approvals runs through the in-process approval bridge, and
+    // OpenClaw dynamic tools run the same guard in their native adapter.
+    return hasBeforeToolCallPolicy();
   }
   if (event === "post_tool_use") {
     return hasGlobalHooks("after_tool_call") || listAgentToolResultMiddlewares("codex").length > 0;

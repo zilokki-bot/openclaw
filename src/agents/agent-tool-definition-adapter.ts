@@ -29,6 +29,7 @@ import { sanitizeForConsole } from "./console-sanitize.js";
 import type { ClientToolDefinition } from "./embedded-agent-runner/run/params.js";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "./runtime/index.js";
 import type { ToolDefinition } from "./sessions/index.js";
+import { recordSubagentToolReceipt } from "./subagent-tool-receipts.js";
 import { normalizeToolName } from "./tool-policy.js";
 import { jsonResult, payloadTextResult } from "./tools/common.js";
 
@@ -410,6 +411,15 @@ export function toToolDefinitions(
           const result = normalizeToolExecutionResult({
             toolName: normalizedName,
             result: rawResult,
+          });
+          recordSubagentToolReceipt({
+            runId: hookContext?.runId,
+            toolName: normalizedName,
+            toolCallId,
+            agentId: hookContext?.agentId,
+            sessionKey: hookContext?.sessionKey,
+            sessionId: hookContext?.sessionId,
+            result,
           });
           return result;
         } catch (err) {

@@ -49,6 +49,7 @@ describe("workboard gateway methods", () => {
       "workboard.cards.list",
       "workboard.cards.create",
       "workboard.cards.update",
+      "workboard.cards.safeChildCreate",
       "workboard.cards.move",
       "workboard.cards.delete",
       "workboard.cards.comment",
@@ -99,6 +100,9 @@ describe("workboard gateway methods", () => {
     });
     expect(methods.get("workboard.cards.export")?.opts).toEqual({ scope: "operator.read" });
     expect(methods.get("workboard.cards.create")?.opts).toEqual({ scope: "operator.write" });
+    expect(methods.get("workboard.cards.safeChildCreate")?.opts).toEqual({
+      scope: "operator.write",
+    });
     expect(methods.get("workboard.cards.runs")?.opts).toEqual({ scope: "operator.read" });
     expect(methods.get("workboard.cards.attachments.get")?.opts).toEqual({
       scope: "operator.read",
@@ -262,6 +266,180 @@ describe("workboard gateway methods", () => {
     expect(
       inheritedRespond.mock.calls[0]?.[1]?.card.metadata?.automation?.workspace,
     ).toBeUndefined();
+  });
+
+  it("creates a safe child-create receipt from sandboxed native workboard_create readback", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const methods = new Map<string, RegisteredMethod>();
+    const spawnSafe = vi.fn(async () => ({
+      status: "accepted" as const,
+      runId: "run-safe-create",
+      childSessionKey: "agent:workboard-worker:subagent:create",
+    }));
+    const waitForRun = vi.fn(async () => ({ status: "ok" as const }));
+    const getToolReceipts = vi.fn();
+    const store = new WorkboardStore(createMemoryStore());
+    const created = await store.create({
+      title: "Safe child card",
+      workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
+    });
+    getToolReceipts.mockResolvedValue({
+      receipts: [
+        {
+          runId: "run-safe-create",
+          toolName: "workboard_create",
+          toolCallId: "tool-call-1",
+          agentId: "workboard-worker",
+          sessionKey: "agent:workboard-worker:subagent:create",
+          toolResult: {
+            card: {
+              id: created.id,
+              workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
+            },
+          },
+        },
+      ],
+    });
+    const api = {
+      runtime: {
+        subagent: {
+          spawnSafe,
+          waitForRun,
+          getToolReceipts,
+        },
+      },
+      registerGatewayMethod: vi.fn(
+        (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
+          methods.set(method, { handler, opts });
+        },
+      ),
+    } as unknown as OpenClawPluginApi;
+
+    registerWorkboardGatewayMethods({ api, store });
+
+    const respond = vi.fn();
+    await methods.get("workboard.cards.safeChildCreate")?.handler({
+      params: {
+        card: {
+          id: "safe-card",
+          title: "Safe child card",
+          idempotencyKey: "safe-pilot-1",
+        },
+      },
+      respond,
+    } as never);
+
+    expect(respond.mock.calls[0]?.[0]).toBe(true);
+    expect(spawnSafe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "workboard-worker",
+        runTimeoutSeconds: 600,
+        expectsCompletionMessage: false,
+      }),
+    );
+    expect(waitForRun).toHaveBeenCalledWith({ runId: "run-safe-create", timeoutMs: 600_000 });
+    expect(getToolReceipts).toHaveBeenCalledWith({
+      runId: "run-safe-create",
+      toolName: "workboard_create",
+    });
+    expect(respond.mock.calls[0]?.[1]?.receipt).toMatchObject({
+      taskId: "run-safe-create",
+      runId: "run-safe-create",
+      childSessionKey: "agent:workboard-worker:subagent:create",
+      agentId: "workboard-worker",
+      sandboxPosture: {
+        sandbox: "require",
+        context: "isolated",
+        mode: "run",
+        cleanup: "keep",
+        inheritedToolAllowlist: ["workboard_create"],
+        singleRequest: true,
+      },
+      toolResult: {
+        card: {
+          id: created.id,
+          workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
+        },
+      },
+      readback: {
+        workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
+      },
+    });
+    expect(typeof respond.mock.calls[0]?.[1]?.receipt.argsHash).toBe("string");
+  });
+
+  it("rejects safe child-create when multiple restricted native receipts are returned", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const methods = new Map<string, RegisteredMethod>();
+    const store = new WorkboardStore(createMemoryStore());
+    const created = await store.create({
+      title: "Safe child card",
+      workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
+    });
+    const api = {
+      runtime: {
+        subagent: {
+          spawnSafe: vi.fn(async () => ({
+            status: "accepted" as const,
+            runId: "run-safe-create",
+            childSessionKey: "agent:workboard-worker:subagent:create",
+          })),
+          waitForRun: vi.fn(async () => ({ status: "ok" as const })),
+          getToolReceipts: vi.fn(async () => ({
+            receipts: [
+              {
+                toolResult: {
+                  card: {
+                    id: created.id,
+                    workspaceAccess: {
+                      unrestricted: false,
+                      roots: ["/workspace"],
+                      writable: true,
+                    },
+                  },
+                },
+              },
+              {
+                toolResult: {
+                  card: {
+                    id: created.id,
+                    workspaceAccess: {
+                      unrestricted: false,
+                      roots: ["/workspace"],
+                      writable: true,
+                    },
+                  },
+                },
+              },
+            ],
+          })),
+        },
+      },
+      registerGatewayMethod: vi.fn(
+        (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
+          methods.set(method, { handler, opts });
+        },
+      ),
+    } as unknown as OpenClawPluginApi;
+
+    registerWorkboardGatewayMethods({ api, store });
+
+    const respond = vi.fn();
+    await methods.get("workboard.cards.safeChildCreate")?.handler({
+      params: { card: { title: "Safe child card" } },
+      respond,
+    } as never);
+
+    expect(respond.mock.calls[0]?.[0]).toBe(false);
+    expect(respond.mock.calls[0]?.[2]?.message).toContain(
+      "multiple restricted workboard_create receipts",
+    );
   });
 
   it("stores metadata updates through dedicated card methods", async () => {

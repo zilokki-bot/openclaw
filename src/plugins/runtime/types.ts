@@ -42,6 +42,26 @@ type SubagentRunResult = {
   };
 };
 
+type SubagentSafeSpawnParams = {
+  task: string;
+  agentId?: string;
+  taskName?: string;
+  label?: string;
+  runTimeoutSeconds?: number;
+  lightContext?: boolean;
+  expectsCompletionMessage?: boolean;
+};
+
+type SubagentSafeSpawnResult = {
+  status: "accepted" | "forbidden" | "error";
+  childSessionKey?: string;
+  runId?: string;
+  mode?: "run" | "session";
+  taskName?: string;
+  note?: string;
+  error?: string;
+};
+
 type SubagentWaitParams = {
   runId: string;
   timeoutMs?: number;
@@ -59,6 +79,15 @@ type SubagentGetSessionMessagesParams = {
 
 type SubagentGetSessionMessagesResult = {
   messages: unknown[];
+};
+
+type SubagentToolReceiptsParams = {
+  runId: string;
+  toolName?: string;
+};
+
+type SubagentToolReceiptsResult = {
+  receipts: unknown[];
 };
 
 type SubagentDeleteSessionParams = {
@@ -114,7 +143,9 @@ export type PluginRuntime = PluginRuntimeCore & {
   };
   subagent: {
     run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
+    spawnSafe: (params: SubagentSafeSpawnParams) => Promise<SubagentSafeSpawnResult>;
     waitForRun: (params: SubagentWaitParams) => Promise<SubagentWaitResult>;
+    getToolReceipts: (params: SubagentToolReceiptsParams) => Promise<SubagentToolReceiptsResult>;
     getSessionMessages: (
       params: SubagentGetSessionMessagesParams,
     ) => Promise<SubagentGetSessionMessagesResult>;

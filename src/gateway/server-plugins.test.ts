@@ -1,6 +1,7 @@
 // Gateway plugin tests cover plugin loading, auto-enable, runtime registry setup,
 // request-scope injection, diagnostics, and handler dispatch integration.
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { recordSubagentToolReceipt } from "../agents/subagent-tool-receipts.js";
 import { createPluginRecord } from "../plugins/loader-records.js";
 import type { PluginDiagnostic } from "../plugins/manifest-types.js";
 import type { PluginLookUpTable } from "../plugins/plugin-lookup-table.js";
@@ -27,6 +28,7 @@ const applyPluginAutoEnable = vi.hoisted(() =>
 const primeConfiguredBindingRegistry = vi.hoisted(() =>
   vi.fn(() => ({ bindingCount: 0, channelCount: 0 })),
 );
+const spawnSubagentDirect = vi.hoisted(() => vi.fn());
 const pluginRuntimeLoaderLogger = vi.hoisted(() => ({
   info: vi.fn(),
   warn: vi.fn(),
@@ -55,6 +57,10 @@ vi.mock("../plugins/plugin-lookup-table.js", () => ({
 
 vi.mock("../config/plugin-auto-enable.js", () => ({
   applyPluginAutoEnable,
+}));
+
+vi.mock("../agents/subagent-spawn.js", () => ({
+  spawnSubagentDirect,
 }));
 
 vi.mock("../channels/plugins/binding-registry.js", async () => {
@@ -398,6 +404,13 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(({ config }) => ({ config, changes: [], autoEnabledReasons: {} }));
   primeConfiguredBindingRegistry.mockClear().mockReturnValue({ bindingCount: 0, channelCount: 0 });
+  spawnSubagentDirect.mockReset().mockResolvedValue({
+    status: "accepted",
+    childSessionKey: "agent:workboard-worker:subagent:create",
+    runId: "run-safe-create",
+    mode: "run",
+    taskName: "workboard-safe-child-create",
+  });
   pluginRuntimeLoaderLogger.info.mockClear();
   pluginRuntimeLoaderLogger.warn.mockClear();
   pluginRuntimeLoaderLogger.error.mockClear();
@@ -878,6 +891,141 @@ describe("loadGatewayPlugins", () => {
     ).resolves.toEqual({
       messages: [{ id: "m-3" }],
     });
+  });
+
+  test("provides subagent runtime read access to whitelisted tool receipts", async () => {
+    const runtime = await createSubagentRuntime(serverPluginsModule);
+    const recordedAt = Date.now();
+    recordSubagentToolReceipt({
+      runId: "run-safe-create",
+      toolName: "workboard_create",
+      toolCallId: "tool-call-1",
+      agentId: "workboard-worker",
+      sessionKey: "agent:workboard-worker:subagent:create",
+      result: {
+        details: {
+          card: {
+            id: "card-1",
+            metadata: {
+              automation: {
+                workspaceAccess: {
+                  unrestricted: false,
+                  sandboxed: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      now: recordedAt,
+    });
+
+    await expect(
+      runtime.getToolReceipts({
+        runId: "run-safe-create",
+        toolName: "workboard_create",
+      }),
+    ).resolves.toEqual({
+      receipts: [
+        {
+          runId: "run-safe-create",
+          toolName: "workboard_create",
+          recordedAt,
+          toolCallId: "tool-call-1",
+          agentId: "workboard-worker",
+          sessionKey: "agent:workboard-worker:subagent:create",
+          toolResult: {
+            card: {
+              id: "card-1",
+              workspaceAccess: {
+                unrestricted: false,
+                sandboxed: true,
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  test("safe subagent spawn requires trusted plugin scope and agent runtime identity", async () => {
+    const runtime = await createSubagentRuntime(serverPluginsModule);
+    serverPluginsModule.setFallbackGatewayContext(createTestContext("spawn-safe-unscoped"));
+
+    await expect(
+      runtime.spawnSafe({
+        task: "create a card",
+      }),
+    ).rejects.toThrow("bundled or trusted official plugins");
+
+    const missingIdentityScope = {
+      context: createTestContext("spawn-safe-missing-identity"),
+      client: {
+        connect: {
+          scopes: ["operator.write"],
+        },
+      } as GatewayRequestOptions["client"],
+      isWebchatConnect: () => false,
+    } satisfies PluginRuntimeGatewayRequestScope;
+
+    await expect(
+      gatewayRequestScopeModule.withPluginRuntimeGatewayRequestScope(missingIdentityScope, () =>
+        gatewayRequestScopeModule.withPluginRuntimePluginScope(
+          { pluginId: "workboard", pluginOrigin: "bundled" },
+          () => runtime.spawnSafe({ task: "create a card" }),
+        ),
+      ),
+    ).rejects.toThrow("authenticated agent runtime identity");
+    expect(spawnSubagentDirect).not.toHaveBeenCalled();
+  });
+
+  test("safe subagent spawn passes authenticated controller identity to internal sandbox spawn", async () => {
+    const runtime = await createSubagentRuntime(serverPluginsModule);
+    const scope = {
+      context: createTestContext("spawn-safe-controller"),
+      client: {
+        connect: {
+          scopes: ["operator.write"],
+        },
+        internal: {
+          agentRuntimeIdentity: {
+            kind: "agentRuntime",
+            agentId: "main",
+            sessionKey: "agent:main:telegram:direct:6098642967",
+          },
+        },
+      } as GatewayRequestOptions["client"],
+      isWebchatConnect: () => false,
+    } satisfies PluginRuntimeGatewayRequestScope;
+
+    await expect(
+      gatewayRequestScopeModule.withPluginRuntimeGatewayRequestScope(scope, () =>
+        gatewayRequestScopeModule.withPluginRuntimePluginScope(
+          { pluginId: "workboard", pluginOrigin: "bundled" },
+          () => runtime.spawnSafe({ task: "create a card" }),
+        ),
+      ),
+    ).resolves.toMatchObject({
+      status: "accepted",
+      childSessionKey: "agent:workboard-worker:subagent:create",
+      runId: "run-safe-create",
+    });
+
+    expect(spawnSubagentDirect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "workboard-worker",
+        sandbox: "require",
+        context: "isolated",
+        mode: "run",
+        cleanup: "keep",
+      }),
+      expect.objectContaining({
+        agentSessionKey: "agent:main:telegram:direct:6098642967",
+        completionOwnerKey: "agent:main:telegram:direct:6098642967",
+        requesterAgentIdOverride: "main",
+        inheritedToolAllowlist: ["workboard_create"],
+      }),
+    );
   });
 
   test("times out while waiting for the first in-process gateway response", async () => {
