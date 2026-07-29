@@ -22,6 +22,10 @@ export * from "../agents/provider-auth-aliases.js";
 export * from "../agents/sandbox-paths.js";
 export * from "../agents/schema/typebox.js";
 export * from "../agents/tools/common.js";
+export {
+  getGatewayToolCallerIdentity,
+  withGatewayToolCallerIdentity,
+} from "../agents/tools/gateway-caller-context.js";
 export * from "../agents/tools/web-guarded-fetch.js";
 export * from "../agents/tools/web-shared.js";
 export * from "../agents/tools/web-fetch-utils.js";
