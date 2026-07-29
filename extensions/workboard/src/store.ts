@@ -133,6 +133,7 @@ type WorkboardCardInput = {
   idempotencyKey?: unknown;
   skills?: unknown;
   workspace?: unknown;
+  workspaceAccess?: unknown;
   maxRuntimeSeconds?: unknown;
   maxRetries?: unknown;
   scheduledAt?: unknown;
@@ -655,6 +656,40 @@ function normalizeWorkspace(
   };
 }
 
+function normalizeWorkspaceAccess(
+  value: unknown,
+  fallback: WorkboardAutomation["workspaceAccess"] | undefined,
+): WorkboardAutomation["workspaceAccess"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallback;
+  }
+  const record = value as Record<string, unknown>;
+  const unrestricted =
+    typeof record.unrestricted === "boolean" ? record.unrestricted : fallback?.unrestricted;
+  const sandboxed = typeof record.sandboxed === "boolean" ? record.sandboxed : fallback?.sandboxed;
+  const agentId = normalizeBoundedString(record.agentId, fallback?.agentId, 120, "agent id");
+  const sessionKey = normalizeBoundedString(
+    record.sessionKey,
+    fallback?.sessionKey,
+    240,
+    "session key",
+  );
+  const sessionId = normalizeBoundedString(
+    record.sessionId,
+    fallback?.sessionId,
+    120,
+    "session id",
+  );
+  const next = {
+    ...(unrestricted !== undefined ? { unrestricted } : {}),
+    ...(sandboxed !== undefined ? { sandboxed } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(sessionKey ? { sessionKey } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  };
+  return Object.keys(next).length ? next : undefined;
+}
+
 function normalizeAutomation(
   value: unknown,
   fallback: WorkboardAutomation = {},
@@ -704,6 +739,9 @@ function normalizeAutomation(
   const workspace = Object.hasOwn(record, "workspace")
     ? normalizeWorkspace(record.workspace, fallback.workspace)
     : fallback.workspace;
+  const workspaceAccess = Object.hasOwn(record, "workspaceAccess")
+    ? normalizeWorkspaceAccess(record.workspaceAccess, fallback.workspaceAccess)
+    : fallback.workspaceAccess;
   const next = removeUndefinedAutomationFields({
     ...(tenant ? { tenant } : {}),
     ...(boardId ? { boardId } : {}),
@@ -711,6 +749,7 @@ function normalizeAutomation(
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(skills?.length ? { skills } : {}),
     ...(workspace ? { workspace } : {}),
+    ...(workspaceAccess ? { workspaceAccess } : {}),
     ...(maxRuntimeSeconds ? { maxRuntimeSeconds } : {}),
     ...(maxRetries ? { maxRetries } : {}),
     ...(scheduledAt ? { scheduledAt } : {}),
@@ -1598,6 +1637,7 @@ function removeUndefinedAutomationFields(automation: WorkboardAutomation): Workb
     "idempotencyKey",
     "skills",
     "workspace",
+    "workspaceAccess",
     "maxRuntimeSeconds",
     "maxRetries",
     "scheduledAt",
@@ -2748,6 +2788,7 @@ export class WorkboardStore {
       idempotencyKey: input.idempotencyKey,
       skills: input.skills,
       workspace: input.workspace,
+      workspaceAccess: input.workspaceAccess,
       maxRuntimeSeconds: input.maxRuntimeSeconds,
       maxRetries: input.maxRetries,
       scheduledAt: input.scheduledAt,
