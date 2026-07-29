@@ -5,13 +5,18 @@ import {
   deleteTaskDeliveryStateFromSqlite,
   deleteTaskRegistryRecordFromSqlite,
   loadTaskRegistryStateFromSqlite,
+  listTaskRegistryRecordsPageFromSqlite,
   listTaskRegistryRecordsByOwnerKeyFromSqlite,
   saveTaskRegistryStateToSqlite,
   upsertTaskWithDeliveryStateToSqlite,
   upsertTaskDeliveryStateToSqlite,
   upsertTaskRegistryRecordToSqlite,
 } from "./task-registry.store.sqlite.js";
-import type { TaskRegistryStoreSnapshot } from "./task-registry.store.types.js";
+import type {
+  TaskRecordPage,
+  TaskRecordPageParams,
+  TaskRegistryStoreSnapshot,
+} from "./task-registry.store.types.js";
 import type { TaskDeliveryState, TaskRecord } from "./task-registry.types.js";
 
 export type { TaskRegistryStoreSnapshot } from "./task-registry.store.types.js";
@@ -19,6 +24,7 @@ export type { TaskRegistryStoreSnapshot } from "./task-registry.store.types.js";
 export type TaskRegistryStore = {
   loadSnapshot: () => TaskRegistryStoreSnapshot;
   saveSnapshot: (snapshot: TaskRegistryStoreSnapshot) => void;
+  listTaskRecordsPage?: (params: TaskRecordPageParams) => TaskRecordPage;
   listTasksForOwnerKey?: (ownerKey: string) => TaskRecord[];
   upsertTaskWithDeliveryState?: (params: {
     task: TaskRecord;
@@ -56,6 +62,7 @@ type TaskRegistryObservers = {
 const defaultTaskRegistryStore: TaskRegistryStore = {
   loadSnapshot: loadTaskRegistryStateFromSqlite,
   saveSnapshot: saveTaskRegistryStateToSqlite,
+  listTaskRecordsPage: listTaskRegistryRecordsPageFromSqlite,
   listTasksForOwnerKey: listTaskRegistryRecordsByOwnerKeyFromSqlite,
   upsertTaskWithDeliveryState: upsertTaskWithDeliveryStateToSqlite,
   upsertTask: upsertTaskRegistryRecordToSqlite,

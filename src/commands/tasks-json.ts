@@ -4,10 +4,10 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { RuntimeEnv } from "../runtime.js";
 import { writeRuntimeJson } from "../runtime.js";
-import { listTaskRecords } from "../tasks/runtime-internal.js";
+import { listTaskRecords, listTaskRecordsPage } from "../tasks/runtime-internal.js";
 import { listTaskFlowAuditFindings } from "../tasks/task-flow-registry.audit.js";
 import { listTaskAuditFindings } from "../tasks/task-registry.audit.js";
-import type { TaskRecord } from "../tasks/task-registry.types.js";
+import type { TaskRecord, TaskRuntime, TaskStatus } from "../tasks/task-registry.types.js";
 import {
   buildTaskSystemAuditJsonPayload,
   buildTaskSystemAuditFindings,
@@ -15,16 +15,52 @@ import {
   type TaskSystemAuditSeverity,
 } from "./tasks-audit-system.js";
 
-function listTaskJsonRecords(): TaskRecord[] {
+const DEFAULT_TASKS_LIST_JSON_LIMIT = 500;
+const MAX_TASKS_LIST_JSON_LIMIT = 500;
+const TASK_RUNTIMES = new Set<TaskRuntime>(["subagent", "acp", "cli", "cron"]);
+const TASK_STATUSES = new Set<TaskStatus>([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "timed_out",
+  "cancelled",
+  "lost",
+]);
+
+function parseCursor(cursor: string | undefined): number | null {
+  if (!cursor) {
+    return 0;
+  }
+  if (!/^\d+$/.test(cursor.trim())) {
+    return null;
+  }
+  const parsed = Number(cursor);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function listTaskJsonRecords(opts?: {
+  runtime?: TaskRuntime;
+  status?: TaskStatus;
+  limit?: number;
+  cursor?: number;
+}): { tasks: TaskRecord[]; nextCursor?: string } {
   // Keep the routed JSON path a read-only store snapshot; maintenance reconciliation imports
   // broader task runtimes and can keep JSON-only CLI processes alive.
-  return listTaskRecords();
+  return listTaskRecordsPage({
+    ...(opts?.runtime ? { runtime: opts.runtime } : {}),
+    ...(opts?.status ? { statuses: [opts.status] } : {}),
+    limit: Math.min(opts?.limit ?? DEFAULT_TASKS_LIST_JSON_LIMIT, MAX_TASKS_LIST_JSON_LIMIT),
+    cursor: opts?.cursor ?? 0,
+  });
 }
 
 type TasksListJsonArgs = {
   json?: boolean;
   runtime?: string;
   status?: string;
+  limit?: number;
+  cursor?: string;
 };
 
 type TasksAuditJsonArgs = {
@@ -38,7 +74,7 @@ function toSystemAuditFindings(params: {
   severityFilter?: TaskSystemAuditSeverity;
   codeFilter?: TaskSystemAuditCode;
 }) {
-  const tasks = listTaskJsonRecords();
+  const tasks = listTaskRecords();
   const taskFindings = listTaskAuditFindings({ tasks });
   const flowFindings = listTaskFlowAuditFindings();
   const result = buildTaskSystemAuditFindings({
@@ -53,20 +89,26 @@ function toSystemAuditFindings(params: {
 function buildTasksListJsonPayload(opts: TasksListJsonArgs) {
   const runtimeFilter = normalizeOptionalString(opts.runtime);
   const statusFilter = normalizeOptionalString(opts.status);
-  const tasks = listTaskJsonRecords().filter((task) => {
-    if (runtimeFilter && task.runtime !== runtimeFilter) {
-      return false;
-    }
-    if (statusFilter && task.status !== statusFilter) {
-      return false;
-    }
-    return true;
-  });
+  const runtime =
+    runtimeFilter && TASK_RUNTIMES.has(runtimeFilter as TaskRuntime)
+      ? (runtimeFilter as TaskRuntime)
+      : undefined;
+  const status =
+    statusFilter && TASK_STATUSES.has(statusFilter as TaskStatus)
+      ? (statusFilter as TaskStatus)
+      : undefined;
+  const cursor = parseCursor(opts.cursor);
+  const page =
+    (runtimeFilter && !runtime) || (statusFilter && !status) || cursor === null
+      ? { tasks: [] }
+      : listTaskJsonRecords({ runtime, status, limit: opts.limit, cursor });
+  const tasks = page.tasks;
   return {
     count: tasks.length,
     runtime: runtimeFilter ?? null,
     status: statusFilter ?? null,
     tasks,
+    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
   };
 }
 

@@ -54,6 +54,7 @@ import {
   resetTaskRegistryRuntimeForTests,
   type TaskRegistryObserverEvent,
 } from "./task-registry.store.js";
+import type { TaskRecordPage, TaskRecordPageParams } from "./task-registry.store.types.js";
 import type {
   TaskDeliveryState,
   TaskDeliveryStatus,
@@ -2554,6 +2555,44 @@ export function listTaskRecords(): TaskRecord[] {
     .map((task, insertionIndex) => Object.assign({}, cloneTaskRecord(task), { insertionIndex }))
     .toSorted(compareTasksNewestFirst)
     .map(({ insertionIndex: _, ...task }) => task);
+}
+
+function taskRecordPageUpdatedAt(task: TaskRecord): number {
+  return task.lastEventAt ?? task.endedAt ?? task.startedAt ?? task.createdAt;
+}
+
+export function listTaskRecordsPage(params: TaskRecordPageParams): TaskRecordPage {
+  const limit = Math.max(1, Math.floor(params.limit));
+  const cursor = Math.max(0, Math.floor(params.cursor ?? 0));
+  const storePage = getTaskRegistryStore().listTaskRecordsPage?.({ ...params, limit, cursor });
+  if (storePage) {
+    return storePage;
+  }
+  const statusFilter =
+    params.statuses && params.statuses.length > 0 ? new Set(params.statuses) : null;
+  const filtered = listTaskRecordsUnsorted()
+    .filter((task) => {
+      if (params.runtime && task.runtime !== params.runtime) {
+        return false;
+      }
+      if (statusFilter && !statusFilter.has(task.status)) {
+        return false;
+      }
+      return true;
+    })
+    .toSorted((left, right) => {
+      const updatedDiff = taskRecordPageUpdatedAt(right) - taskRecordPageUpdatedAt(left);
+      if (updatedDiff !== 0) {
+        return updatedDiff;
+      }
+      return left.taskId < right.taskId ? -1 : left.taskId > right.taskId ? 1 : 0;
+    });
+  const page = filtered.slice(cursor, cursor + limit);
+  const nextOffset = cursor + page.length;
+  return {
+    tasks: page,
+    ...(nextOffset < filtered.length ? { nextCursor: String(nextOffset) } : {}),
+  };
 }
 
 export function hasActiveTaskForChildSessionKey(params: {

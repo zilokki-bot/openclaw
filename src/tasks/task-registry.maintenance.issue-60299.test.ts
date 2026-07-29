@@ -1075,6 +1075,27 @@ describe("task-registry maintenance issue #60299", () => {
     expect(currentTasks.has(freshTask.taskId)).toBe(true);
   });
 
+  it("stamps fresh terminal cron rows with cleanupAfter", async () => {
+    const endedAt = Date.now();
+    const task = makeStaleTask({
+      taskId: "cron-history-cleanup-stamp",
+      runtime: "cron",
+      sourceId: "cron-history-cleanup-job",
+      status: "succeeded",
+      endedAt,
+      lastEventAt: endedAt,
+      cleanupAfter: undefined,
+    });
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({ tasks: [task] });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.cleanupStamped).toBe(1);
+    expect(requireTaskRecord(currentTasks, task.taskId).cleanupAfter).toBe(
+      endedAt + 7 * 24 * 60 * 60_000,
+    );
+  });
+
   it("still stamps non-cron terminal rows with default retention", async () => {
     const endedAt = Date.now();
     const task = makeStaleTask({

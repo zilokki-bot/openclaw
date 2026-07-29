@@ -19,8 +19,9 @@ import {
   resetTaskRegistryForTests,
   setTaskRegistryControlRuntimeForTests,
 } from "../../tasks/task-registry.js";
+import { configureTaskRegistryRuntime } from "../../tasks/task-registry.store.js";
 import { saveTaskRegistryStateToSqlite } from "../../tasks/task-registry.store.sqlite.js";
-import type { TaskRecord } from "../../tasks/task-registry.types.js";
+import type { TaskDeliveryState, TaskRecord } from "../../tasks/task-registry.types.js";
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import { tasksHandlers } from "./tasks.js";
 import type { RespondFn } from "./types.js";
@@ -38,6 +39,41 @@ type TaskResponsePayload = {
 
 let stateDir: string;
 
+function configureInMemoryTaskRegistryForTest() {
+  const tasks = new Map<string, TaskRecord>();
+  const deliveryStates = new Map<string, TaskDeliveryState>();
+  configureTaskRegistryRuntime({
+    store: {
+      loadSnapshot: () => ({ tasks: new Map(tasks), deliveryStates: new Map(deliveryStates) }),
+      saveSnapshot: (snapshot) => {
+        tasks.clear();
+        for (const [taskId, task] of snapshot.tasks.entries()) {
+          tasks.set(taskId, task);
+        }
+        deliveryStates.clear();
+        for (const [taskId, state] of snapshot.deliveryStates.entries()) {
+          deliveryStates.set(taskId, state);
+        }
+      },
+      upsertTaskWithDeliveryState: ({ task, deliveryState }) => {
+        tasks.set(task.taskId, task);
+        if (deliveryState) {
+          deliveryStates.set(task.taskId, deliveryState);
+        }
+      },
+      upsertTask: (task) => tasks.set(task.taskId, task),
+      deleteTaskWithDeliveryState: (taskId) => {
+        tasks.delete(taskId);
+        deliveryStates.delete(taskId);
+      },
+      deleteTask: (taskId) => tasks.delete(taskId),
+      upsertDeliveryState: (state) => deliveryStates.set(state.taskId, state),
+      deleteDeliveryState: (taskId) => deliveryStates.delete(taskId),
+      close: () => {},
+    },
+  });
+}
+
 function createTaskRecord(params: Parameters<typeof createTaskRecordOrNull>[0]): TaskRecord {
   const task = createTaskRecordOrNull(params);
   if (!task) {
@@ -49,7 +85,8 @@ function createTaskRecord(params: Parameters<typeof createTaskRecordOrNull>[0]):
 beforeEach(async () => {
   stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gateway-tasks-"));
   setTestEnvValue("OPENCLAW_STATE_DIR", stateDir);
-  resetTaskRegistryForTests();
+  resetTaskRegistryForTests({ persist: false });
+  configureInMemoryTaskRegistryForTest();
   cancelSessionMock.mockReset();
   killSubagentRunAdminMock.mockReset();
   setTaskRegistryControlRuntimeForTests({

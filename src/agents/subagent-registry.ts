@@ -357,6 +357,11 @@ function resolveCompletionFromTerminalTask(
   ) {
     return undefined;
   }
+  const progressSummary = task.progressSummary?.trim();
+  const terminalSummary = task.terminalSummary?.trim();
+  const resultText =
+    progressSummary ||
+    (terminalSummary && !/^completed$/i.test(terminalSummary) ? terminalSummary : null);
   const outcome: SubagentRunOutcome =
     task.status === "succeeded"
       ? { status: "ok" }
@@ -371,10 +376,31 @@ function resolveCompletionFromTerminalTask(
     outcome,
     reason: task.status === "failed" ? SUBAGENT_ENDED_REASON_ERROR : SUBAGENT_ENDED_REASON_COMPLETE,
     completionSnapshot: {
-      resultText: task.progressSummary ?? task.terminalSummary ?? null,
+      resultText,
       capturedAt: task.endedAt,
     },
   };
+}
+
+function resolveCompletionFromSubagentOrCliTerminalTask(entry: SubagentRunRecord) {
+  const subagentTaskCompletion = resolveCompletionFromTerminalTask(
+    findSubagentTaskForRun(entry).task,
+    entry,
+  );
+  if (subagentTaskCompletion?.completionSnapshot.resultText) {
+    return subagentTaskCompletion;
+  }
+  const nextRunCreatedAt = findNextSubagentRunCreatedAt(entry);
+  const generationStartedAt = entry.sessionStartedAt ?? entry.createdAt;
+  const cliTask = findDetachedTaskRun({
+    runId: entry.taskRunId ?? entry.runId,
+    runtime: "cli",
+    sessionKey: entry.childSessionKey,
+    createdAtOrAfter: generationStartedAt,
+    createdBefore: nextRunCreatedAt,
+    allowSessionFallback: true,
+  }).task;
+  return resolveCompletionFromTerminalTask(cliTask, entry) ?? subagentTaskCompletion;
 }
 
 export function scheduleSubagentOrphanRecovery(params?: { delayMs?: number; maxRetries?: number }) {
@@ -461,6 +487,7 @@ type CompleteSubagentRunParams = {
   triggerCleanup: boolean;
   startedAt?: number;
   suppressSessionEffects?: boolean;
+  completionSnapshot?: { resultText: string | null; capturedAt: number };
   recoverInterrupted?: true;
 };
 
@@ -1700,6 +1727,7 @@ const subagentRunManager = createSubagentRunManager({
     await completeSubagentRunWithRecovery(params, "subagent-wait");
   },
   resolveSubagentTask: findSubagentTaskForRun,
+  resolveTerminalTaskCompletion: resolveCompletionFromSubagentOrCliTerminalTask,
 });
 
 configureSubagentRegistrySteerRuntime({
