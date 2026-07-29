@@ -18,6 +18,7 @@ const MACOS_DESKTOP_CODEX_APP_SERVER_COMMANDS = [
   "/Applications/ChatGPT.app/Contents/Resources/codex",
   "/Applications/Codex.app/Contents/Resources/codex",
 ] as const;
+const LINUX_SYSTEM_CODEX_APP_SERVER_COMMANDS = ["/usr/bin/codex", "/usr/local/bin/codex"] as const;
 
 type ManagedCodexAppServerPaths = {
   commandPath: string;
@@ -209,17 +210,22 @@ function resolveManagedCodexAppServerCommandCandidates(
     ...resolveManagedCodexPackageBinCandidates(roots, platform),
   ];
   const desktopCommandPaths = resolveDesktopCodexAppServerCommandCandidates(platform);
+  const systemCommandPaths = resolveSystemCodexAppServerCommandCandidates(platform);
   // Ordinary turns must honor the pinned package version. Computer Use opts
   // into the desktop app owner because its macOS TCC permissions live there.
   const orderedCommandPaths =
     managedCommandOrder === "desktop-first"
-      ? [...desktopCommandPaths, ...packageCommandPaths]
-      : [...packageCommandPaths, ...desktopCommandPaths];
+      ? [...desktopCommandPaths, ...packageCommandPaths, ...systemCommandPaths]
+      : [...packageCommandPaths, ...desktopCommandPaths, ...systemCommandPaths];
   return [...new Set(orderedCommandPaths)];
 }
 
 function resolveDesktopCodexAppServerCommandCandidates(platform: NodeJS.Platform): string[] {
   return platform === "darwin" ? [...MACOS_DESKTOP_CODEX_APP_SERVER_COMMANDS] : [];
+}
+
+function resolveSystemCodexAppServerCommandCandidates(platform: NodeJS.Platform): string[] {
+  return platform === "linux" ? [...LINUX_SYSTEM_CODEX_APP_SERVER_COMMANDS] : [];
 }
 
 function resolveDefaultCodexPluginRoot(moduleDir: string): string {
