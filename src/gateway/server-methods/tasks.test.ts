@@ -119,25 +119,6 @@ function createContext() {
   } as never;
 }
 
-function createSnapshotTask(overrides: Partial<TaskRecord>): TaskRecord {
-  return {
-    taskId: "task-snapshot",
-    runtime: "cli",
-    requesterSessionKey: "agent:main:main",
-    ownerKey: "agent:main:main",
-    scopeKind: "session",
-    runId: "run-snapshot",
-    task: "Snapshot task",
-    status: "running",
-    deliveryStatus: "pending",
-    notifyPolicy: "done_only",
-    createdAt: 1_000,
-    startedAt: 1_010,
-    lastEventAt: 1_010,
-    ...overrides,
-  };
-}
-
 async function runTaskHandler(
   method: "tasks.list" | "tasks.get" | "tasks.cancel",
   params: Record<string, unknown>,
