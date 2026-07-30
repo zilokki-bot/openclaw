@@ -188,7 +188,7 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +6: model-picker action/capability and authoritative session-apply contracts.
       // +1: logger file-transport flush for graceful shutdown drains.
       // +1: process-local sessions.changed plugin notification payload.
-      4739,
+      4741,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -217,7 +217,7 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: focused CLI root-option parsers.
       // +1: authoritative model-picker session-apply operation.
       // +1: logger file-transport flush for graceful shutdown drains.
-      2868,
+      2870,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

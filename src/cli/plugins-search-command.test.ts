@@ -114,6 +114,7 @@ describe("plugins search command", () => {
   it("rejects partial numeric search limits", async () => {
     const program = new Command();
     program.exitOverride();
+    program.configureOutput({ writeErr: () => undefined });
     registerPluginsCli(program);
 
     await expect(

@@ -40,6 +40,7 @@ import { readPostCompactionContext } from "./post-compaction-context.js";
 import { warnPrivateMessageToolFinal } from "./private-message-tool-final.js";
 import { enqueueFollowupRun, refreshQueuedFollowupSession } from "./queue.js";
 import { incrementRunCompactionCount } from "./session-run-accounting.js";
+import { markUsageOnlySourceReplyFooterForDelivery } from "./source-reply-usage-footer.js";
 import {
   buildStrandedReplyDeliveryFailurePayload,
   resolveStrandedReplyRecovery,
@@ -309,6 +310,12 @@ export async function completeReplyAgentRun(input: {
       sessionKey,
       runtimePolicySessionKey,
       opts,
+    });
+    finalPayloads = markUsageOnlySourceReplyFooterForDelivery({
+      finalPayloads,
+      responseUsageLine,
+      completedSourceReplyDelivery,
+      sourceReplyDeliveryMode: sourceReplyPolicy.sourceReplyDeliveryMode,
     });
     const finalDeliveryText = buildPendingFinalDeliveryText(finalPayloads);
     // #85714: warn only for unusually substantive private final text. In
