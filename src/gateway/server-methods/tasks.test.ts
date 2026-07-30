@@ -15,13 +15,11 @@ import {
   recordTaskProgressByRunId,
 } from "../../tasks/runtime-internal.js";
 import {
-  reloadTaskRegistryFromStore,
   resetTaskRegistryControlRuntimeForTests,
   resetTaskRegistryForTests,
   setTaskRegistryControlRuntimeForTests,
 } from "../../tasks/task-registry.js";
 import { configureTaskRegistryRuntime } from "../../tasks/task-registry.store.js";
-import { saveTaskRegistryStateToSqlite } from "../../tasks/task-registry.store.sqlite.js";
 import type { TaskDeliveryState, TaskRecord } from "../../tasks/task-registry.types.js";
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import { tasksHandlers } from "./tasks.js";
@@ -420,33 +418,32 @@ describe("tasks gateway handlers", () => {
   });
 
   it("cancels ACP tasks through the live Gateway handler and control runtime", async () => {
-    const task = createSnapshotTask({
-      taskId: "task-acp-primary",
+    const task = createTaskRecord({
       runtime: "acp",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
       childSessionKey: "agent:codex:acp:child",
       agentId: "codex",
       runId: "run-cancel-acp-gateway",
       task: "Primary ACP task",
+      status: "running",
+      deliveryStatus: "pending",
     });
-    const siblingTask = createSnapshotTask({
-      taskId: "task-acp-sibling",
+    const siblingTask = createTaskRecord({
       runtime: "acp",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
       childSessionKey: "agent:codex:acp:child",
       agentId: "codex",
       runId: "run-cancel-acp-gateway",
       task: "Sibling ACP task",
-      createdAt: 1_001,
+      status: "running",
+      deliveryStatus: "pending",
       startedAt: 1_011,
       lastEventAt: 1_011,
     });
-    saveTaskRegistryStateToSqlite({
-      tasks: new Map([
-        [task.taskId, task],
-        [siblingTask.taskId, siblingTask],
-      ]),
-      deliveryStates: new Map(),
-    });
-    reloadTaskRegistryFromStore();
     cancelSessionMock.mockResolvedValue(undefined);
 
     const { calls, payload } = await runTaskHandler("tasks.cancel", {
