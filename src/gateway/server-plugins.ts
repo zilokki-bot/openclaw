@@ -191,6 +191,9 @@ function resolveRequestedFallbackModelRef(params: {
 // ── Internal gateway dispatch for plugin runtime ────────────────────
 
 function createSyntheticOperatorClient(params?: {
+  agentRuntimeIdentity?: NonNullable<
+    NonNullable<GatewayRequestOptions["client"]>["internal"]
+  >["agentRuntimeIdentity"];
   allowModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
   cronRunContinuation?: boolean;
@@ -219,6 +222,9 @@ function createSyntheticOperatorClient(params?: {
       ...(params?.agentRunTracking ? { agentRunTracking: params.agentRunTracking } : {}),
       ...(params?.cronRunContinuation === true ? { cronRunContinuation: true } : {}),
       ...(params?.scopes?.includes(APPROVALS_SCOPE) ? { approvalRuntime: true } : {}),
+      ...(params?.agentRuntimeIdentity
+        ? { agentRuntimeIdentity: params.agentRuntimeIdentity }
+        : {}),
       ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
     },
   };
@@ -281,6 +287,9 @@ function mergeGatewayClientInternal(
 }
 
 type DispatchGatewayMethodInProcessOptions = {
+  agentRuntimeIdentity?: NonNullable<
+    NonNullable<GatewayRequestOptions["client"]>["internal"]
+  >["agentRuntimeIdentity"];
   allowSyntheticModelOverride?: boolean;
   allowSyntheticCronRunContinuation?: boolean;
   agentRunTracking?: "plugin_subagent";
@@ -396,6 +405,7 @@ export async function dispatchGatewayMethodInProcessRaw(
       ? options.pluginRuntimeOwnerId.trim()
       : undefined;
   const syntheticClient = createSyntheticOperatorClient({
+    agentRuntimeIdentity: options?.agentRuntimeIdentity,
     allowModelOverride: options?.allowSyntheticModelOverride === true,
     agentRunTracking: options?.agentRunTracking,
     cronRunContinuation: options?.allowSyntheticCronRunContinuation === true,
@@ -532,6 +542,7 @@ export async function dispatchTrustedPluginGatewayMethod<T>(
   const syntheticScopes = normalizeOperatorScopeList(options?.scopes);
   return await dispatchGatewayMethod<T>(method, params, {
     forceSyntheticClient: true,
+    agentRuntimeIdentity: scope?.client?.internal?.agentRuntimeIdentity,
     pluginRuntimeOwnerId: pluginId,
     ...(syntheticScopes ? { syntheticScopes } : {}),
     ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
