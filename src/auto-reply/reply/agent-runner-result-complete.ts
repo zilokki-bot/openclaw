@@ -56,6 +56,30 @@ type PreparedReplyAgentPayloads = {
   responseUsageLine: string | undefined;
 };
 
+export function markUsageOnlySourceReplyFooterForDelivery(params: {
+  finalPayloads: ReplyPayload[];
+  responseUsageLine: string | undefined;
+  completedSourceReplyDelivery: boolean;
+  sourceReplyDeliveryMode: string | undefined;
+}): ReplyPayload[] {
+  const {
+    completedSourceReplyDelivery,
+    finalPayloads,
+    responseUsageLine,
+    sourceReplyDeliveryMode,
+  } = params;
+  if (
+    responseUsageLine &&
+    completedSourceReplyDelivery &&
+    sourceReplyDeliveryMode === "message_tool_only" &&
+    finalPayloads.length === 1 &&
+    finalPayloads[0]?.text === responseUsageLine
+  ) {
+    return [markReplyPayloadForSourceSuppressionDelivery(finalPayloads[0])];
+  }
+  return finalPayloads;
+}
+
 export async function completeReplyAgentRun(input: {
   context: FinalizeReplyAgentRunInput;
   accounting: ReplyAgentAccounting;
@@ -313,15 +337,12 @@ export async function completeReplyAgentRun(input: {
       runtimePolicySessionKey,
       opts,
     });
-    if (
-      responseUsageLine &&
-      completedSourceReplyDelivery &&
-      sourceReplyPolicy.sourceReplyDeliveryMode === "message_tool_only" &&
-      finalPayloads.length === 1 &&
-      finalPayloads[0]?.text === responseUsageLine
-    ) {
-      finalPayloads = [markReplyPayloadForSourceSuppressionDelivery(finalPayloads[0])];
-    }
+    finalPayloads = markUsageOnlySourceReplyFooterForDelivery({
+      finalPayloads,
+      responseUsageLine,
+      completedSourceReplyDelivery,
+      sourceReplyDeliveryMode: sourceReplyPolicy.sourceReplyDeliveryMode,
+    });
     const finalDeliveryText = buildPendingFinalDeliveryText(finalPayloads);
     // #85714: warn only for unusually substantive private final text. In
     // message_tool_only, no tool call can be intentional silence, and
