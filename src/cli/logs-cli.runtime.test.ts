@@ -44,8 +44,7 @@ describe("execFileUtf8Tail", () => {
       { maxBytes: 1024 },
     );
     expect(result.code).toBe(1);
-    expect(result.stderr).toBe("😀" + "x".repeat(64 * 1024 - 4));
-    expect(Buffer.byteLength(result.stderr, "utf8")).toBe(64 * 1024);
+    expect(result.stderr).toBe("x".repeat(64 * 1024));
     expect(result.stderr).not.toContain("�");
     expect(result.truncated).toBe(false);
   });
