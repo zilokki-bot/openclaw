@@ -299,7 +299,7 @@ export async function consultRealtimeVoiceAgent(params: {
       });
       const changed = initialSessionEntry
         ? !currentEntry || currentEntry.sessionId !== initialSessionEntry.sessionId
-        : Boolean(currentEntry);
+        : false;
       if (changed) {
         throw new Error(`Session "${params.sessionKey}" changed while starting work. Retry.`);
       }
