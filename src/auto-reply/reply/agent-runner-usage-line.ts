@@ -124,6 +124,9 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
   }
   const existing = expectDefined(payloads[index], "payloads entry at index");
   const existingText = existing.text ?? "";
+  if (existingText === line || existingText.endsWith(`\n${line}`)) {
+    return payloads;
+  }
   const separator = existingText.endsWith("\n") ? "" : "\n";
   const next = {
     ...existing,

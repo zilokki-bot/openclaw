@@ -33,4 +33,10 @@ describe("appendUsageLine", () => {
       },
     );
   });
+
+  it("does not append duplicate usage text", () => {
+    const payload = { text: "message tool reply\nUsage: 12 in / 3 out" };
+
+    expect(appendUsageLine([payload], "Usage: 12 in / 3 out")).toEqual([payload]);
+  });
 });
