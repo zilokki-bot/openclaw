@@ -39,6 +39,20 @@ describe("appendUsageLine", () => {
 
     expect(appendUsageLine([payload], "Usage: 12 in / 3 out")).toEqual([payload]);
   });
+
+  it("removes model-authored legacy footer text before appending the native usage footer", () => {
+    const payload = {
+      text:
+        "На месте 👑\n" +
+        "⚙️ Pulse main | deepseek/deepseek-v4-flash | 355K/131K (100%+) | компактов вкл | 23:33 UTC",
+    };
+
+    expect(appendUsageLine([payload], "👑 Пульс · DeepSeek Flash 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082")).toEqual([
+      {
+        text: "На месте 👑\n👑 Пульс · DeepSeek Flash 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082",
+      },
+    ]);
+  });
 });
 
 describe("resolveResponseUsageLine", () => {
