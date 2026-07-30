@@ -321,7 +321,7 @@ function parseTasksListRouteArgsForCommandPath(argv: string[], commandPath: stri
   const positionals = getCommandPositionalsWithRootOptions(argv, {
     commandPath,
     booleanFlags: ["--json"],
-    valueFlags: ["--runtime", "--status"],
+    valueFlags: ["--runtime", "--status", "--limit", "--cursor"],
   });
   if (!positionals || positionals.length !== 0) {
     return null;
@@ -334,10 +334,24 @@ function parseTasksListRouteArgsForCommandPath(argv: string[], commandPath: stri
   if (!status.ok) {
     return null;
   }
+  const rawLimit = getFlagValue(argv, "--limit");
+  if (rawLimit === null) {
+    return null;
+  }
+  const limit = rawLimit === undefined ? undefined : parseStrictPositiveIntOrUndefined(rawLimit);
+  if (rawLimit !== undefined && limit === undefined) {
+    return null;
+  }
+  const cursor = parseOptionalFlagValue(argv, "--cursor");
+  if (!cursor.ok) {
+    return null;
+  }
   return {
     json: true as const,
     runtime: runtime.value,
     status: status.value,
+    limit,
+    cursor: cursor.value,
   };
 }
 

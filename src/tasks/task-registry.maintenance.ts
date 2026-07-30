@@ -719,11 +719,7 @@ function shouldPruneTerminalTask(
 }
 
 function shouldStampCleanupAfter(task: TaskRecord): boolean {
-  return (
-    isTerminalTask(task) &&
-    typeof task.cleanupAfter !== "number" &&
-    !(task.runtime === "cron" && task.status !== "lost")
-  );
+  return isTerminalTask(task) && typeof task.cleanupAfter !== "number";
 }
 
 function resolveCleanupAfter(task: TaskRecord): number {

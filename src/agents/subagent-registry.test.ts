@@ -28,6 +28,8 @@ import {
 } from "../tasks/detached-task-runtime.js";
 import { resetTaskFlowRegistryForTests } from "../tasks/task-flow-registry.js";
 import { resetTaskRegistryForTests } from "../tasks/task-registry.js";
+import { configureTaskRegistryRuntime } from "../tasks/task-registry.store.js";
+import type { TaskDeliveryState, TaskRecord } from "../tasks/task-registry.types.js";
 import { findTaskByRunIdForStatus } from "../tasks/task-status-access.js";
 import {
   SUBAGENT_ENDED_REASON_COMPLETE,
@@ -88,6 +90,41 @@ function findRecordCallArg(
     }
   }
   throw new Error(`expected ${label}`);
+}
+
+function configureInMemoryTaskRegistryForTest() {
+  const tasks = new Map<string, TaskRecord>();
+  const deliveryStates = new Map<string, TaskDeliveryState>();
+  configureTaskRegistryRuntime({
+    store: {
+      loadSnapshot: () => ({ tasks: new Map(tasks), deliveryStates: new Map(deliveryStates) }),
+      saveSnapshot: (snapshot) => {
+        tasks.clear();
+        for (const [taskId, task] of snapshot.tasks.entries()) {
+          tasks.set(taskId, task);
+        }
+        deliveryStates.clear();
+        for (const [taskId, state] of snapshot.deliveryStates.entries()) {
+          deliveryStates.set(taskId, state);
+        }
+      },
+      upsertTaskWithDeliveryState: ({ task, deliveryState }) => {
+        tasks.set(task.taskId, task);
+        if (deliveryState) {
+          deliveryStates.set(task.taskId, deliveryState);
+        }
+      },
+      upsertTask: (task) => tasks.set(task.taskId, task),
+      deleteTaskWithDeliveryState: (taskId) => {
+        tasks.delete(taskId);
+        deliveryStates.delete(taskId);
+      },
+      deleteTask: (taskId) => tasks.delete(taskId),
+      upsertDeliveryState: (state) => deliveryStates.set(state.taskId, state),
+      deleteDeliveryState: (taskId) => deliveryStates.delete(taskId),
+      close: () => {},
+    },
+  });
 }
 
 async function expectPathMissing(targetPath: string): Promise<void> {
@@ -676,6 +713,67 @@ describe("subagent registry seam flow", () => {
     });
     await waitForFast(() => {
       expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("promotes terminal cli task progress after a plain agent.wait timeout", async () => {
+    resetTaskRegistryForTests({ persist: false });
+    configureInMemoryTaskRegistryForTest();
+    const startedAt = Date.now();
+    const endedAt = startedAt + 35_000;
+    let waitAttempts = 0;
+    mocks.callGateway.mockImplementation(async (request: { method?: string }) => {
+      if (request.method === "agent.wait") {
+        waitAttempts += 1;
+        return { status: "timeout" };
+      }
+      return {};
+    });
+    mocks.loadSessionStore.mockReturnValue({});
+
+    mod.registerSubagentRun({
+      runId: "run-pulse-child-smoke",
+      childSessionKey: "agent:engineer:subagent:pulse-smoke",
+      requesterSessionKey: "agent:main:codex-coord",
+      requesterDisplayKey: "main:codex-coord",
+      task: "complete pulse child smoke",
+      cleanup: "keep",
+    });
+
+    expect(
+      createRunningTaskRun({
+        runtime: "cli",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        childSessionKey: "agent:engineer:subagent:pulse-smoke",
+        runId: "run-pulse-child-smoke",
+        task: "complete pulse child smoke",
+        deliveryStatus: "pending",
+        startedAt,
+        lastEventAt: startedAt,
+      }),
+    ).not.toBeNull();
+    expect(
+      finalizeTaskRunByRunId({
+        runId: "run-pulse-child-smoke",
+        runtime: "cli",
+        sessionKey: "agent:engineer:subagent:pulse-smoke",
+        status: "succeeded",
+        endedAt,
+        lastEventAt: endedAt,
+        progressSummary: "PULSE_NON_MAIN_CHILD_SMOKE_DONE_20260729",
+        terminalSummary: "completed",
+      }),
+    ).toHaveLength(1);
+
+    await waitForFast(() => {
+      const completedRun = mod
+        .listSubagentRunsForRequester("agent:main:codex-coord")
+        .find((entry) => entry.runId === "run-pulse-child-smoke");
+      expect(waitAttempts).toBeGreaterThanOrEqual(1);
+      expect(completedRun?.endedAt).toBe(endedAt);
+      expectRecordFields(completedRun?.outcome, { status: "ok" }, "pulse child outcome");
+      expect(completedRun?.completion?.resultText).toBe("PULSE_NON_MAIN_CHILD_SMOKE_DONE_20260729");
     });
   });
 

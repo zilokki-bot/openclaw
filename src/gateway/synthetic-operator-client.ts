@@ -7,7 +7,7 @@ import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/version.js
 import { APPROVALS_SCOPE, WRITE_SCOPE } from "./method-scopes.js";
 import type { GatewayRequestOptions } from "./server-methods/types.js";
 
-export type SyntheticOperatorClientOptions = {
+type SyntheticOperatorClientOptions = {
   agentRuntimeIdentity?: NonNullable<
     NonNullable<GatewayRequestOptions["client"]>["internal"]
   >["agentRuntimeIdentity"];

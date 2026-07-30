@@ -7,6 +7,7 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emitAgentEvent } from "../../infra/agent-events.js";
+import { resetDetachedTaskLifecycleRuntimeForTests } from "../../tasks/detached-task-runtime.js";
 import {
   createTaskRecord as createTaskRecordOrNull,
   getTaskById,
@@ -14,13 +15,12 @@ import {
   recordTaskProgressByRunId,
 } from "../../tasks/runtime-internal.js";
 import {
-  reloadTaskRegistryFromStore,
   resetTaskRegistryControlRuntimeForTests,
   resetTaskRegistryForTests,
   setTaskRegistryControlRuntimeForTests,
 } from "../../tasks/task-registry.js";
-import { saveTaskRegistryStateToSqlite } from "../../tasks/task-registry.store.sqlite.js";
-import type { TaskRecord } from "../../tasks/task-registry.types.js";
+import { configureTaskRegistryRuntime } from "../../tasks/task-registry.store.js";
+import type { TaskDeliveryState, TaskRecord } from "../../tasks/task-registry.types.js";
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import { tasksHandlers } from "./tasks.js";
 import type { RespondFn } from "./types.js";
@@ -38,6 +38,41 @@ type TaskResponsePayload = {
 
 let stateDir: string;
 
+function configureInMemoryTaskRegistryForTest() {
+  const tasks = new Map<string, TaskRecord>();
+  const deliveryStates = new Map<string, TaskDeliveryState>();
+  configureTaskRegistryRuntime({
+    store: {
+      loadSnapshot: () => ({ tasks: new Map(tasks), deliveryStates: new Map(deliveryStates) }),
+      saveSnapshot: (snapshot) => {
+        tasks.clear();
+        for (const [taskId, task] of snapshot.tasks.entries()) {
+          tasks.set(taskId, task);
+        }
+        deliveryStates.clear();
+        for (const [taskId, state] of snapshot.deliveryStates.entries()) {
+          deliveryStates.set(taskId, state);
+        }
+      },
+      upsertTaskWithDeliveryState: ({ task, deliveryState }) => {
+        tasks.set(task.taskId, task);
+        if (deliveryState) {
+          deliveryStates.set(task.taskId, deliveryState);
+        }
+      },
+      upsertTask: (task) => tasks.set(task.taskId, task),
+      deleteTaskWithDeliveryState: (taskId) => {
+        tasks.delete(taskId);
+        deliveryStates.delete(taskId);
+      },
+      deleteTask: (taskId) => tasks.delete(taskId),
+      upsertDeliveryState: (state) => deliveryStates.set(state.taskId, state),
+      deleteDeliveryState: (taskId) => deliveryStates.delete(taskId),
+      close: () => {},
+    },
+  });
+}
+
 function createTaskRecord(params: Parameters<typeof createTaskRecordOrNull>[0]): TaskRecord {
   const task = createTaskRecordOrNull(params);
   if (!task) {
@@ -47,9 +82,11 @@ function createTaskRecord(params: Parameters<typeof createTaskRecordOrNull>[0]):
 }
 
 beforeEach(async () => {
+  resetDetachedTaskLifecycleRuntimeForTests();
   stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gateway-tasks-"));
   setTestEnvValue("OPENCLAW_STATE_DIR", stateDir);
-  resetTaskRegistryForTests();
+  resetTaskRegistryForTests({ persist: false });
+  configureInMemoryTaskRegistryForTest();
   cancelSessionMock.mockReset();
   killSubagentRunAdminMock.mockReset();
   setTaskRegistryControlRuntimeForTests({
@@ -61,6 +98,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  resetDetachedTaskLifecycleRuntimeForTests();
   resetTaskRegistryControlRuntimeForTests();
   resetTaskRegistryForTests();
   stateDirEnvSnapshot.restore();
@@ -79,25 +117,6 @@ function createContext() {
   return {
     getRuntimeConfig: () => ({}),
   } as never;
-}
-
-function createSnapshotTask(overrides: Partial<TaskRecord>): TaskRecord {
-  return {
-    taskId: "task-snapshot",
-    runtime: "cli",
-    requesterSessionKey: "agent:main:main",
-    ownerKey: "agent:main:main",
-    scopeKind: "session",
-    runId: "run-snapshot",
-    task: "Snapshot task",
-    status: "running",
-    deliveryStatus: "pending",
-    notifyPolicy: "done_only",
-    createdAt: 1_000,
-    startedAt: 1_010,
-    lastEventAt: 1_010,
-    ...overrides,
-  };
 }
 
 async function runTaskHandler(
@@ -380,33 +399,32 @@ describe("tasks gateway handlers", () => {
   });
 
   it("cancels ACP tasks through the live Gateway handler and control runtime", async () => {
-    const task = createSnapshotTask({
-      taskId: "task-acp-primary",
+    const task = createTaskRecord({
       runtime: "acp",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
       childSessionKey: "agent:codex:acp:child",
       agentId: "codex",
       runId: "run-cancel-acp-gateway",
       task: "Primary ACP task",
+      status: "running",
+      deliveryStatus: "pending",
     });
-    const siblingTask = createSnapshotTask({
-      taskId: "task-acp-sibling",
+    const siblingTask = createTaskRecord({
       runtime: "acp",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
       childSessionKey: "agent:codex:acp:child",
       agentId: "codex",
       runId: "run-cancel-acp-gateway",
       task: "Sibling ACP task",
-      createdAt: 1_001,
+      status: "running",
+      deliveryStatus: "pending",
       startedAt: 1_011,
       lastEventAt: 1_011,
     });
-    saveTaskRegistryStateToSqlite({
-      tasks: new Map([
-        [task.taskId, task],
-        [siblingTask.taskId, siblingTask],
-      ]),
-      deliveryStates: new Map(),
-    });
-    reloadTaskRegistryFromStore();
     cancelSessionMock.mockResolvedValue(undefined);
 
     const { calls, payload } = await runTaskHandler("tasks.cancel", {

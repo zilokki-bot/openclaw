@@ -12,7 +12,11 @@ import {
   validateTasksListParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
-import { getTaskById, listTaskRecordsUnsorted } from "../../tasks/runtime-internal.js";
+import {
+  getTaskById,
+  listTaskRecordsPage,
+  listTaskRecordsUnsorted,
+} from "../../tasks/runtime-internal.js";
 import { cancelDetachedTaskRunById } from "../../tasks/task-executor.js";
 import type { TaskRecord, TaskStatus } from "../../tasks/task-registry.types.js";
 import { mapTaskSummary, taskUpdatedAt } from "./task-summary.js";
@@ -109,31 +113,43 @@ export const tasksHandlers: GatewayRequestHandlers = {
     }
     const statusFilter = normalizeTaskStatusFilter(params.status);
     const limit = Math.min(params.limit ?? DEFAULT_TASKS_LIST_LIMIT, MAX_TASKS_LIST_LIMIT);
-    // The ledger view pages by last activity so an old long-running task that
-    // just finished still surfaces on the first page instead of hiding behind
-    // newer-created records. Start from a cloned insertion-order snapshot so
-    // this sort does not first pay for the registry's discarded createdAt sort.
-    const filtered = listTaskRecordsUnsorted()
-      .filter((task) => {
-        if (statusFilter && !statusFilter.has(task.status)) {
-          return false;
-        }
-        return (
-          taskMatchesAgent(task, params.agentId) && taskMatchesSession(task, params.sessionKey)
-        );
-      })
-      .toSorted((left, right) => {
-        const updatedDiff = taskUpdatedAt(right) - taskUpdatedAt(left);
-        if (updatedDiff !== 0) {
-          return updatedDiff;
-        }
-        return left.taskId < right.taskId ? -1 : left.taskId > right.taskId ? 1 : 0;
+    let pageResult: { tasks: TaskRecord[]; nextCursor?: string };
+    if (!params.agentId && !params.sessionKey) {
+      pageResult = listTaskRecordsPage({
+        ...(statusFilter ? { statuses: [...statusFilter] } : {}),
+        limit,
+        cursor,
       });
-    const page = filtered.slice(cursor, cursor + limit);
-    const nextOffset = cursor + page.length;
+    } else {
+      // Agent/session matching includes legacy ownership fallbacks, so keep the
+      // compatibility path for scoped views. Unscoped ledger views use the
+      // bounded store page above and avoid materializing the full registry.
+      const filtered = listTaskRecordsUnsorted()
+        .filter((task) => {
+          if (statusFilter && !statusFilter.has(task.status)) {
+            return false;
+          }
+          return (
+            taskMatchesAgent(task, params.agentId) && taskMatchesSession(task, params.sessionKey)
+          );
+        })
+        .toSorted((left, right) => {
+          const updatedDiff = taskUpdatedAt(right) - taskUpdatedAt(left);
+          if (updatedDiff !== 0) {
+            return updatedDiff;
+          }
+          return left.taskId < right.taskId ? -1 : left.taskId > right.taskId ? 1 : 0;
+        });
+      const page = filtered.slice(cursor, cursor + limit);
+      const nextOffset = cursor + page.length;
+      pageResult = {
+        tasks: page,
+        ...(nextOffset < filtered.length ? { nextCursor: String(nextOffset) } : {}),
+      };
+    }
     respond(true, {
-      tasks: page.map((task) => mapTaskSummary(task)),
-      ...(nextOffset < filtered.length ? { nextCursor: String(nextOffset) } : {}),
+      tasks: pageResult.tasks.map((task) => mapTaskSummary(task)),
+      ...(pageResult.nextCursor ? { nextCursor: pageResult.nextCursor } : {}),
     });
   },
   "tasks.get": ({ params, respond }) => {

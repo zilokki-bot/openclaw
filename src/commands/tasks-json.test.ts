@@ -12,7 +12,8 @@ import {
   resetTaskRegistryDeliveryRuntimeForTests,
   resetTaskRegistryForTests,
 } from "../tasks/task-registry.js";
-import type { TaskRecord } from "../tasks/task-registry.types.js";
+import { configureTaskRegistryRuntime } from "../tasks/task-registry.store.js";
+import type { TaskDeliveryState, TaskRecord } from "../tasks/task-registry.types.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { tasksAuditJsonCommand, tasksListJsonCommand } from "./tasks-json.js";
 
@@ -50,6 +51,41 @@ function readJsonLog(runtime: RuntimeEnv): unknown {
   return JSON.parse(String(call[0]));
 }
 
+function configureInMemoryTaskRegistryForTest() {
+  const tasks = new Map<string, TaskRecord>();
+  const deliveryStates = new Map<string, TaskDeliveryState>();
+  configureTaskRegistryRuntime({
+    store: {
+      loadSnapshot: () => ({ tasks: new Map(tasks), deliveryStates: new Map(deliveryStates) }),
+      saveSnapshot: (snapshot) => {
+        tasks.clear();
+        for (const [taskId, task] of snapshot.tasks.entries()) {
+          tasks.set(taskId, task);
+        }
+        deliveryStates.clear();
+        for (const [taskId, state] of snapshot.deliveryStates.entries()) {
+          deliveryStates.set(taskId, state);
+        }
+      },
+      upsertTaskWithDeliveryState: ({ task, deliveryState }) => {
+        tasks.set(task.taskId, task);
+        if (deliveryState) {
+          deliveryStates.set(task.taskId, deliveryState);
+        }
+      },
+      upsertTask: (task) => tasks.set(task.taskId, task),
+      deleteTaskWithDeliveryState: (taskId) => {
+        tasks.delete(taskId);
+        deliveryStates.delete(taskId);
+      },
+      deleteTask: (taskId) => tasks.delete(taskId),
+      upsertDeliveryState: (state) => deliveryStates.set(state.taskId, state),
+      deleteDeliveryState: (taskId) => deliveryStates.delete(taskId),
+      close: () => {},
+    },
+  });
+}
+
 function jsonRoundTrip<T>(value: T): T {
   const serialized = JSON.stringify(value);
   return JSON.parse(serialized) as T;
@@ -61,6 +97,7 @@ async function withTaskJsonStateDir(run: () => Promise<void>): Promise<void> {
     async () => {
       resetTaskRegistryDeliveryRuntimeForTests();
       resetTaskRegistryForTests({ persist: false });
+      configureInMemoryTaskRegistryForTest();
       resetTaskFlowRegistryForTests({ persist: false });
       try {
         await run();
@@ -135,6 +172,60 @@ describe("tasks JSON commands", () => {
         runtime: null,
         status: null,
         tasks: [jsonRoundTrip(task)],
+      });
+    });
+  });
+
+  it("paginates task list JSON output with a cursor", async () => {
+    await withTaskJsonStateDir(async () => {
+      const base = Date.now();
+      const oldest = createTaskRecord({
+        runtime: "cron",
+        ownerKey: "agent:main:main",
+        scopeKind: "system",
+        runId: "run-oldest",
+        status: "succeeded",
+        task: "Old cron task",
+        lastEventAt: base,
+      });
+      const middle = createTaskRecord({
+        runtime: "cron",
+        ownerKey: "agent:main:main",
+        scopeKind: "system",
+        runId: "run-middle",
+        status: "succeeded",
+        task: "Middle cron task",
+        lastEventAt: base + 1,
+      });
+      const newest = createTaskRecord({
+        runtime: "cron",
+        ownerKey: "agent:main:main",
+        scopeKind: "system",
+        runId: "run-newest",
+        status: "succeeded",
+        task: "Newest cron task",
+        lastEventAt: base + 2,
+      });
+
+      const firstRuntime = createRuntime();
+      await tasksListJsonCommand({ json: true, limit: 2 }, firstRuntime);
+
+      expect(readJsonLog(firstRuntime)).toStrictEqual({
+        count: 2,
+        runtime: null,
+        status: null,
+        tasks: [jsonRoundTrip(newest), jsonRoundTrip(middle)],
+        nextCursor: "2",
+      });
+
+      const secondRuntime = createRuntime();
+      await tasksListJsonCommand({ json: true, limit: 2, cursor: "2" }, secondRuntime);
+
+      expect(readJsonLog(secondRuntime)).toStrictEqual({
+        count: 1,
+        runtime: null,
+        status: null,
+        tasks: [jsonRoundTrip(oldest)],
       });
     });
   });
