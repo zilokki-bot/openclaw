@@ -474,7 +474,7 @@ describe("handleModeCommand", () => {
       thinkingLevel: "medium",
       providerOverride: "openai",
       modelOverride: "gpt-5.5",
-      modelOverrideSource: "session",
+      modelOverrideSource: "user",
     };
     params.sessionStore = { [params.sessionKey]: params.sessionEntry! };
 
