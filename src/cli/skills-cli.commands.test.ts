@@ -259,16 +259,19 @@ vi.mock("../skills/discovery/status.js", async (importOriginal) => ({
 }));
 
 describe("skills cli commands", () => {
-  const createProgram = () => {
+  const createProgram = (options: { suppressStderr?: boolean } = {}) => {
     const program = new Command();
     program.exitOverride();
+    if (options.suppressStderr === true) {
+      program.configureOutput({ writeErr: () => undefined });
+    }
     registerSkillsCli(program);
     return program;
   };
 
-  const runCommand = async (argv: string[]) => {
+  const runCommand = async (argv: string[], options: { suppressStderr?: boolean } = {}) => {
     try {
-      await createProgram().parseAsync(argv, { from: "user" });
+      await createProgram(options).parseAsync(argv, { from: "user" });
     } catch (error) {
       if (error instanceof Error && error.message === "__exit__:0") {
         return;
@@ -480,9 +483,11 @@ describe("skills cli commands", () => {
   });
 
   it("rejects partial numeric search limits", async () => {
-    await expect(runCommand(["skills", "search", "calendar", "--limit", "10ms"])).rejects.toThrow(
-      "--limit must be a positive integer.",
-    );
+    await expect(
+      runCommand(["skills", "search", "calendar", "--limit", "10ms"], {
+        suppressStderr: true,
+      }),
+    ).rejects.toThrow("--limit must be a positive integer.");
     expect(searchSkillsFromClawHubMock).not.toHaveBeenCalled();
   });
 
