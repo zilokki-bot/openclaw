@@ -173,6 +173,38 @@ const OptionalOperatorNoteField = Type.Optional(
   Type.String({ description: "Optional operator note." }),
 );
 
+function readObjectParam(params: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = params[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw new Error(`${key} is required.`);
+}
+
+function readOptionalTrimmedString(
+  params: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = params[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function assertSafeChildCreateToolParams(params: Record<string, unknown>) {
+  const card = readObjectParam(params, "card");
+  if (readOptionalTrimmedString(params, "agentId") || readOptionalTrimmedString(card, "agentId")) {
+    throw new Error("workboard_safe_child_create does not accept caller-provided agentId.");
+  }
+  if (
+    readOptionalTrimmedString(params, "cwd") ||
+    readOptionalTrimmedString(params, "workspaceDir") ||
+    readOptionalTrimmedString(card, "cwd") ||
+    readOptionalTrimmedString(card, "workspaceDir")
+  ) {
+    throw new Error("workboard_safe_child_create does not accept caller-provided workspace paths.");
+  }
+  readStringParam(card, "idempotencyKey", { required: true });
+}
+
 function readCardToolParams(rawParams: unknown, ownerId: string): WorkboardToolCardParams {
   const record = rawParams as Record<string, unknown>;
   const id = readStringParam(record, "id", { required: true });
@@ -330,6 +362,69 @@ export function createWorkboardTools(params: {
             ),
           ),
         });
+      },
+    },
+    {
+      name: "workboard_safe_child_create",
+      label: "Workboard Safe Child Create",
+      description:
+        "Create one Workboard card through a sandboxed workboard-worker child and return the native restricted receipt/readback.",
+      parameters: Type.Object(
+        {
+          card: Type.Object(
+            {
+              title: Type.String({ description: "Card title." }),
+              idempotencyKey: Type.String({ description: "Stable idempotency key." }),
+              notes: Type.Optional(
+                Type.String({ description: "Card notes or acceptance criteria." }),
+              ),
+              status: Type.Optional(Type.String({ description: "Initial status." })),
+              priority: Type.Optional(
+                Type.String({ description: "low, normal, high, or urgent." }),
+              ),
+              labels: Type.Optional(Type.Array(Type.String(), { description: "Card labels." })),
+              parents: Type.Optional(
+                Type.Array(Type.String(), { description: "Parent card ids." }),
+              ),
+              tenant: Type.Optional(Type.String({ description: "Soft tenant namespace." })),
+              boardId: Type.Optional(Type.String({ description: "Soft board namespace." })),
+              createdByCardId: Type.Optional(
+                Type.String({ description: "Parent card that created this card." }),
+              ),
+              skills: Type.Optional(
+                Type.Array(Type.String(), { description: "Suggested skills." }),
+              ),
+              maxRuntimeSeconds: Type.Optional(
+                Type.Number({ description: "Run timeout seconds." }),
+              ),
+              maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
+              scheduledAt: Type.Optional(Type.Number({ description: "Unix epoch milliseconds." })),
+            },
+            { additionalProperties: false },
+          ),
+          taskName: Type.Optional(Type.String({ description: "Optional safe child task name." })),
+          label: Type.Optional(Type.String({ description: "Optional safe child run label." })),
+        },
+        { additionalProperties: false },
+      ),
+      execute: async (_toolCallId, rawParams) => {
+        const record = rawParams as Record<string, unknown>;
+        assertSafeChildCreateToolParams(record);
+        return jsonResult(
+          await params.api.runtime.gateway.request(
+            "workboard.cards.safeChildCreate",
+            {
+              card: readObjectParam(record, "card"),
+              ...(readOptionalTrimmedString(record, "taskName")
+                ? { taskName: readOptionalTrimmedString(record, "taskName") }
+                : {}),
+              ...(readOptionalTrimmedString(record, "label")
+                ? { label: readOptionalTrimmedString(record, "label") }
+                : {}),
+            },
+            { scopes: ["operator.write"] },
+          ),
+        );
       },
     },
     {
