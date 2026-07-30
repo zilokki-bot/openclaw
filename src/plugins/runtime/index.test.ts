@@ -22,7 +22,13 @@ const runtimeModelAuthMocks = vi.hoisted(() => ({
   resolveApiKeyForProvider: vi.fn(),
 }));
 
+const gatewayRuntimeMocks = vi.hoisted(() => ({
+  dispatchTrustedPluginGatewayMethod: vi.fn(),
+  hasInProcessGatewayContext: vi.fn(),
+}));
+
 vi.mock("./runtime-model-auth.runtime.js", () => runtimeModelAuthMocks);
+vi.mock("../../gateway/server-plugins.js", () => gatewayRuntimeMocks);
 
 import { setGatewayNodesRuntime, setGatewaySubagentRuntime } from "./gateway-bindings.js";
 import { clearGatewaySubagentRuntime } from "./gateway-bindings.test-fixtures.js";
@@ -120,6 +126,8 @@ function expectRunCommandOutcome(params: {
 describe("plugin runtime command execution", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    gatewayRuntimeMocks.dispatchTrustedPluginGatewayMethod.mockReset();
+    gatewayRuntimeMocks.hasInProcessGatewayContext.mockReset();
     runtimeModelAuthMocks.getApiKeyForModel.mockReset();
     runtimeModelAuthMocks.getRuntimeAuthForModel.mockReset();
     runtimeModelAuthMocks.resolveApiKeyForProvider.mockReset();
@@ -214,6 +222,35 @@ describe("plugin runtime command execution", () => {
       resetHeartbeatWakeStateForTests();
       vi.useRealTimers();
     }
+  });
+
+  it("routes runtime.gateway.request through the trusted plugin Gateway dispatcher", async () => {
+    gatewayRuntimeMocks.dispatchTrustedPluginGatewayMethod.mockResolvedValue({
+      ok: true,
+    });
+
+    const result = await createPluginRuntime().gateway.request(
+      "workboard.cards.safeChildCreate",
+      {
+        card: {
+          title: "Safe card",
+          idempotencyKey: "br-wb:v1:safe-card",
+        },
+      },
+      { scopes: ["operator.write"] },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(gatewayRuntimeMocks.dispatchTrustedPluginGatewayMethod).toHaveBeenCalledWith(
+      "workboard.cards.safeChildCreate",
+      {
+        card: {
+          title: "Safe card",
+          idempotencyKey: "br-wb:v1:safe-card",
+        },
+      },
+      { scopes: ["operator.write"] },
+    );
   });
 
   it("resolves thinking policy with configured model compat from runtime config", () => {

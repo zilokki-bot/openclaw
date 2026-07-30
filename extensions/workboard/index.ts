@@ -42,6 +42,7 @@ export default definePluginEntry({
       names: [
         "workboard_list",
         "workboard_create",
+        "workboard_safe_child_create",
         "workboard_link",
         "workboard_read",
         "workboard_claim",

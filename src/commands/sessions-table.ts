@@ -14,6 +14,14 @@ export type SessionDisplayRow = {
   key: string;
   updatedAt: number | null;
   ageMs: number | null;
+  channel?: SessionEntry["lastChannel"];
+  lastChannel?: SessionEntry["lastChannel"];
+  lastTo?: SessionEntry["lastTo"];
+  lastAccountId?: SessionEntry["lastAccountId"];
+  lastThreadId?: SessionEntry["lastThreadId"];
+  deliveryContext?: SessionEntry["deliveryContext"];
+  origin?: SessionEntry["origin"];
+  chatType?: SessionEntry["chatType"];
   sessionId?: string;
   sessionFile?: string;
   spawnedBy?: string;
@@ -60,6 +68,14 @@ export function toSessionDisplayRow(key: string, entry: SessionEntry): SessionDi
     key,
     updatedAt,
     ageMs: updatedAt ? Date.now() - updatedAt : null,
+    channel: entry?.channel,
+    lastChannel: entry?.lastChannel,
+    lastTo: entry?.lastTo,
+    lastAccountId: entry?.lastAccountId,
+    lastThreadId: entry?.lastThreadId,
+    deliveryContext: entry?.deliveryContext,
+    origin: entry?.origin,
+    chatType: entry?.chatType,
     sessionId: entry?.sessionId,
     sessionFile: entry?.sessionFile,
     spawnedBy: entry?.spawnedBy,

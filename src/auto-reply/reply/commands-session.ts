@@ -59,6 +59,43 @@ const SESSION_COMMAND_PREFIX = "/session";
 const SESSION_DURATION_OFF_VALUES = new Set(["off", "disable", "disabled", "none", "0"]);
 const SESSION_ACTION_IDLE = "idle";
 const SESSION_ACTION_MAX_AGE = "max-age";
+const MODE_COMMAND_ALIASES = new Set(["/mode", "/режим"]);
+
+function parseModeCommand(normalized: string): string | null {
+  for (const alias of MODE_COMMAND_ALIASES) {
+    if (normalized === alias) {
+      return "";
+    }
+    if (normalized.startsWith(`${alias} `)) {
+      return normalized.slice(alias.length).trim();
+    }
+  }
+  return null;
+}
+
+function normalizeModeName(raw: string): "light" | "normal" | "status" | undefined {
+  switch (normalizeLowercaseStringOrEmpty(raw)) {
+    case "":
+    case "status":
+    case "статус":
+      return "status";
+    case "light":
+    case "lite":
+    case "low":
+    case "лайт":
+    case "легкий":
+    case "лёгкий":
+      return "light";
+    case "normal":
+    case "default":
+    case "обычный":
+    case "норм":
+    case "дефолт":
+      return "normal";
+    default:
+      return undefined;
+  }
+}
 
 function buildRestartCommandSentinel(params: HandleCommandsParams): RestartSentinelPayload | null {
   const sessionKey = normalizeOptionalString(params.sessionKey);
@@ -506,6 +543,106 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
         nextMode === "auto"
           ? "⚙️ Fast mode set to auto."
           : `⚙️ Fast mode ${nextMode ? "enabled" : "disabled"}.`,
+    },
+  };
+};
+
+export const handleModeCommand: CommandHandler = async (params, allowTextCommands) => {
+  if (!allowTextCommands) {
+    return null;
+  }
+  const rawArgs = parseModeCommand(params.command.commandBodyNormalized);
+  if (rawArgs === null) {
+    return null;
+  }
+  if (!params.command.isAuthorizedSender) {
+    logVerbose(
+      `Ignoring /mode from unauthorized sender: ${params.command.senderId || "<unknown>"}`,
+    );
+    return { shouldContinue: false };
+  }
+
+  const [rawMode = "", extraArg] = rawArgs.split(/\s+/, 2);
+  const mode = normalizeModeName(rawMode);
+  if (!mode) {
+    return {
+      shouldContinue: false,
+      reply: { text: "⚙️ Usage: /mode status|light|normal" },
+    };
+  }
+  if (extraArg) {
+    return {
+      shouldContinue: false,
+      reply: {
+        text: "⚙️ /mode does not change models or thinking. Use an approved model command.",
+      },
+    };
+  }
+
+  const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
+  if (mode === "status") {
+    const fastState = resolveFastModeState({
+      cfg: params.cfg,
+      provider: params.provider,
+      model: params.model,
+      agentId: params.agentId,
+      sessionEntry: targetSessionEntry,
+    });
+    const thinkingLevel = normalizeOptionalString(targetSessionEntry?.thinkingLevel) ?? "default";
+    const selectedModel =
+      targetSessionEntry?.providerOverride && targetSessionEntry.modelOverride
+        ? `${targetSessionEntry.providerOverride}/${targetSessionEntry.modelOverride}`
+        : `${params.provider}/${params.model}`;
+    return {
+      shouldContinue: false,
+      reply: {
+        text:
+          `⚙️ Current mode\n` +
+          `Model: ${selectedModel}\n` +
+          `Thinking: ${thinkingLevel}\n` +
+          formatFastModeCurrentStatus({
+            mode: fastState.mode,
+            source: fastState.source,
+            fastAutoOnSeconds: fastState.fastAutoOnSeconds,
+            label: "Fast",
+          }),
+      },
+    };
+  }
+
+  if (!targetSessionEntry || !params.sessionStore || !params.sessionKey) {
+    return {
+      shouldContinue: false,
+      reply: { text: "⚙️ Mode change needs an active session. Send one normal message first." },
+    };
+  }
+
+  const touchedFields = new Set<keyof typeof targetSessionEntry>();
+  if (mode === "light") {
+    targetSessionEntry.fastMode = true;
+    touchedFields.add("fastMode");
+  } else {
+    delete targetSessionEntry.fastMode;
+    touchedFields.add("fastMode");
+  }
+
+  if (
+    !(await persistSessionEntry({
+      ...params,
+      sessionEntry: targetSessionEntry,
+      touchedFields: [...touchedFields],
+    }))
+  ) {
+    return sessionEntryPersistenceConflictReply();
+  }
+
+  return {
+    shouldContinue: false,
+    reply: {
+      text:
+        mode === "light"
+          ? "⚙️ Light mode enabled. Fast mode on; model and thinking unchanged."
+          : "⚙️ Normal mode restored. Fast mode reset; model and thinking unchanged.",
     },
   };
 };
