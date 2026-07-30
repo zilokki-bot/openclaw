@@ -76,11 +76,24 @@ export const resolveResponseUsageLine = (params: {
     params.config.messages?.responseUsage,
     params.channel,
   );
-  if (
-    responseUsageMode === "off" ||
-    !hasNonzeroUsage(params.usage) ||
-    params.preserveUserFacingSessionState === true
-  ) {
+  if (responseUsageMode === "off" || params.preserveUserFacingSessionState === true) {
+    return undefined;
+  }
+
+  const usageTemplate =
+    responseUsageMode === "full" && params.replyUsageState
+      ? loadUsageBarTemplate(params.config.messages?.usageTemplate)
+      : undefined;
+  const rendered =
+    usageTemplate && params.replyUsageState
+      ? renderUsageBar(usageTemplate, buildUsageContract(params.replyUsageState, params.channel))
+      : undefined;
+
+  if (rendered) {
+    return rendered;
+  }
+
+  if (!hasNonzeroUsage(params.usage)) {
     return undefined;
   }
 
@@ -96,18 +109,6 @@ export const resolveResponseUsageLine = (params: {
     showCost,
     costConfig,
   });
-  const usageTemplate =
-    responseUsageMode === "full" && params.replyUsageState
-      ? loadUsageBarTemplate(params.config.messages?.usageTemplate)
-      : undefined;
-  const rendered =
-    usageTemplate && params.replyUsageState
-      ? renderUsageBar(usageTemplate, buildUsageContract(params.replyUsageState, params.channel))
-      : undefined;
-
-  if (rendered) {
-    return rendered;
-  }
   return formatted ?? undefined;
 };
 
