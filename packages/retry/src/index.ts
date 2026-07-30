@@ -7,6 +7,12 @@ export type BackoffPolicy = {
   jitter: number;
 };
 
+export type RetrySupervisorNext = {
+  attempt: number;
+  delayMs: number;
+  signal: AbortSignal;
+};
+
 export function computeBackoff(policy: BackoffPolicy, attempt: number): number {
   const base = Math.min(policy.maxMs, policy.initialMs * policy.factor ** Math.max(attempt - 1, 0));
   const jitter = base * policy.jitter * Math.random();
@@ -81,7 +87,7 @@ export class RetrySupervisor {
     this.pendingAbort = undefined;
   }
 
-  next(abortSignal?: AbortSignal) {
+  next(abortSignal?: AbortSignal): RetrySupervisorNext | undefined {
     const override = this.nextDelayOverrideMs;
     this.nextDelayOverrideMs = undefined;
     if (override === undefined && ++this.attempts > Math.ceil(this.maxAttempts)) {
