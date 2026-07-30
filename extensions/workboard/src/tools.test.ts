@@ -108,42 +108,43 @@ describe("workboard tools", () => {
     ).rejects.toThrow(/outside the caller/);
   });
 
-  it("creates a safe child-create receipt through the agent-callable tool", async () => {
+  it("exposes safe child-create as an agent tool that delegates to the safe gateway surface", async () => {
     const store = new WorkboardStore(createMemoryStore());
-    const created = await store.create({
-      title: "Safe child card",
-      idempotencyKey: "safe-tool-1",
-      workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
-    });
-    const spawnSafe = vi.fn(async () => ({
-      status: "accepted" as const,
-      runId: "run-safe-tool",
-      childSessionKey: "agent:workboard-worker:subagent:create",
-    }));
-    const waitForRun = vi.fn(async () => ({ status: "ok" as const }));
-    const getToolReceipts = vi.fn(async () => ({
-      receipts: [
-        {
-          runId: "run-safe-tool",
-          toolName: "workboard_create",
-          toolCallId: "tool-call-1",
-          agentId: "workboard-worker",
-          sessionKey: "agent:workboard-worker:subagent:create",
-          toolResult: {
-            card: {
-              id: created.id,
-              workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
-            },
+    const gatewayRequest = vi.fn(async () => ({
+      receipt: {
+        taskId: "run-safe-tool",
+        runId: "run-safe-tool",
+        childSessionKey: "agent:workboard-worker:subagent:create",
+        agentId: "workboard-worker",
+        argsHash: "a".repeat(64),
+        sandboxPosture: {
+          sandbox: "require",
+          context: "isolated",
+          mode: "run",
+          cleanup: "keep",
+          inheritedToolAllowlist: ["workboard_create"],
+          singleRequest: true,
+        },
+        toolResult: {
+          card: {
+            id: "card-safe",
+            workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
           },
         },
-      ],
+        readback: {
+          card: { id: "card-safe", title: "Safe child card" },
+          workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
+        },
+      },
     }));
+    const spawnSafe = vi.fn();
     const api = {
       runtime: {
+        gateway: {
+          request: gatewayRequest,
+        },
         subagent: {
           spawnSafe,
-          waitForRun,
-          getToolReceipts,
         },
       },
     } as unknown as OpenClawPluginApi;
@@ -157,63 +158,47 @@ describe("workboard tools", () => {
 
     const result = readPayload(
       await tools.get("workboard_safe_child_create")?.execute("safe-tool-create", {
-        title: "Safe child card",
-        idempotencyKey: "safe-tool-1",
+        card: {
+          title: "Safe child card",
+          notes: "Create only through the safe route.",
+          labels: ["pilot"],
+          idempotencyKey: "safe-tool-1",
+        },
+        taskName: "safe-pilot",
+        label: "safe pilot",
       }),
     );
 
-    expect(spawnSafe).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: "workboard-worker",
-        runTimeoutSeconds: 600,
-        expectsCompletionMessage: false,
-      }),
+    expect(gatewayRequest).toHaveBeenCalledWith(
+      "workboard.cards.safeChildCreate",
+      {
+        card: {
+          title: "Safe child card",
+          notes: "Create only through the safe route.",
+          labels: ["pilot"],
+          idempotencyKey: "safe-tool-1",
+        },
+        taskName: "safe-pilot",
+        label: "safe pilot",
+      },
+      { scopes: ["operator.write"] },
     );
-    expect(waitForRun).toHaveBeenCalledWith({ runId: "run-safe-tool", timeoutMs: 600_000 });
-    expect(getToolReceipts).toHaveBeenCalledWith({
-      runId: "run-safe-tool",
-      toolName: "workboard_create",
-    });
+    expect(spawnSafe).not.toHaveBeenCalled();
     expect(result.receipt).toMatchObject({
       taskId: "run-safe-tool",
       runId: "run-safe-tool",
       childSessionKey: "agent:workboard-worker:subagent:create",
       agentId: "workboard-worker",
-      sandboxPosture: {
-        sandbox: "require",
-        context: "isolated",
-        mode: "run",
-        cleanup: "keep",
-        inheritedToolAllowlist: ["workboard_create"],
-        singleRequest: true,
-      },
-      toolResult: {
-        card: {
-          id: created.id,
-          workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
-        },
-      },
-      readback: {
-        workspaceAccess: { unrestricted: false, roots: ["/workspace"], writable: true },
-      },
     });
-    expect(typeof (result.receipt as { argsHash?: unknown }).argsHash).toBe("string");
   });
 
-  it("rejects safe child-create when the same idempotency key already has unrestricted access", async () => {
+  it("rejects safe child-create caller escape hatches before gateway dispatch", async () => {
     const store = new WorkboardStore(createMemoryStore());
-    await store.create({
-      title: "01-market-sku",
-      idempotencyKey: "safe-pilot-same-key",
-      workspaceAccess: { unrestricted: true },
-    });
-    const spawnSafe = vi.fn();
+    const gatewayRequest = vi.fn();
     const api = {
       runtime: {
-        subagent: {
-          spawnSafe,
-          waitForRun: vi.fn(),
-          getToolReceipts: vi.fn(),
+        gateway: {
+          request: gatewayRequest,
         },
       },
     } as unknown as OpenClawPluginApi;
@@ -227,12 +212,55 @@ describe("workboard tools", () => {
 
     await expect(
       tools.get("workboard_safe_child_create")?.execute("safe-tool-blocked", {
-        title: "01-market-sku",
-        idempotencyKey: "safe-pilot-same-key",
+        card: {
+          title: "Blocked",
+          idempotencyKey: "safe-pilot-blocked",
+          agentId: "workboard-worker",
+        },
       }),
-    ).rejects.toThrow(/existing same-key Workboard card .* unrestricted workspace access/);
-    expect(spawnSafe).not.toHaveBeenCalled();
-    expect(await store.list()).toHaveLength(1);
+    ).rejects.toThrow(/does not accept caller-provided agentId/);
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("safe-tool-blocked-path", {
+        card: {
+          title: "Blocked",
+          idempotencyKey: "safe-pilot-blocked-path",
+          workspaceDir: "/tmp/outside",
+        },
+      }),
+    ).rejects.toThrow(/does not accept caller-provided workspace paths/);
+    expect(gatewayRequest).not.toHaveBeenCalled();
+    expect(await store.list()).toHaveLength(0);
+  });
+
+  it("propagates safe child-create gateway failures without falling back to direct create", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const gatewayRequest = vi.fn(async () => {
+      throw new Error("authenticated agent runtime identity required");
+    });
+    const api = {
+      runtime: {
+        gateway: {
+          request: gatewayRequest,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+    const tools = new Map(
+      createWorkboardTools({
+        api,
+        store,
+        context: { agentId: "main", sessionKey: "agent:main:codex-coord" } as never,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("safe-tool-error", {
+        card: {
+          title: "Safe child card",
+          idempotencyKey: "safe-tool-error",
+        },
+      }),
+    ).rejects.toThrow(/authenticated agent runtime identity required/);
+    expect(await store.list()).toHaveLength(0);
   });
 
   it("preserves read-only sandbox authority while allowing manual card movement", async () => {

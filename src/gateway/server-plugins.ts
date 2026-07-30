@@ -281,6 +281,9 @@ export async function dispatchGatewayMethodInProcessRaw(
       ? options.pluginRuntimeOwnerId.trim()
       : undefined;
   const syntheticClient = createSyntheticPluginRuntimeClient({
+    agentRuntimeIdentity: options?.forceSyntheticClient
+      ? scope?.client?.internal?.agentRuntimeIdentity
+      : undefined,
     allowModelOverride: options?.allowSyntheticModelOverride === true,
     agentRunTracking: options?.agentRunTracking,
     cronRunContinuation: options?.allowSyntheticCronRunContinuation === true,

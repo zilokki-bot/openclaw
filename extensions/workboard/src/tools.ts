@@ -6,7 +6,6 @@ import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { Type } from "typebox";
 import { redactClaimToken } from "./card-redaction.js";
-import { executeWorkboardSafeChildCreate } from "./safe-child-create.js";
 import { WorkboardStore } from "./store.js";
 import { cardIdField, claimTokenField, createWorkboardMoveTool } from "./tools-card-mutations.js";
 
@@ -52,6 +51,39 @@ function readParentIds(value: unknown): string[] {
     }
   }
   return parents;
+}
+
+function readObjectParam(params: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = params[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw new Error(`${key} is required.`);
+}
+
+function readOptionalTrimmedString(
+  params: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = params[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function assertSafeChildCreateToolParams(params: Record<string, unknown>) {
+  const card = readObjectParam(params, "card");
+  if (readOptionalTrimmedString(params, "agentId") || readOptionalTrimmedString(card, "agentId")) {
+    throw new Error("workboard_safe_child_create does not accept caller-provided agentId.");
+  }
+  if (
+    readOptionalTrimmedString(params, "cwd") ||
+    readOptionalTrimmedString(params, "workspaceDir") ||
+    readOptionalTrimmedString(card, "cwd") ||
+    readOptionalTrimmedString(card, "workspaceDir")
+  ) {
+    throw new Error("workboard_safe_child_create does not accept caller-provided workspace paths.");
+  }
+  readStringParam(card, "title", { required: true });
+  readStringParam(card, "idempotencyKey", { required: true });
 }
 
 async function requireScopedCard(
@@ -304,49 +336,76 @@ export function createWorkboardTools(params: {
       name: "workboard_safe_child_create",
       label: "Workboard Safe Child Create",
       description:
-        "Create one Workboard card through a sandboxed workboard-worker, returning a native restricted receipt and readback.",
+        "Create one Workboard card through a sandboxed workboard-worker child and return the native restricted receipt/readback.",
       parameters: Type.Object(
         {
-          title: Type.String({ description: "Card title." }),
-          notes: Type.Optional(Type.String({ description: "Card notes or acceptance criteria." })),
-          status: Type.Optional(Type.String({ description: "Initial status." })),
-          priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
-          labels: Type.Optional(Type.Array(Type.String(), { description: "Card labels." })),
-          agentId: Type.Optional(Type.String({ description: "Assigned agent id." })),
-          parents: Type.Optional(Type.Array(Type.String(), { description: "Parent card ids." })),
-          tenant: Type.Optional(Type.String({ description: "Soft tenant namespace." })),
-          boardId: Type.Optional(Type.String({ description: "Soft board namespace." })),
-          createdByCardId: Type.Optional(
-            Type.String({ description: "Parent card that created this card." }),
+          card: Type.Object(
+            {
+              title: Type.String({ description: "Card title." }),
+              idempotencyKey: Type.String({ description: "Stable idempotency key." }),
+              notes: Type.Optional(
+                Type.String({ description: "Card notes or acceptance criteria." }),
+              ),
+              status: Type.Optional(Type.String({ description: "Initial status." })),
+              priority: Type.Optional(
+                Type.String({ description: "low, normal, high, or urgent." }),
+              ),
+              labels: Type.Optional(Type.Array(Type.String(), { description: "Card labels." })),
+              parents: Type.Optional(
+                Type.Array(Type.String(), { description: "Parent card ids." }),
+              ),
+              tenant: Type.Optional(Type.String({ description: "Soft tenant namespace." })),
+              boardId: Type.Optional(Type.String({ description: "Soft board namespace." })),
+              createdByCardId: Type.Optional(
+                Type.String({ description: "Parent card that created this card." }),
+              ),
+              skills: Type.Optional(
+                Type.Array(Type.String(), { description: "Suggested skills." }),
+              ),
+              workspace: Type.Optional(
+                Type.Object(
+                  {
+                    kind: Type.String({ description: "scratch, dir, or worktree." }),
+                    path: Type.Optional(
+                      Type.String({ description: "Absolute dir/worktree path." }),
+                    ),
+                    branch: Type.Optional(Type.String({ description: "Suggested branch." })),
+                  },
+                  { additionalProperties: false },
+                ),
+              ),
+              maxRuntimeSeconds: Type.Optional(
+                Type.Number({ description: "Run timeout seconds." }),
+              ),
+              maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
+              scheduledAt: Type.Optional(Type.Number({ description: "Unix epoch milliseconds." })),
+            },
+            { additionalProperties: false },
           ),
-          idempotencyKey: Type.Optional(Type.String({ description: "Idempotent create key." })),
-          skills: Type.Optional(Type.Array(Type.String(), { description: "Suggested skills." })),
-          workspace: Type.Optional(
-            Type.Object(
-              {
-                kind: Type.String({ description: "scratch, dir, or worktree." }),
-                path: Type.Optional(Type.String({ description: "Absolute dir/worktree path." })),
-                branch: Type.Optional(Type.String({ description: "Suggested branch." })),
-              },
-              { additionalProperties: false },
-            ),
-          ),
-          maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Run timeout seconds." })),
-          maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
-          scheduledAt: Type.Optional(Type.Number({ description: "Unix epoch milliseconds." })),
+          taskName: Type.Optional(Type.String({ description: "Optional safe child task name." })),
+          label: Type.Optional(Type.String({ description: "Optional safe child run label." })),
         },
         { additionalProperties: false },
       ),
       execute: async (_toolCallId, rawParams) => {
         const record = rawParams as Record<string, unknown>;
-        readParentIds(record.parents);
+        const card = readObjectParam(record, "card");
+        assertSafeChildCreateToolParams(record);
+        readParentIds(card.parents);
         return jsonResult(
-          await executeWorkboardSafeChildCreate({
-            runtime: params.api.runtime.subagent,
-            store,
-            cardParams: record,
-            redactCard: redactClaimToken,
-          }),
+          await params.api.runtime.gateway.request(
+            "workboard.cards.safeChildCreate",
+            {
+              card,
+              ...(readOptionalTrimmedString(record, "taskName")
+                ? { taskName: readOptionalTrimmedString(record, "taskName") }
+                : {}),
+              ...(readOptionalTrimmedString(record, "label")
+                ? { label: readOptionalTrimmedString(record, "label") }
+                : {}),
+            },
+            { scopes: ["operator.write"] },
+          ),
         );
       },
     },

@@ -14,6 +14,9 @@ import type { TrustedSessionCreation } from "./server-methods/session-creation-p
 import type { GatewayRequestOptions } from "./server-methods/types.js";
 
 export function createSyntheticPluginRuntimeClient(params?: {
+  agentRuntimeIdentity?: NonNullable<
+    NonNullable<GatewayRequestOptions["client"]>["internal"]
+  >["agentRuntimeIdentity"];
   allowModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
   cronRunContinuation?: boolean;
@@ -45,6 +48,9 @@ export function createSyntheticPluginRuntimeClient(params?: {
     internal: {
       syntheticClient: true,
       ...(params?.sessionCreation ? { sessionCreation: params.sessionCreation } : {}),
+      ...(params?.agentRuntimeIdentity
+        ? { agentRuntimeIdentity: params.agentRuntimeIdentity }
+        : {}),
       allowModelOverride: params?.allowModelOverride === true,
       ...(params?.agentRunTracking ? { agentRunTracking: params.agentRunTracking } : {}),
       ...(params?.cronRunContinuation === true ? { cronRunContinuation: true } : {}),

@@ -45,6 +45,7 @@
     "tools": [
       "workboard_list",
       "workboard_create",
+      "workboard_safe_child_create",
       "workboard_link",
       "workboard_read",
       "workboard_claim",
@@ -86,6 +87,9 @@
       "optional": true
     },
     "workboard_create": {
+      "optional": true
+    },
+    "workboard_safe_child_create": {
       "optional": true
     },
     "workboard_link": {

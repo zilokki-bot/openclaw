@@ -1371,6 +1371,55 @@ describe("loadGatewayPlugins", () => {
     expect(getLastDispatchedClientInternal().pluginRuntimeOwnerId).toBe("google-meet");
   });
 
+  test("preserves authenticated agent runtime identity for trusted plugin gateway requests", async () => {
+    loadOpenClawPlugins.mockReturnValue(addLoadedPlugin(createRegistry([]), { id: "workboard" }));
+    loadGatewayStartupPluginsForTest();
+    const scope = {
+      context: createTestContext("plugin-gateway-request-agent-identity"),
+      client: {
+        connect: {
+          scopes: ["operator.write"],
+        },
+        internal: {
+          agentRuntimeIdentity: {
+            kind: "agentRuntime",
+            agentId: "main",
+            sessionKey: "agent:main:codex-coord",
+          },
+        },
+      } as GatewayRequestOptions["client"],
+      isWebchatConnect: () => false,
+    } satisfies PluginRuntimeGatewayRequestScope;
+    const runtime = runtimeModule.createPluginRuntime();
+
+    await gatewayRequestScopeModule.withPluginRuntimeGatewayRequestScope(scope, () =>
+      gatewayRequestScopeModule.withPluginRuntimePluginScope(
+        { pluginId: "workboard", pluginOrigin: "bundled" },
+        () =>
+          runtime.gateway.request(
+            "workboard.cards.safeChildCreate",
+            {
+              card: {
+                title: "Safe card",
+                idempotencyKey: "br-wb:v1:safe-card",
+              },
+            },
+            { scopes: ["operator.write"] },
+          ),
+      ),
+    );
+
+    expect(getLastDispatchedClientScopes()).toEqual(["operator.write"]);
+    expect(getLastDispatchedClientInternal()).toMatchObject({
+      pluginRuntimeOwnerId: "workboard",
+      agentRuntimeIdentity: {
+        kind: "agentRuntime",
+        agentId: "main",
+        sessionKey: "agent:main:codex-coord",
+      },
+    });
+  });
+
   test("preserves structured errors from trusted plugin gateway requests", async () => {
     loadOpenClawPlugins.mockReturnValue(addLoadedPlugin(createRegistry([]), { id: "google-meet" }));
     loadGatewayStartupPluginsForTest();

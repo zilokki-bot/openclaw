@@ -27,6 +27,7 @@ type PrepareSandboxWorkspaceAuthority =
 export const WORKBOARD_TOOL_NAMES = [
   "workboard_list",
   "workboard_create",
+  "workboard_safe_child_create",
   "workboard_link",
   "workboard_read",
   "workboard_claim",
