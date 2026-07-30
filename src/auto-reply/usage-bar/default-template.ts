@@ -31,6 +31,7 @@ export const DEFAULT_USAGE_BAR_TEMPLATE: UsageBarTemplate = {
       { when: "model.auth_profile", text: "🔑{model.auth_profile}" },
       { when: "model.reasoning", text: "{model.reasoning|alias:reasoning}" },
       { map: "state.fast_mode", cases: { true: "⚡️", false: "🐌" } },
+      { when: "state.compactions", text: "🧹{state.compactions}" },
       {
         when: "context.max_tokens",
         text: "\u00A0| 📚[{context.pct_used|meter:5:braille}]{context.max_tokens|num}",
