@@ -5,12 +5,7 @@ import { performance } from "node:perf_hooks";
 import { parseModelCatalogRef } from "@openclaw/model-catalog-core/model-catalog-refs";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { GatewayClientRequestError } from "../../packages/gateway-client/src/index.js";
-import {
-  GATEWAY_CLIENT_IDS,
-  GATEWAY_CLIENT_MODES,
-} from "../../packages/gateway-protocol/src/client-info.js";
 import type { ErrorShape } from "../../packages/gateway-protocol/src/schema/frames.js";
-import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/version.js";
 import { normalizeModelRef, parseModelRef } from "../agents/model-selection.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -31,6 +26,7 @@ import { ADMIN_SCOPE, APPROVALS_SCOPE, WRITE_SCOPE } from "./method-scopes.js";
 import { normalizeOperatorScopeList, type OperatorScope } from "./operator-scopes.js";
 import type { GatewayRequestHandler, GatewayRequestOptions } from "./server-methods/types.js";
 import { getFallbackGatewayContext } from "./server-plugin-fallback-context.js";
+import { createSyntheticOperatorClient } from "./synthetic-operator-client.js";
 
 export {
   clearFallbackGatewayContext,
@@ -189,46 +185,6 @@ function resolveRequestedFallbackModelRef(params: {
 }
 
 // ── Internal gateway dispatch for plugin runtime ────────────────────
-
-function createSyntheticOperatorClient(params?: {
-  agentRuntimeIdentity?: NonNullable<
-    NonNullable<GatewayRequestOptions["client"]>["internal"]
-  >["agentRuntimeIdentity"];
-  allowModelOverride?: boolean;
-  agentRunTracking?: "plugin_subagent";
-  cronRunContinuation?: boolean;
-  pluginRuntimeOwnerId?: string;
-  scopes?: string[];
-}): GatewayRequestOptions["client"] {
-  const pluginRuntimeOwnerId =
-    typeof params?.pluginRuntimeOwnerId === "string" && params.pluginRuntimeOwnerId.trim()
-      ? params.pluginRuntimeOwnerId.trim()
-      : undefined;
-  return {
-    connect: {
-      minProtocol: PROTOCOL_VERSION,
-      maxProtocol: PROTOCOL_VERSION,
-      client: {
-        id: GATEWAY_CLIENT_IDS.GATEWAY_CLIENT,
-        version: "internal",
-        platform: "node",
-        mode: GATEWAY_CLIENT_MODES.BACKEND,
-      },
-      role: "operator",
-      scopes: params?.scopes ?? [WRITE_SCOPE],
-    },
-    internal: {
-      allowModelOverride: params?.allowModelOverride === true,
-      ...(params?.agentRunTracking ? { agentRunTracking: params.agentRunTracking } : {}),
-      ...(params?.cronRunContinuation === true ? { cronRunContinuation: true } : {}),
-      ...(params?.scopes?.includes(APPROVALS_SCOPE) ? { approvalRuntime: true } : {}),
-      ...(params?.agentRuntimeIdentity
-        ? { agentRuntimeIdentity: params.agentRuntimeIdentity }
-        : {}),
-      ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
-    },
-  };
-}
 
 function hasAdminScope(client: GatewayRequestOptions["client"] | undefined): boolean {
   const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
