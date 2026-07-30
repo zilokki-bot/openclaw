@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
 import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import type { RuntimePluginToolGrant } from "../plugins/runtime/tool-grant.js";
 import type { PluginRuntime } from "../plugins/runtime/types.js";
@@ -32,7 +33,7 @@ type GatewaySubagentRuntimeParams = {
   canClientUseModelOverride: (client: GatewayRequestOptions["client"]) => boolean;
   canTrustedOfficialPluginRequestScopes: (params: {
     pluginId?: string;
-    pluginOrigin?: string;
+    pluginOrigin?: PluginOrigin;
     pluginTrustedOfficialInstall?: boolean;
   }) => boolean;
   dispatchGatewayMethodInProcess: DispatchGatewayMethodInProcess;
