@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getReplyPayloadMetadata } from "../reply-payload.js";
-import { markUsageOnlySourceReplyFooterForDelivery } from "./agent-runner-result-complete.js";
+import { markUsageOnlySourceReplyFooterForDelivery } from "./source-reply-usage-footer.js";
 
 describe("markUsageOnlySourceReplyFooterForDelivery", () => {
   it("marks usage-only source-reply footer for delivery under message_tool_only", () => {

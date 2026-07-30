@@ -43,6 +43,7 @@ import { readPostCompactionContext } from "./post-compaction-context.js";
 import { warnPrivateMessageToolFinal } from "./private-message-tool-final.js";
 import { enqueueFollowupRun, refreshQueuedFollowupSession } from "./queue.js";
 import { incrementRunCompactionCount } from "./session-run-accounting.js";
+import { markUsageOnlySourceReplyFooterForDelivery } from "./source-reply-usage-footer.js";
 import {
   buildStrandedReplyDeliveryFailurePayload,
   resolveStrandedReplyRecovery,
@@ -55,30 +56,6 @@ type PreparedReplyAgentPayloads = {
   guardedReplyPayloads: ReplyPayload[];
   responseUsageLine: string | undefined;
 };
-
-export function markUsageOnlySourceReplyFooterForDelivery(params: {
-  finalPayloads: ReplyPayload[];
-  responseUsageLine: string | undefined;
-  completedSourceReplyDelivery: boolean;
-  sourceReplyDeliveryMode: string | undefined;
-}): ReplyPayload[] {
-  const {
-    completedSourceReplyDelivery,
-    finalPayloads,
-    responseUsageLine,
-    sourceReplyDeliveryMode,
-  } = params;
-  if (
-    responseUsageLine &&
-    completedSourceReplyDelivery &&
-    sourceReplyDeliveryMode === "message_tool_only" &&
-    finalPayloads.length === 1 &&
-    finalPayloads[0]?.text === responseUsageLine
-  ) {
-    return [markReplyPayloadForSourceSuppressionDelivery(finalPayloads[0])];
-  }
-  return finalPayloads;
-}
 
 export async function completeReplyAgentRun(input: {
   context: FinalizeReplyAgentRunInput;

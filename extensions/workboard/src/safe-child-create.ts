@@ -24,7 +24,7 @@ type SafeSubagentRuntime = {
   getToolReceipts(params: { runId: string; toolName: string }): Promise<{ receipts: unknown[] }>;
 };
 
-export type SafeChildCreateReceipt = {
+type SafeChildCreateReceipt = {
   receipt: {
     taskId: string;
     runId: string;
