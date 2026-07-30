@@ -2153,6 +2153,81 @@ describe("subagent registry lifecycle hardening", () => {
     expect(finalArg.terminalOutcome).toBeUndefined();
   });
 
+  it("promotes terminal task progress when completion reply capture is empty", async () => {
+    const entry = createRunEntry({
+      expectsCompletionMessage: true,
+    });
+
+    await createLifecycleController({
+      entry,
+      captureSubagentCompletionReply: vi.fn(async () => undefined),
+      resolveSubagentTask: () => ({
+        lookup: "available",
+        task: {
+          taskId: "task-terminal",
+          runId: entry.runId,
+          childSessionKey: entry.childSessionKey,
+          status: "succeeded",
+          progressSummary: "Diagnosed runtime pressure and returned the exact blocker.",
+          terminalSummary: "completed",
+        } as never,
+      }),
+    }).completeSubagentRun({
+      runId: entry.runId,
+      endedAt: 4_000,
+      outcome: { status: "ok" },
+      reason: SUBAGENT_ENDED_REASON_COMPLETE,
+      triggerCleanup: false,
+    });
+
+    expect(entry.completion?.resultText).toBe(
+      "Diagnosed runtime pressure and returned the exact blocker.",
+    );
+    const finalArg = firstCallArg(taskExecutorMocks.completeTaskRunByRunId);
+    expectFields(finalArg, {
+      runId: entry.runId,
+      runtime: "subagent",
+      sessionKey: entry.childSessionKey,
+      progressSummary: "Diagnosed runtime pressure and returned the exact blocker.",
+      terminalSummary: null,
+    });
+    expect(finalArg.terminalOutcome).toBeUndefined();
+  });
+
+  it("does not treat generic terminal task completion as a required result", async () => {
+    const entry = createRunEntry({
+      expectsCompletionMessage: true,
+    });
+
+    await createLifecycleController({
+      entry,
+      captureSubagentCompletionReply: vi.fn(async () => undefined),
+      resolveSubagentTask: () => ({
+        lookup: "available",
+        task: {
+          taskId: "task-terminal",
+          runId: entry.runId,
+          childSessionKey: entry.childSessionKey,
+          status: "succeeded",
+          terminalSummary: "completed",
+        } as never,
+      }),
+    }).completeSubagentRun({
+      runId: entry.runId,
+      endedAt: 4_000,
+      outcome: { status: "ok" },
+      reason: SUBAGENT_ENDED_REASON_COMPLETE,
+      triggerCleanup: false,
+    });
+
+    expect(entry.completion?.resultText).toBeNull();
+    expectFields(firstCallArg(taskExecutorMocks.completeTaskRunByRunId), {
+      runId: entry.runId,
+      terminalOutcome: "blocked",
+      terminalSummary: "Required completion did not produce a final deliverable.",
+    });
+  });
+
   it("keeps required completions successful when final output follows progress text", async () => {
     const entry = createRunEntry({
       expectsCompletionMessage: true,

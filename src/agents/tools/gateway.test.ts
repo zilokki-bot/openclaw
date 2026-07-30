@@ -480,6 +480,49 @@ describe("gateway tool defaults", () => {
     expect(call.agentRuntimeIdentityToken).toEqual(expect.any(String));
   });
 
+  it("does not mark direct Workboard safe child create calls with agent runtime identity", async () => {
+    mocks.callGateway.mockResolvedValueOnce({ ok: true });
+
+    await callGatewayTool(
+      "workboard.cards.safeChildCreate",
+      {},
+      {
+        card: {
+          title: "01-market-sku",
+          idempotencyKey: "br-wb:v1:autocomposite-market-sku-russia:92511a7e67e41b3cf2cbee94",
+        },
+      },
+    );
+
+    const call = capturedGatewayCall();
+    expect(call.method).toBe("workboard.cards.safeChildCreate");
+    expect(call).not.toHaveProperty("agentRuntimeIdentityToken");
+  });
+
+  it("marks local Workboard safe child create calls from trusted tool context with agent runtime identity", async () => {
+    mocks.callGateway.mockResolvedValueOnce({ ok: true });
+
+    await withGatewayToolCallerIdentity(
+      { agentId: "main", sessionKey: "agent:main:codex-coord" },
+      async () => {
+        await callGatewayTool(
+          "workboard.cards.safeChildCreate",
+          {},
+          {
+            card: {
+              title: "01-market-sku",
+              idempotencyKey: "br-wb:v1:autocomposite-market-sku-russia:92511a7e67e41b3cf2cbee94",
+            },
+          },
+        );
+      },
+    );
+
+    const call = capturedGatewayCall();
+    expect(call.method).toBe("workboard.cards.safeChildCreate");
+    expect(call.agentRuntimeIdentityToken).toEqual(expect.any(String));
+  });
+
   it("mints message action identity only for an admitted turn on the managed local gateway", async () => {
     const turnCapability = mintMessageActionTurnCapability({
       agentId: "ops",

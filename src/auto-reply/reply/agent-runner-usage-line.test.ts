@@ -33,4 +33,23 @@ describe("appendUsageLine", () => {
       },
     );
   });
+
+  it("does not append duplicate usage text", () => {
+    const payload = setReplyPayloadMetadata(
+      { text: "message tool reply\nUsage: 12 in / 3 out" },
+      {
+        sourceReplyTranscriptMirror: {
+          sessionKey: "agent:main:telegram:direct:123",
+          agentId: "main",
+          text: "message tool reply\nUsage: 12 in / 3 out",
+          idempotencyKey: "run-1:internal-source-reply:0",
+        },
+      },
+    );
+
+    const updated = appendUsageLine([payload], "Usage: 12 in / 3 out");
+
+    expect(updated).toEqual([payload]);
+    expect(updated[0]?.text?.match(/Usage:/g)).toHaveLength(1);
+  });
 });
