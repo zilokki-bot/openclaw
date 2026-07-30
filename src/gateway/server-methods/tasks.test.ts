@@ -7,6 +7,7 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emitAgentEvent } from "../../infra/agent-events.js";
+import { clearDetachedTaskLifecycleRuntimeRegistration } from "../../tasks/detached-task-runtime-state.js";
 import {
   createTaskRecord as createTaskRecordOrNull,
   getTaskById,
@@ -83,6 +84,7 @@ function createTaskRecord(params: Parameters<typeof createTaskRecordOrNull>[0]):
 }
 
 beforeEach(async () => {
+  clearDetachedTaskLifecycleRuntimeRegistration();
   stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gateway-tasks-"));
   setTestEnvValue("OPENCLAW_STATE_DIR", stateDir);
   resetTaskRegistryForTests({ persist: false });
@@ -98,6 +100,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  clearDetachedTaskLifecycleRuntimeRegistration();
   resetTaskRegistryControlRuntimeForTests();
   resetTaskRegistryForTests();
   stateDirEnvSnapshot.restore();
