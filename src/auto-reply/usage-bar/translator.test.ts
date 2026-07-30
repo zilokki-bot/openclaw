@@ -169,6 +169,7 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
         reasoningEffort: "medium",
         fastMode: false,
         fallbackUsed: false,
+        authProfileId: "openai:owner@example.com",
         contextTokenBudget: 272000,
         contextUsedTokens: 204000,
         usage: { input: 204000, output: 15, cacheRead: 0, cacheWrite: 0, total: 204015 },
@@ -180,11 +181,14 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
       { text: "{model.display_name|alias:models}" },
       { map: "model.is_fallback", cases: { true: "🔄" } },
       { text: " | " },
+      { when: "model.auth_profile", text: "🔑{model.auth_profile} | " },
       { when: "model.reasoning", text: "{model.reasoning|alias:reasoning}" },
       { map: "state.fast_mode", cases: { true: "⚡", false: "🐌" } },
       { text: " | 📚 [{context.pct_used|meter:5:braille}]{context.max_tokens|num}" },
       { text: " | ${cost.turn_usd|fixed:4}" },
     ];
-    expect(renderUsageBar(tpl(pieces), contract)).toBe("opus46 | med🐌 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377");
+    expect(renderUsageBar(tpl(pieces), contract)).toBe(
+      "opus46 | 🔑openai:owner@… | med🐌 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377",
+    );
   });
 });

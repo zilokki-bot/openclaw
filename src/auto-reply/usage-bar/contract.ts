@@ -1,6 +1,14 @@
 import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import type { UsageContract } from "./translator.js";
 
+function formatFooterAuthProfileId(profileId?: string): string | null {
+  const trimmed = profileId?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(/([A-Za-z0-9._%+-]{1,64})@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "$1@…");
+}
+
 export function buildUsageContract(
   state: PluginHookReplyUsageState,
   surface?: string,
@@ -62,6 +70,7 @@ export function buildUsageContract(
       is_override: isOverride,
       override_source: overrideSource,
       auth_mode: state.authMode ?? null,
+      auth_profile: formatFooterAuthProfileId(state.authProfileId),
     },
     state: {
       fast_mode: typeof state.fastMode === "boolean" ? state.fastMode : null,

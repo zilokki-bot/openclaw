@@ -155,6 +155,7 @@ export async function accountAgentTurn(context: AgentTurnAccountingContext) {
     sessionId: followupRun.run.sessionId,
     chatType: typeof sessionCtx.ChatType === "string" ? sessionCtx.ChatType : undefined,
     authMode: runResult.meta?.requestShaping?.authMode ?? undefined,
+    authProfileId: followupRun.run.authProfileId,
     overrideSource: activeSessionEntry?.modelOverrideSource ?? undefined,
     requestedProvider: followupRun.run.provider,
     requestedModel: followupRun.run.model,

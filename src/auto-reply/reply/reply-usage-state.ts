@@ -23,6 +23,7 @@ export function buildReplyUsageState(params: {
   sessionId: string;
   chatType?: string;
   authMode?: string;
+  authProfileId?: string;
   overrideSource?: string;
   requestedProvider?: string;
   requestedModel?: string;
@@ -54,6 +55,7 @@ export function buildReplyUsageState(params: {
     sessionId: params.sessionId,
     chatType: params.chatType,
     authMode: params.authMode,
+    authProfileId: params.authProfileId,
     overrideSource: params.overrideSource,
     requested:
       params.requestedProvider && params.requestedModel
