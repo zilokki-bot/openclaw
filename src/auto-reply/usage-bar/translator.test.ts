@@ -178,14 +178,50 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
   });
 
   it("omits mainline branches from the footer contract", () => {
-    const contract = buildUsageContract({
-      provider: "openai",
-      model: "gpt-5.5",
-      gitBranch: "main",
-    });
+    const pieces = [{ when: "runtime.branch", text: "🌿{runtime.branch}" }];
+
+    for (const branch of ["main", "master", "HEAD"]) {
+      const contract = buildUsageContract(
+        { provider: "openai", model: "gpt-5.5", gitBranch: branch },
+        "discord",
+      );
+
+      expect(renderUsageBar(tpl(pieces), contract)).toBe("");
+    }
+  });
+
+  it("keeps non-mainline branches in the footer contract", () => {
+    const contract = buildUsageContract(
+      { provider: "openai", model: "gpt-5.5", gitBranch: "fix/usage-footer" },
+      "discord",
+    );
 
     expect(
       renderUsageBar(tpl([{ when: "runtime.branch", text: "🌿{runtime.branch}" }]), contract),
-    ).toBe("");
+    ).toBe("🌿fix/usage-footer");
+  });
+
+  it("omits the compaction marker when nothing was compacted", () => {
+    const pieces = [{ when: "state.compactions", text: "🧹{state.compactions}" }];
+
+    for (const compactionCount of [0, undefined]) {
+      const contract = buildUsageContract(
+        { provider: "openai", model: "gpt-5.5", compactionCount },
+        "discord",
+      );
+
+      expect(renderUsageBar(tpl(pieces), contract)).toBe("");
+    }
+  });
+
+  it("shows the compaction marker once compactions happened", () => {
+    const contract = buildUsageContract(
+      { provider: "openai", model: "gpt-5.5", compactionCount: 1 },
+      "discord",
+    );
+
+    expect(
+      renderUsageBar(tpl([{ when: "state.compactions", text: "🧹{state.compactions}" }]), contract),
+    ).toBe("🧹1");
   });
 });

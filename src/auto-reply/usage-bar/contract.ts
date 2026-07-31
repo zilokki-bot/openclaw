@@ -9,6 +9,13 @@ function formatFooterAuthProfileId(profileId?: string): string | null {
   return trimmed.replace(/([A-Za-z0-9._%+-]{1,64})@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "$1@…");
 }
 
+function formatFooterCompactions(count?: number): number | null {
+  if (typeof count !== "number" || !Number.isFinite(count) || count <= 0) {
+    return null;
+  }
+  return Math.floor(count);
+}
+
 function formatFooterGitBranch(branch?: string): string | null {
   const trimmed = branch?.trim();
   if (!trimmed || trimmed === "main" || trimmed === "master" || trimmed === "HEAD") {
@@ -82,7 +89,7 @@ export function buildUsageContract(
     },
     state: {
       fast_mode: typeof state.fastMode === "boolean" ? state.fastMode : null,
-      compactions: typeof state.compactionCount === "number" ? state.compactionCount : null,
+      compactions: formatFooterCompactions(state.compactionCount),
     },
     runtime: {
       branch: formatFooterGitBranch(state.gitBranch),
