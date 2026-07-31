@@ -56,7 +56,7 @@ describe("appendUsageLine", () => {
 
   it("removes a trailing manual usage footer without depending on Pulse identity", () => {
     const payload = {
-      text: "Готово\n" + "🧪 Responder qa | openai/gpt-5.5 | 12K/272K | compactions on | 20:00 UTC",
+      text: "Готово\n🧪 Responder qa | openai/gpt-5.5 | 12K/272K | compactions on | 20:00 UTC",
     };
 
     expect(appendUsageLine([payload], "👑 Пульс · GPT-5.5 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082")).toEqual([
