@@ -225,7 +225,7 @@ empty (so a `when` guard or a `|fallback` keeps the piece clean).
 | `model.is_fallback` / `model.is_override`                                           | bool: fallback used / model pinned                                                                   |
 | `model.override_source` / `model.auth_mode`                                         | override source label / credential mode (`oauth`, `api-key`, `token`, `mixed`, `aws-sdk`, `unknown`) |
 | `state.fast_mode`                                                                   | bool: fast vs slow                                                                                   |
-| `state.compactions`                                                                 | compaction count for the session                                                                     |
+| `state.compactions`                                                                 | compaction count for the session (`null` when nothing was compacted, so `when:` drops the segment)   |
 | `context.max_tokens` / `context.used_tokens` / `context.pct_used`                   | window budget / occupied tokens / 0-100 used                                                         |
 | `usage.input_tokens` / `usage.output_tokens` / `usage.total_tokens`                 | turn aggregate                                                                                       |
 | `usage.cache_read_tokens` / `usage.cache_write_tokens`                              | cache-read and cache-write tokens for the turn                                                       |
