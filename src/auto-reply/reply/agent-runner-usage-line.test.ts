@@ -2,7 +2,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it } from "vitest";
 import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
-import { appendUsageLine } from "./agent-runner-usage-line.js";
+import { appendUsageLine, resolveResponseUsageLine } from "./agent-runner-usage-line.js";
 
 describe("appendUsageLine", () => {
   it("preserves reply payload metadata when appending usage text", () => {
@@ -35,21 +35,66 @@ describe("appendUsageLine", () => {
   });
 
   it("does not append duplicate usage text", () => {
-    const payload = setReplyPayloadMetadata(
-      { text: "message tool reply\nUsage: 12 in / 3 out" },
+    const payload = { text: "message tool reply\nUsage: 12 in / 3 out" };
+
+    expect(appendUsageLine([payload], "Usage: 12 in / 3 out")).toEqual([payload]);
+  });
+
+  it("removes model-authored legacy footer text before appending the native usage footer", () => {
+    const payload = {
+      text:
+        "На месте 👑\n" +
+        "⚙️ Pulse main | deepseek/deepseek-v4-flash | 355K/131K (100%+) | компактов вкл | 23:33 UTC",
+    };
+
+    expect(appendUsageLine([payload], "👑 Пульс · DeepSeek Flash 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082")).toEqual([
       {
-        sourceReplyTranscriptMirror: {
-          sessionKey: "agent:main:telegram:direct:123",
-          agentId: "main",
-          text: "message tool reply\nUsage: 12 in / 3 out",
-          idempotencyKey: "run-1:internal-source-reply:0",
+        text: "На месте 👑\n👑 Пульс · DeepSeek Flash 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082",
+      },
+    ]);
+  });
+});
+
+describe("resolveResponseUsageLine", () => {
+  it("renders the full usage footer from reply state even when token usage is zero", () => {
+    const line = resolveResponseUsageLine({
+      config: {
+        messages: {
+          responseUsage: "full",
         },
       },
-    );
+      channel: "telegram",
+      usage: { input: 0, output: 0 },
+      replyUsageState: {
+        provider: "openai",
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+        authProfileId: "openai:owner@example.com",
+        contextTokenBudget: 272_000,
+        contextUsedTokens: 131_000,
+        compactionCount: 2,
+        identity: { name: "Pulse", emoji: "👑" },
+      },
+    });
 
-    const updated = appendUsageLine([payload], "Usage: 12 in / 3 out");
+    expect(line).toContain("gpt5.5");
+    expect(line).toContain("👑");
+    expect(line).toContain("🔑openai:owner@…");
+    expect(line).toContain("272k");
+    expect(line).toContain("🧹2");
+  });
 
-    expect(updated).toEqual([payload]);
-    expect(updated[0]?.text?.match(/Usage:/g)).toHaveLength(1);
+  it("keeps token-only usage footer silent when token usage is missing", () => {
+    const line = resolveResponseUsageLine({
+      config: {
+        messages: {
+          responseUsage: "tokens",
+        },
+      },
+      channel: "telegram",
+      usage: { input: 0, output: 0 },
+    });
+
+    expect(line).toBeUndefined();
   });
 });
