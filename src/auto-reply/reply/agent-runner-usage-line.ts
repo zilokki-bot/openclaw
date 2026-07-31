@@ -61,6 +61,42 @@ const formatResponseUsageLine = (params: {
   return `Usage: ${inputLabel} in / ${outputLabel} out${cacheSuffix}${suffix}`;
 };
 
+const MANUAL_USAGE_FOOTER_LINE_RE =
+  /^\s*(?=.{1,220}$)(?=.*\|)(?=.*\bUTC\b)(?=.*(?:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:/+-]*|\b\d+(?:\.\d+)?\s*[KMGT]?\s*\/\s*\d+(?:\.\d+)?\s*[KMGT]?\b|компакт|compaction|context|ctx|\$\d)).*$/iu;
+
+const stripTrailingManualUsageFooterLine = (text: string): string => {
+  const lines = text.split("\n");
+  let index = lines.length - 1;
+  while (index >= 0 && (lines[index] ?? "").trim() === "") {
+    index -= 1;
+  }
+  if (index < 0 || !MANUAL_USAGE_FOOTER_LINE_RE.test(lines[index] ?? "")) {
+    return text;
+  }
+  return [...lines.slice(0, index), ...lines.slice(index + 1)].join("\n").trimEnd();
+};
+
+const replacePayloadTextPreservingMetadata = (
+  payload: ReplyPayload,
+  text: string,
+): ReplyPayload => {
+  const next = { ...payload, text };
+  const metadata = getReplyPayloadMetadata(payload);
+  return metadata
+    ? setReplyPayloadMetadata(next, {
+        ...metadata,
+        ...(metadata.sourceReplyTranscriptMirror
+          ? {
+              sourceReplyTranscriptMirror: {
+                ...metadata.sourceReplyTranscriptMirror,
+                text,
+              },
+            }
+          : {}),
+      })
+    : next;
+};
+
 export const resolveResponseUsageLine = (params: {
   config: OpenClawConfig;
   sessionRaw?: string | null;
@@ -76,11 +112,24 @@ export const resolveResponseUsageLine = (params: {
     params.config.messages?.responseUsage,
     params.channel,
   );
-  if (
-    responseUsageMode === "off" ||
-    !hasNonzeroUsage(params.usage) ||
-    params.preserveUserFacingSessionState === true
-  ) {
+  if (responseUsageMode === "off" || params.preserveUserFacingSessionState === true) {
+    return undefined;
+  }
+
+  const usageTemplate =
+    responseUsageMode === "full" && params.replyUsageState
+      ? loadUsageBarTemplate(params.config.messages?.usageTemplate)
+      : undefined;
+  const rendered =
+    usageTemplate && params.replyUsageState
+      ? renderUsageBar(usageTemplate, buildUsageContract(params.replyUsageState, params.channel))
+      : undefined;
+
+  if (rendered) {
+    return rendered;
+  }
+
+  if (!hasNonzeroUsage(params.usage)) {
     return undefined;
   }
 
@@ -96,18 +145,6 @@ export const resolveResponseUsageLine = (params: {
     showCost,
     costConfig,
   });
-  const usageTemplate =
-    responseUsageMode === "full" && params.replyUsageState
-      ? loadUsageBarTemplate(params.config.messages?.usageTemplate)
-      : undefined;
-  const rendered =
-    usageTemplate && params.replyUsageState
-      ? renderUsageBar(usageTemplate, buildUsageContract(params.replyUsageState, params.channel))
-      : undefined;
-
-  if (rendered) {
-    return rendered;
-  }
   return formatted ?? undefined;
 };
 
@@ -123,9 +160,14 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
     return [...payloads, { text: line }];
   }
   const existing = expectDefined(payloads[index], "payloads entry at index");
-  const existingText = existing.text ?? "";
+  const existingText = stripTrailingManualUsageFooterLine(existing.text ?? "");
   if (existingText === line || existingText.endsWith(`\n${line}`)) {
-    return payloads;
+    if (existingText === existing.text) {
+      return payloads;
+    }
+    const updated = payloads.slice();
+    updated[index] = replacePayloadTextPreservingMetadata(existing, existingText);
+    return updated;
   }
   const separator = existingText.endsWith("\n") ? "" : "\n";
   const next = {

@@ -53,6 +53,7 @@ import {
   getAgentEventLifecycleGeneration,
   registerAgentRunContext,
 } from "../../infra/agent-events.js";
+import { resolveDevInstallGitBranch } from "../../infra/dev-install-branch.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { defaultRuntime } from "../../runtime.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
@@ -125,6 +126,7 @@ import { buildReplyUsageState } from "./reply-usage-state.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { resolveSourceReplyVisibilityPolicy } from "./source-reply-delivery-mode.js";
+import { markUsageOnlySourceReplyFooterForDelivery } from "./source-reply-usage-footer.js";
 import {
   buildStrandedReplyDeliveryFailurePayload,
   buildStrandedReplyRetryFollowupRun,
@@ -1919,6 +1921,8 @@ export function createFollowupRunner(params: {
         sessionId: run.sessionId,
         chatType: queued.originatingChatType,
         authMode: runResult.meta?.requestShaping?.authMode ?? undefined,
+        authProfileId: run.authProfileId,
+        gitBranch: await resolveDevInstallGitBranch(),
         overrideSource: activeSessionEntry?.modelOverrideSource ?? undefined,
         requestedProvider: run.provider,
         requestedModel: run.model,
@@ -1949,6 +1953,16 @@ export function createFollowupRunner(params: {
       });
       if (responseUsageLine) {
         deliveryPayloads = appendUsageLine(deliveryPayloads, responseUsageLine);
+        deliveryPayloads = markUsageOnlySourceReplyFooterForDelivery({
+          finalPayloads: deliveryPayloads,
+          responseUsageLine,
+          completedSourceReplyDelivery: hasSuccessfulFollowupSourceReplyDelivery({
+            didDeliverSourceReplyViaMessageTool: runResult.didDeliverSourceReplyViaMessageTool,
+            messagingToolSentTargets: runResult.messagingToolSentTargets,
+            messagingToolSourceReplyPayloads: runResult.messagingToolSourceReplyPayloads,
+          }),
+          sourceReplyDeliveryMode: run.sourceReplyDeliveryMode,
+        });
       }
       if (autoCompactionCount > 0) {
         const previousSessionId = run.sessionId;

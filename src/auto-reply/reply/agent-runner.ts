@@ -44,6 +44,7 @@ import type { TypingMode } from "../../config/types.js";
 import { readLatestSessionUsageFromTranscriptAsync } from "../../gateway/session-transcript-readers.js";
 import { logVerbose } from "../../globals.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
+import { resolveDevInstallGitBranch } from "../../infra/dev-install-branch.js";
 import { emitTrustedDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import {
   createChildDiagnosticTraceContext,
@@ -144,6 +145,7 @@ import { createReplyRestartRecoveryClaimController } from "./restart-recovery-cl
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { resolveSourceReplyVisibilityPolicy } from "./source-reply-delivery-mode.js";
+import { markUsageOnlySourceReplyFooterForDelivery } from "./source-reply-usage-footer.js";
 import {
   buildStrandedReplyDeliveryFailurePayload,
   buildStrandedReplyRetryFollowupRun,
@@ -1839,6 +1841,8 @@ export async function runReplyAgent(params: {
       sessionId: followupRun.run.sessionId,
       chatType: typeof sessionCtx.ChatType === "string" ? sessionCtx.ChatType : undefined,
       authMode: runResult.meta?.requestShaping?.authMode ?? undefined,
+      authProfileId: followupRun.run.authProfileId,
+      gitBranch: await resolveDevInstallGitBranch(),
       overrideSource: activeSessionEntry?.modelOverrideSource ?? undefined,
       requestedProvider: followupRun.run.provider,
       requestedModel: followupRun.run.model,
@@ -2593,15 +2597,12 @@ export async function runReplyAgent(params: {
         runtimePolicySessionKey,
         opts,
       });
-      if (
-        responseUsageLine &&
-        completedSourceReplyDelivery &&
-        sourceReplyPolicy.sourceReplyDeliveryMode === "message_tool_only" &&
-        finalPayloads.length === 1 &&
-        finalPayloads[0]?.text === responseUsageLine
-      ) {
-        finalPayloads = [markReplyPayloadForSourceSuppressionDelivery(finalPayloads[0])];
-      }
+      finalPayloads = markUsageOnlySourceReplyFooterForDelivery({
+        finalPayloads,
+        responseUsageLine,
+        completedSourceReplyDelivery,
+        sourceReplyDeliveryMode: sourceReplyPolicy.sourceReplyDeliveryMode,
+      });
       const finalDeliveryText = buildPendingFinalDeliveryText(finalPayloads);
       // #85714: warn only for unusually substantive private final text. In
       // message_tool_only, no tool call can be intentional silence, and
