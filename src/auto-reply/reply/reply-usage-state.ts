@@ -138,6 +138,10 @@ export function recordReplyUsageState(
   prune(now);
 }
 
+export function clearReplyUsageStateForTest(): void {
+  store.clear();
+}
+
 export function consumeReplyUsageState(runId?: string): PluginHookReplyUsageState | undefined {
   if (!runId) {
     return undefined;

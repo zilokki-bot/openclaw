@@ -62,12 +62,18 @@ const formatResponseUsageLine = (params: {
 };
 
 const MANUAL_USAGE_FOOTER_LINE_RE =
-  /^\s*(?:[^\s|]{1,4}\s*)?(?:Pulse|Пульс)\s+main\s*\|(?=.*\|)(?=.*\bUTC\b)(?=.*(?:\/|компакт|compaction|context|ctx|\d+\s*K\s*\/\s*\d+\s*K)).*$/i;
+  /^\s*(?=.{1,220}$)(?=.*\|)(?=.*\bUTC\b)(?=.*(?:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:/+-]*|\b\d+(?:\.\d+)?\s*[KMGT]?\s*\/\s*\d+(?:\.\d+)?\s*[KMGT]?\b|компакт|compaction|context|ctx|\$\d)).*$/iu;
 
-const stripManualUsageFooterLines = (text: string): string => {
+const stripTrailingManualUsageFooterLine = (text: string): string => {
   const lines = text.split("\n");
-  const filtered = lines.filter((line) => !MANUAL_USAGE_FOOTER_LINE_RE.test(line));
-  return filtered.join("\n").trimEnd();
+  let index = lines.length - 1;
+  while (index >= 0 && (lines[index] ?? "").trim() === "") {
+    index -= 1;
+  }
+  if (index < 0 || !MANUAL_USAGE_FOOTER_LINE_RE.test(lines[index] ?? "")) {
+    return text;
+  }
+  return [...lines.slice(0, index), ...lines.slice(index + 1)].join("\n").trimEnd();
 };
 
 const replacePayloadTextPreservingMetadata = (
@@ -154,7 +160,7 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
     return [...payloads, { text: line }];
   }
   const existing = expectDefined(payloads[index], "payloads entry at index");
-  const existingText = stripManualUsageFooterLines(existing.text ?? "");
+  const existingText = stripTrailingManualUsageFooterLine(existing.text ?? "");
   if (existingText === line || existingText.endsWith(`\n${line}`)) {
     if (existingText === existing.text) {
       return payloads;

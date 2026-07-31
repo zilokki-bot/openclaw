@@ -53,6 +53,37 @@ describe("appendUsageLine", () => {
       },
     ]);
   });
+
+  it("removes a trailing manual usage footer without depending on Pulse identity", () => {
+    const payload = {
+      text: "Готово\n" + "🧪 Responder qa | openai/gpt-5.5 | 12K/272K | compactions on | 20:00 UTC",
+    };
+
+    expect(appendUsageLine([payload], "👑 Пульс · GPT-5.5 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082")).toEqual([
+      {
+        text: "Готово\n👑 Пульс · GPT-5.5 🌘 · ⟦⣿⡇⠐⠐⠐⟧ · $0.0082",
+      },
+    ]);
+  });
+
+  it("does not remove manual usage-looking text from the middle of a reply", () => {
+    const payload = {
+      text:
+        "До\n" +
+        "🧪 Responder qa | openai/gpt-5.5 | 12K/272K | compactions on | 20:00 UTC\n" +
+        "После",
+    };
+
+    expect(appendUsageLine([payload], "Usage: 12 in / 3 out")).toEqual([
+      {
+        text:
+          "До\n" +
+          "🧪 Responder qa | openai/gpt-5.5 | 12K/272K | compactions on | 20:00 UTC\n" +
+          "После\n" +
+          "Usage: 12 in / 3 out",
+      },
+    ]);
+  });
 });
 
 describe("resolveResponseUsageLine", () => {
