@@ -565,6 +565,8 @@ export type PluginHookReplyUsageState = {
   chatType?: string;
   /** Credential mode the turn ran under (e.g. "oauth" | "api_key"). */
   authMode?: string;
+  /** Safe selected auth profile/account identifier for usage footer display. */
+  authProfileId?: string;
   /** Session model-override source, when a non-default model was pinned. */
   overrideSource?: string;
   /** Provider/model ref requested for the turn (vs resolvedRef actually used). */
@@ -575,6 +577,8 @@ export type PluginHookReplyUsageState = {
   durationMs?: number;
   /** Owning agent's configured identity (name/emoji/avatar), when set. */
   identity?: { name?: string; emoji?: string; avatar?: string };
+  /** Source checkout branch for non-mainline dev installs. */
+  gitBranch?: string;
   compactionCount?: number;
   /** Effective context-token budget after model/config/agent caps. */
   contextTokenBudget?: number;
