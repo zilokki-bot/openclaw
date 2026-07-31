@@ -565,6 +565,8 @@ export type PluginHookReplyUsageState = {
   durationMs?: number;
   /** Owning agent's configured identity (name/emoji/avatar), when set. */
   identity?: { name?: string; emoji?: string; avatar?: string };
+  /** Source checkout branch for non-mainline dev installs. */
+  gitBranch?: string;
   compactionCount?: number;
   /** Effective context-token budget after model/config/agent caps. */
   contextTokenBudget?: number;

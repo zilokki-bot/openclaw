@@ -24,6 +24,7 @@ export function buildReplyUsageState(params: {
   chatType?: string;
   authMode?: string;
   authProfileId?: string;
+  gitBranch?: string | null;
   overrideSource?: string;
   requestedProvider?: string;
   requestedModel?: string;
@@ -73,6 +74,7 @@ export function buildReplyUsageState(params: {
       : undefined,
     durationMs: params.durationMs,
     identity: resolveAgentIdentity(params.config, params.agentId),
+    gitBranch: params.gitBranch ?? undefined,
     compactionCount: params.compactionCount,
     contextTokenBudget:
       typeof params.contextTokenBudget === "number" && Number.isFinite(params.contextTokenBudget)

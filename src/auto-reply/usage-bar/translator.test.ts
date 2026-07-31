@@ -170,6 +170,7 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
         fastMode: false,
         fallbackUsed: false,
         authProfileId: "openai:owner@example.com",
+        gitBranch: "codex/usage-footer-auth-profile-20260730",
         compactionCount: 3,
         contextTokenBudget: 272000,
         contextUsedTokens: 204000,
@@ -182,6 +183,7 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
       { text: "{model.display_name|alias:models}" },
       { map: "model.is_fallback", cases: { true: "🔄" } },
       { text: " | " },
+      { when: "runtime.branch", text: "🌿{runtime.branch} | " },
       { when: "model.auth_profile", text: "🔑{model.auth_profile} | " },
       { when: "model.reasoning", text: "{model.reasoning|alias:reasoning}" },
       { map: "state.fast_mode", cases: { true: "⚡", false: "🐌" } },
@@ -190,7 +192,19 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
       { text: " | ${cost.turn_usd|fixed:4}" },
     ];
     expect(renderUsageBar(tpl(pieces), contract)).toBe(
-      "opus46 | 🔑openai:owner@… | med🐌🧹3 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377",
+      "opus46 | 🌿codex/usage-footer-auth-profi… | 🔑openai:owner@… | med🐌🧹3 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377",
     );
+  });
+
+  it("omits mainline branches from the footer contract", () => {
+    const contract = buildUsageContract({
+      provider: "openai",
+      model: "gpt-5.5",
+      gitBranch: "main",
+    });
+
+    expect(
+      renderUsageBar(tpl([{ when: "runtime.branch", text: "🌿{runtime.branch}" }]), contract),
+    ).toBe("");
   });
 });

@@ -6,6 +6,7 @@ import { consolidateLiveModelSwitchAfterRun } from "../../agents/live-model-swit
 import { isCliProvider } from "../../agents/model-selection.js";
 import { updateSessionEntry } from "../../config/sessions/session-accessor.js";
 import { logVerbose } from "../../globals.js";
+import { resolveDevInstallGitBranch } from "../../infra/dev-install-branch.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { resolveFallbackTransition } from "../fallback-state.js";
 import { normalizeVerboseLevel } from "../thinking.js";
@@ -134,6 +135,7 @@ export async function accountAgentTurn(context: AgentTurnAccountingContext) {
   const ctxTokens = runResult.meta?.agentMeta?.contextTokens;
   const compactions = runResult.meta?.agentMeta?.compactionCount;
   const lastCallUsage = runResult.meta?.agentMeta?.lastCallUsage;
+  const gitBranch = await resolveDevInstallGitBranch();
   const replyUsageState = buildReplyUsageState({
     config: cfg,
     provider: providerUsed,
@@ -156,6 +158,7 @@ export async function accountAgentTurn(context: AgentTurnAccountingContext) {
     chatType: typeof sessionCtx.ChatType === "string" ? sessionCtx.ChatType : undefined,
     authMode: runResult.meta?.requestShaping?.authMode ?? undefined,
     authProfileId: followupRun.run.authProfileId,
+    gitBranch,
     overrideSource: activeSessionEntry?.modelOverrideSource ?? undefined,
     requestedProvider: followupRun.run.provider,
     requestedModel: followupRun.run.model,
