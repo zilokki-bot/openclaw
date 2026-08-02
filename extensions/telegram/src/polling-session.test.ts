@@ -1457,6 +1457,83 @@ describe("TelegramPollingSession", () => {
     await firstRun;
   });
 
+  it("releases isolated ingress singleflight owner after recoverable bot init failure", async () => {
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    const log = vi.fn();
+    const firstBot = {
+      api: {
+        deleteWebhook: vi.fn(async () => true),
+        config: { use: vi.fn() },
+      },
+      init: vi.fn(async () => {
+        throw new Error("init failed before worker setup");
+      }),
+      handleUpdate: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    const secondBot = {
+      api: {
+        deleteWebhook: vi.fn(async () => true),
+        config: { use: vi.fn() },
+      },
+      init: vi.fn(async () => undefined),
+      handleUpdate: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    createTelegramBotMock.mockReturnValueOnce(firstBot).mockReturnValueOnce(secondBot);
+    const firstCreateWorker = vi.fn(() => ({
+      onMessage: vi.fn(() => () => undefined),
+      stop: vi.fn(async () => undefined),
+      task: vi.fn(async () => undefined),
+    }));
+    let stopSecondWorker: (() => void) | undefined;
+    const secondWorkerDone = new Promise<void>((resolve) => {
+      stopSecondWorker = resolve;
+    });
+    const secondCreateWorker = vi.fn(() => ({
+      onMessage: vi.fn(() => () => undefined),
+      stop: vi.fn(async () => {
+        stopSecondWorker?.();
+      }),
+      task: vi.fn(async () => {
+        await secondWorkerDone;
+      }),
+    }));
+
+    const firstSession = createPollingSession({
+      abortSignal: firstAbort.signal,
+      log,
+      isolatedIngress: {
+        enabled: true,
+        createWorker: firstCreateWorker,
+      },
+    });
+    sleepWithAbortMock.mockImplementationOnce(async () => {
+      firstAbort.abort();
+    });
+    await firstSession.runUntilAbort();
+
+    expect(firstBot.init).toHaveBeenCalledTimes(1);
+    expect(firstCreateWorker).not.toHaveBeenCalled();
+
+    const secondSession = createPollingSession({
+      abortSignal: secondAbort.signal,
+      log,
+      isolatedIngress: {
+        enabled: true,
+        createWorker: secondCreateWorker,
+      },
+    });
+    const secondRun = secondSession.runUntilAbort();
+    await vi.waitFor(() => expect(secondCreateWorker).toHaveBeenCalledTimes(1));
+    expectLogExcludes(log, "isolated polling ingress duplicate owner for account default");
+
+    secondAbort.abort();
+    stopSecondWorker?.();
+    await secondRun;
+  });
+
   it("resets restart backoff after isolated ingress reports poll success", async () => {
     const abort = new AbortController();
     const init = vi.fn(async () => undefined);

@@ -682,7 +682,7 @@ describe("telegramPlugin gateway startup", () => {
         token: "123456:bad-token",
         accountId: "default",
       });
-      next.release();
+      await next.release();
     } finally {
       vi.useRealTimers();
     }

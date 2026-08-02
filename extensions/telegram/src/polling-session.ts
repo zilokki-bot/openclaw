@@ -1215,6 +1215,16 @@ export class TelegramPollingSession {
       return shouldRetry ? "continue" : "exit";
     }
     activeIsolatedPollingIngressByAccount.set(singleflightKey, singleflightOwner);
+    let singleflightOwnerReleased = false;
+    const releaseSingleflightOwner = () => {
+      if (singleflightOwnerReleased) {
+        return;
+      }
+      singleflightOwnerReleased = true;
+      if (activeIsolatedPollingIngressByAccount.get(singleflightKey) === singleflightOwner) {
+        activeIsolatedPollingIngressByAccount.delete(singleflightKey);
+      }
+    };
     const cycleAbortController = this.#activeCycleAbort;
     const abortMedia = () => {
       cycleAbortController?.abort();
@@ -1226,6 +1236,7 @@ export class TelegramPollingSession {
       if (this.#activeCycleAbort === cycleAbortController) {
         this.#activeCycleAbort = undefined;
       }
+      releaseSingleflightOwner();
       const shouldRetry = await this.#waitBeforeRetryOnRecoverableSetupError(
         err,
         "Telegram bot init failed",
@@ -1579,9 +1590,7 @@ export class TelegramPollingSession {
       if (this.#activeCycleAbort === cycleAbortController) {
         this.#activeCycleAbort = undefined;
       }
-      if (activeIsolatedPollingIngressByAccount.get(singleflightKey) === singleflightOwner) {
-        activeIsolatedPollingIngressByAccount.delete(singleflightKey);
-      }
+      releaseSingleflightOwner();
     }
   }
 
