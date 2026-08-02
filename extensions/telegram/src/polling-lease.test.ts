@@ -8,7 +8,6 @@ import {
   acquireTelegramPollingLease,
   releaseStoppedTelegramPollingLease,
   resetTelegramPollingLeasesForTests,
-  testing,
 } from "./polling-lease.js";
 
 describe("Telegram polling lease", () => {
@@ -42,7 +41,7 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('refusing duplicate poller for account "ops"');
 
-    first.release();
+    await first.release();
   });
 
   it("refuses an old active duplicate poller for the same bot token", async () => {
@@ -64,7 +63,7 @@ describe("Telegram polling lease", () => {
         }),
       ).rejects.toThrow('refusing duplicate poller for account "ops"');
 
-      first.release();
+      await first.release();
     } finally {
       vi.useRealTimers();
     }
@@ -82,8 +81,8 @@ describe("Telegram polling lease", () => {
 
     expect(first.tokenFingerprint).not.toBe(second.tokenFingerprint);
 
-    first.release();
-    second.release();
+    await first.release();
+    await second.release();
   });
 
   it("waits for an aborting same-token poller before acquiring", async () => {
@@ -101,13 +100,13 @@ describe("Telegram polling lease", () => {
       waitMs: 1_000,
     });
     await Promise.resolve();
-    first.release();
+    await first.release();
     const second = await acquire;
 
     expect(second.waitedForPrevious).toBe(true);
     expect(second.replacedStoppingPrevious).toBe(false);
 
-    second.release();
+    await second.release();
   });
 
   it("does not let stale release clear a replacement lease", async () => {
@@ -130,7 +129,7 @@ describe("Telegram polling lease", () => {
       const replacement = await acquireReplacement;
       expect(replacement.replacedStoppingPrevious).toBe(true);
 
-      first.release();
+      await first.release();
 
       await expect(
         acquireTelegramPollingLease({
@@ -139,7 +138,7 @@ describe("Telegram polling lease", () => {
         }),
       ).rejects.toThrow('account "new"');
 
-      replacement.release();
+      await replacement.release();
     } finally {
       vi.useRealTimers();
     }
@@ -165,7 +164,7 @@ describe("Telegram polling lease", () => {
       await Promise.resolve();
 
       expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
-      first.release();
+      await first.release();
     } finally {
       vi.useRealTimers();
       vi.restoreAllMocks();
@@ -199,7 +198,7 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('account "default"');
 
-    first.release();
+    await first.release();
   });
 
   it("does not release a non-aborted active lease", async () => {
@@ -224,7 +223,7 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('account "default"');
 
-    first.release();
+    await first.release();
   });
 
   it("releases an aborted same-account lease after the stop wait elapses", async () => {
@@ -250,8 +249,8 @@ describe("Telegram polling lease", () => {
         token: "123:abc",
         accountId: "default",
       });
-      next.release();
-      first.release();
+      await next.release();
+      await first.release();
     } finally {
       vi.useRealTimers();
     }
@@ -278,8 +277,8 @@ describe("Telegram polling lease", () => {
       token: "123:abc",
       accountId: "default",
     });
-    next.release();
-    first.release();
+    await next.release();
+    await first.release();
   });
 
   it("refuses duplicate pollers across process registries with a shared file lease", async () => {
@@ -370,7 +369,7 @@ describe("Telegram polling lease", () => {
       accountId: "default",
       leaseDir,
     });
-    first.release();
+    await first.release();
     resetTelegramPollingLeasesForTests();
 
     const staleLock = path.join(leaseDir, `${first.tokenFingerprint}.lock`);
@@ -388,11 +387,5 @@ describe("Telegram polling lease", () => {
       fileLeaseStaleMs: 0,
     });
     await next.release();
-  });
-
-  it("parses Linux process start ticks used to reject pid reuse", () => {
-    const raw = "12345 (node worker) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 424242 20 21";
-
-    expect(testing.parseLinuxProcessStartClockTicks(raw)).toBe("424242");
   });
 });

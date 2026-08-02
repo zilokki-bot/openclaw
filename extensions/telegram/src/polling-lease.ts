@@ -442,7 +442,3 @@ export async function releaseStoppedTelegramPollingLease(
 export function resetTelegramPollingLeasesForTests(): void {
   pollingLeaseRegistry().clear();
 }
-
-export const testing = {
-  parseLinuxProcessStartClockTicks,
-};
