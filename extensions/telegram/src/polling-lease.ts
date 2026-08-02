@@ -34,6 +34,10 @@ type TelegramPollingFileLease = {
   release: () => Promise<void>;
 };
 
+type TelegramPollingFileLeaseOperationLock = {
+  release: () => Promise<void>;
+};
+
 type AcquireTelegramPollingLeaseOpts = {
   token: string;
   accountId: string;
@@ -127,6 +131,10 @@ function pollingFileLeasePath(params: { leaseDir: string; tokenFingerprint: stri
   return path.join(params.leaseDir, `${params.tokenFingerprint}.lock`);
 }
 
+function pollingFileLeaseOperationPath(lockPath: string): string {
+  return `${lockPath}.operation`;
+}
+
 type TelegramPollingFileLeaseOwner = {
   accountId: string;
   ownerId: string;
@@ -167,6 +175,30 @@ async function readFileLeaseAgeMs(lockPath: string, nowMs: number): Promise<numb
   } catch {
     return 0;
   }
+}
+
+async function acquireFileLeaseOperationLock(params: {
+  accountId: string;
+  lockPath: string;
+  tokenFingerprint: string;
+}): Promise<TelegramPollingFileLeaseOperationLock> {
+  const operationPath = pollingFileLeaseOperationPath(params.lockPath);
+  try {
+    await mkdir(operationPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw err;
+    }
+    throw new Error(
+      `Telegram polling file lease operation already active for bot token ${params.tokenFingerprint}; refusing duplicate poller for account "${params.accountId}".`,
+      { cause: err },
+    );
+  }
+  return {
+    release: async () => {
+      await rm(operationPath, { force: true, recursive: true });
+    },
+  };
 }
 
 async function quarantineStaleFileLease(params: {
@@ -269,80 +301,89 @@ async function acquireTelegramPollingFileLease(params: {
     leaseDir: params.leaseDir,
     tokenFingerprint: params.tokenFingerprint,
   });
-  for (;;) {
-    try {
-      await mkdir(lockPath);
-      const ownerId = randomUUID();
+  const operationLock = await acquireFileLeaseOperationLock({
+    accountId: params.accountId,
+    lockPath,
+    tokenFingerprint: params.tokenFingerprint,
+  });
+  try {
+    for (;;) {
       try {
-        await writeFile(
-          path.join(lockPath, "owner.json"),
-          JSON.stringify({
-            accountId: params.accountId,
-            ownerId,
-            pid: process.pid,
-            processStartClockTicks: await readCurrentProcessStartClockTicks(),
-            startedAt: Date.now(),
-          }),
-          "utf8",
-        );
+        await mkdir(lockPath);
+        const ownerId = randomUUID();
+        try {
+          await writeFile(
+            path.join(lockPath, "owner.json"),
+            JSON.stringify({
+              accountId: params.accountId,
+              ownerId,
+              pid: process.pid,
+              processStartClockTicks: await readCurrentProcessStartClockTicks(),
+              startedAt: Date.now(),
+            }),
+            "utf8",
+          );
+        } catch (err) {
+          await rm(lockPath, { force: true, recursive: true }).catch(() => undefined);
+          throw err;
+        }
+        return {
+          ownerId,
+          path: lockPath,
+          release: async () => {
+            let currentOwner: TelegramPollingFileLeaseOwner | undefined;
+            try {
+              currentOwner = await readFileLeaseOwner(lockPath);
+            } catch {
+              currentOwner = undefined;
+            }
+            if (currentOwner?.ownerId !== ownerId) {
+              return;
+            }
+            await rm(lockPath, { force: true, recursive: true });
+          },
+        };
       } catch (err) {
-        await rm(lockPath, { force: true, recursive: true }).catch(() => undefined);
-        throw err;
-      }
-      return {
-        ownerId,
-        path: lockPath,
-        release: async () => {
-          let currentOwner: TelegramPollingFileLeaseOwner | undefined;
-          try {
-            currentOwner = await readFileLeaseOwner(lockPath);
-          } catch {
-            currentOwner = undefined;
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw err;
+        }
+        const nowMs = Date.now();
+        const staleMs = resolveTimerTimeoutMs(
+          params.staleMs,
+          DEFAULT_TELEGRAM_POLLING_FILE_LEASE_STALE_MS,
+          0,
+        );
+        let existingOwner: TelegramPollingFileLeaseOwner | undefined;
+        try {
+          existingOwner = await readFileLeaseOwner(lockPath);
+        } catch {
+          existingOwner = undefined;
+        }
+        const leaseAgeMs =
+          existingOwner?.startedAt === undefined
+            ? await readFileLeaseAgeMs(lockPath, nowMs)
+            : Math.max(0, nowMs - existingOwner.startedAt);
+        if (!existingOwner) {
+          if (leaseAgeMs < staleMs) {
+            throw new Error(
+              `Telegram polling file lease for bot token ${params.tokenFingerprint} is still initializing (${Math.round(leaseAgeMs)}ms old); refusing duplicate poller for account "${params.accountId}".`,
+              { cause: err },
+            );
           }
-          if (currentOwner?.ownerId !== ownerId) {
-            return;
-          }
-          await rm(lockPath, { force: true, recursive: true });
-        },
-      };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw err;
-      }
-      const nowMs = Date.now();
-      const staleMs = resolveTimerTimeoutMs(
-        params.staleMs,
-        DEFAULT_TELEGRAM_POLLING_FILE_LEASE_STALE_MS,
-        0,
-      );
-      let existingOwner: TelegramPollingFileLeaseOwner | undefined;
-      try {
-        existingOwner = await readFileLeaseOwner(lockPath);
-      } catch {
-        existingOwner = undefined;
-      }
-      const leaseAgeMs =
-        existingOwner?.startedAt === undefined
-          ? await readFileLeaseAgeMs(lockPath, nowMs)
-          : Math.max(0, nowMs - existingOwner.startedAt);
-      if (!existingOwner) {
-        if (leaseAgeMs < staleMs) {
+          await quarantineStaleFileLease({ lockPath });
+          continue;
+        }
+        if (await isFileLeaseOwnerProcessStillActive(existingOwner)) {
           throw new Error(
-            `Telegram polling file lease for bot token ${params.tokenFingerprint} is still initializing (${Math.round(leaseAgeMs)}ms old); refusing duplicate poller for account "${params.accountId}".`,
+            `Telegram polling already active for bot token ${params.tokenFingerprint} on account "${existingOwner.accountId}" in pid ${existingOwner.pid}; refusing duplicate poller for account "${params.accountId}".`,
             { cause: err },
           );
         }
-        await quarantineStaleFileLease({ lockPath });
-        continue;
+        await quarantineStaleFileLease({ expectedOwner: existingOwner, lockPath });
       }
-      if (await isFileLeaseOwnerProcessStillActive(existingOwner)) {
-        throw new Error(
-          `Telegram polling already active for bot token ${params.tokenFingerprint} on account "${existingOwner.accountId}" in pid ${existingOwner.pid}; refusing duplicate poller for account "${params.accountId}".`,
-          { cause: err },
-        );
-      }
-      await quarantineStaleFileLease({ expectedOwner: existingOwner, lockPath });
     }
+  } finally {
+    await operationLock.release().catch(() => undefined);
   }
 }
 

@@ -429,6 +429,40 @@ describe("Telegram polling lease", () => {
     }
   });
 
+  it("refuses stale recovery while another file lease operation is active", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    await mkdir(`${lockPath}.operation`);
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
+
+    await expect(
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "default",
+        leaseDir,
+        fileLeaseStaleMs: 0,
+      }),
+    ).rejects.toThrow("file lease operation already active");
+
+    await rm(`${lockPath}.operation`, { force: true, recursive: true });
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
   it("recovers a stale file lease with malformed owner metadata", async () => {
     const leaseDir = await createLeaseDir();
     const initial = await acquireTelegramPollingLease({
