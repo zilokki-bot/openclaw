@@ -388,4 +388,87 @@ describe("Telegram polling lease", () => {
     });
     await next.release();
   });
+
+  it("does not let an old file lease release clear a replacement file lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const leaseDir = await createLeaseDir();
+      const oldAbort = new AbortController();
+      const first = await acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "old",
+        abortSignal: oldAbort.signal,
+        leaseDir,
+      });
+      oldAbort.abort();
+
+      const acquireReplacement = acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "new",
+        leaseDir,
+        waitMs: 10,
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      const replacement = await acquireReplacement;
+      expect(replacement.replacedStoppingPrevious).toBe(true);
+
+      await first.release();
+      resetTelegramPollingLeasesForTests();
+
+      await expect(
+        acquireTelegramPollingLease({
+          token: "123:abc",
+          accountId: "third",
+          leaseDir,
+        }),
+      ).rejects.toThrow('account "new"');
+
+      await replacement.release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats EPERM owner liveness checks as active instead of stale", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(
+      path.join(lockPath, "owner.json"),
+      JSON.stringify({
+        accountId: "old",
+        ownerId: "eperm-owner",
+        pid: 42_424,
+        startedAt: Date.now() - 60_000,
+      }),
+      "utf8",
+    );
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid === 42_424 && signal === 0) {
+        throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+      }
+      return true;
+    });
+
+    try {
+      await expect(
+        acquireTelegramPollingLease({
+          token: "123:abc",
+          accountId: "default",
+          leaseDir,
+          fileLeaseStaleMs: 0,
+        }),
+      ).rejects.toThrow("pid 42424");
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
 });

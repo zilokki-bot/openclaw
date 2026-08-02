@@ -64,7 +64,7 @@ export default definePluginEntry({
       api.logger.warn?.("[webhooks] duplicate register skipped; routes already installed.");
       return;
     }
-    apis.add(api);
     registerWebhookRoutes(api);
+    apis.add(api);
   },
 });

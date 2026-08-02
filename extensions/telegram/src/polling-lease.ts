@@ -29,6 +29,7 @@ type TelegramPollingLease = {
 };
 
 type TelegramPollingFileLease = {
+  ownerId: string;
   path: string;
   release: () => Promise<void>;
 };
@@ -113,8 +114,12 @@ function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") {
+      return false;
+    }
+    return true;
   }
 }
 
@@ -229,12 +234,13 @@ async function acquireTelegramPollingFileLease(params: {
   for (;;) {
     try {
       await mkdir(lockPath);
+      const ownerId = randomUUID();
       try {
         await writeFile(
           path.join(lockPath, "owner.json"),
           JSON.stringify({
             accountId: params.accountId,
-            ownerId: randomUUID(),
+            ownerId,
             pid: process.pid,
             processStartClockTicks: await readCurrentProcessStartClockTicks(),
             startedAt: Date.now(),
@@ -246,8 +252,18 @@ async function acquireTelegramPollingFileLease(params: {
         throw err;
       }
       return {
+        ownerId,
         path: lockPath,
         release: async () => {
+          let currentOwner: TelegramPollingFileLeaseOwner | undefined;
+          try {
+            currentOwner = await readFileLeaseOwner(lockPath);
+          } catch {
+            currentOwner = undefined;
+          }
+          if (currentOwner?.ownerId !== ownerId) {
+            return;
+          }
           await rm(lockPath, { force: true, recursive: true });
         },
       };
@@ -327,12 +343,15 @@ function createLease(params: {
         return;
       }
       released = true;
-      await params.fileLease?.release();
       const current = params.registry.get(params.tokenFingerprint);
       if (current?.owner === owner) {
         params.registry.delete(params.tokenFingerprint);
       }
-      resolveDone();
+      try {
+        await params.fileLease?.release();
+      } finally {
+        resolveDone();
+      }
     },
   };
 }
@@ -392,6 +411,10 @@ export async function acquireTelegramPollingLease(
     if (waitResult === "released") {
       continue;
     }
+
+    registry.delete(fingerprint);
+    await existing.fileLease?.release().catch(() => undefined);
+    existing.resolveDone();
 
     const fileLease = await acquireTelegramPollingFileLease({
       accountId: opts.accountId,

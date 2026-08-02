@@ -111,4 +111,34 @@ describe("webhooks plugin registration", () => {
     expect(secondRegisterHttpRoute).toHaveBeenCalledTimes(1);
     expect(secondLogger.warn).not.toHaveBeenCalled();
   });
+
+  it("does not mark an api registered when route registration throws", () => {
+    const registerHttpRoute = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("register failed");
+      })
+      .mockImplementation(() => undefined);
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const api = createApi({
+      pluginConfig: {
+        routes: {
+          github: {
+            sessionKey: "agent:main:codex-coord",
+            secret: "secret-ref",
+          },
+        },
+      },
+      registerHttpRoute,
+      logger,
+    });
+
+    expect(() => plugin.register(api)).toThrow("register failed");
+    expect(() => plugin.register(api)).not.toThrow();
+
+    expect(registerHttpRoute).toHaveBeenCalledTimes(2);
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      "[webhooks] duplicate register skipped; routes already installed.",
+    );
+  });
 });
