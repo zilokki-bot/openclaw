@@ -51,6 +51,8 @@ const TELEGRAM_POLLING_CLIENT_TIMEOUT_FLOOR_SECONDS = Math.ceil(
   TELEGRAM_GET_UPDATES_REQUEST_TIMEOUT_MS / 1000,
 );
 
+const activeIsolatedPollingIngressByAccount = new Map<string, symbol>();
+
 function normalizeTelegramAccountId(accountId?: string | null): string {
   return accountId?.trim() || "default";
 }
@@ -392,6 +394,19 @@ export class TelegramPollingSession {
     if (!ingress?.enabled) {
       return this.#runPollingCycle(bot);
     }
+    const singleflightKey = normalizeTelegramAccountId(this.opts.accountId);
+    const singleflightOwner = Symbol(singleflightKey);
+    if (activeIsolatedPollingIngressByAccount.has(singleflightKey)) {
+      this.#status.notePollingError(
+        `Telegram isolated polling ingress duplicate owner blocked for account ${singleflightKey}.`,
+      );
+      const shouldRetry = await this.#waitBeforeRestart(
+        (delay) =>
+          `Telegram isolated polling ingress duplicate owner for account ${singleflightKey}; backing off for ${delay}.`,
+      );
+      return shouldRetry ? "continue" : "exit";
+    }
+    activeIsolatedPollingIngressByAccount.set(singleflightKey, singleflightOwner);
     const cycleAbortController = this.#activeCycleAbort;
     const abortMedia = () => {
       cycleAbortController?.abort();
@@ -703,6 +718,9 @@ export class TelegramPollingSession {
       await waitForGracefulStop(stopBot);
       if (this.#activeCycleAbort === cycleAbortController) {
         this.#activeCycleAbort = undefined;
+      }
+      if (activeIsolatedPollingIngressByAccount.get(singleflightKey) === singleflightOwner) {
+        activeIsolatedPollingIngressByAccount.delete(singleflightKey);
       }
     }
   }
