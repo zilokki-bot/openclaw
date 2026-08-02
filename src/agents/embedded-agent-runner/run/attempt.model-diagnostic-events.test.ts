@@ -1263,7 +1263,8 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
       undefined as unknown as Parameters<StreamFn>[1],
       undefined as unknown as Parameters<StreamFn>[2],
     )) as AsyncIterable<unknown>;
-    for await (const _chunk of streamed) {
+    for await (const chunk of streamed) {
+      void chunk;
       consumed += 1;
       if (consumed === CHUNKS / 2) {
         macrotaskRanMidStream = macrotaskRan;
