@@ -1,4 +1,5 @@
 // Telegram plugin module implements monitor behavior.
+import path from "node:path";
 import type { RunOptions } from "@grammyjs/runner";
 import { CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY } from "openclaw/plugin-sdk/approval-handler-adapter-runtime";
 import { registerChannelRuntimeContext } from "openclaw/plugin-sdk/channel-runtime-context";
@@ -24,6 +25,7 @@ import {
 } from "./network-errors.js";
 import { acquireTelegramPollingLease } from "./polling-lease.js";
 import { makeProxyFetch } from "./proxy.js";
+import { resolveTelegramIngressSpoolDir } from "./telegram-ingress-spool.js";
 import type {
   TelegramOffsetRotationReason,
   TelegramUpdateOffsetRotationInfo,
@@ -195,10 +197,14 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       writeTelegramUpdateOffset,
     } = await loadTelegramMonitorPollingRuntime();
 
+    const telegramStateDir = path.dirname(
+      resolveTelegramIngressSpoolDir({ accountId: account.accountId }),
+    );
     const pollingLease = await acquireTelegramPollingLease({
       token,
       accountId: account.accountId,
       abortSignal: opts.abortSignal,
+      leaseDir: path.join(telegramStateDir, "polling-leases"),
     });
     if (pollingLease.waitedForPrevious) {
       log(
