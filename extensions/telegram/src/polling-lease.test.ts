@@ -429,6 +429,62 @@ describe("Telegram polling lease", () => {
     }
   });
 
+  it("recovers a stale file lease with malformed owner metadata", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("recovers a stale file lease with start clock metadata whose owner is gone", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(
+      path.join(lockPath, "owner.json"),
+      JSON.stringify({
+        accountId: "old",
+        ownerId: "dead-owner-with-clock",
+        pid: 9_999_999,
+        processStartClockTicks: "1",
+        startedAt: Date.now() - 60_000,
+      }),
+      "utf8",
+    );
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
   it("treats EPERM owner liveness checks as active instead of stale", async () => {
     const leaseDir = await createLeaseDir();
     const initial = await acquireTelegramPollingLease({

@@ -1,6 +1,6 @@
 // Telegram plugin module implements polling lease behavior.
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { fingerprintTelegramBotToken } from "./token-fingerprint.js";
@@ -169,6 +169,44 @@ async function readFileLeaseAgeMs(lockPath: string, nowMs: number): Promise<numb
   }
 }
 
+async function quarantineStaleFileLease(params: {
+  expectedOwner?: TelegramPollingFileLeaseOwner;
+  lockPath: string;
+}): Promise<void> {
+  const quarantinePath = `${params.lockPath}.stale-${process.pid}-${Date.now()}-${randomUUID()}`;
+  try {
+    await rename(params.lockPath, quarantinePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw err;
+  }
+
+  let movedOwner: TelegramPollingFileLeaseOwner | undefined;
+  try {
+    movedOwner = await readFileLeaseOwner(quarantinePath);
+  } catch {
+    movedOwner = undefined;
+  }
+
+  const ownerMatches = params.expectedOwner
+    ? movedOwner?.ownerId === params.expectedOwner.ownerId &&
+      movedOwner.pid === params.expectedOwner.pid &&
+      movedOwner.startedAt === params.expectedOwner.startedAt
+    : !movedOwner;
+  if (ownerMatches) {
+    await rm(quarantinePath, { force: true, recursive: true });
+    return;
+  }
+
+  try {
+    await rename(quarantinePath, params.lockPath);
+  } catch {
+    await rm(quarantinePath, { force: true, recursive: true }).catch(() => undefined);
+  }
+}
+
 async function readFileLeaseOwner(
   lockPath: string,
 ): Promise<TelegramPollingFileLeaseOwner | undefined> {
@@ -294,7 +332,7 @@ async function acquireTelegramPollingFileLease(params: {
             { cause: err },
           );
         }
-        await rm(lockPath, { force: true, recursive: true });
+        await quarantineStaleFileLease({ lockPath });
         continue;
       }
       if (await isFileLeaseOwnerProcessStillActive(existingOwner)) {
@@ -303,7 +341,7 @@ async function acquireTelegramPollingFileLease(params: {
           { cause: err },
         );
       }
-      await rm(lockPath, { force: true, recursive: true });
+      await quarantineStaleFileLease({ expectedOwner: existingOwner, lockPath });
     }
   }
 }
