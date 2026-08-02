@@ -72,4 +72,43 @@ describe("webhooks plugin registration", () => {
     expect(route.replaceExisting).toBe(true);
     expect(route.handler).toBeTypeOf("function");
   });
+
+  it("skips duplicate registration on the same api but arms a fresh api after reload", () => {
+    const pluginConfig = {
+      routes: {
+        github: {
+          sessionKey: "agent:main:codex-coord",
+          secret: "secret-ref",
+        },
+      },
+    };
+    const firstRegisterHttpRoute = vi.fn();
+    const firstLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const firstApi = createApi({
+      pluginConfig,
+      registerHttpRoute: firstRegisterHttpRoute,
+      logger: firstLogger,
+    });
+
+    plugin.register(firstApi);
+    plugin.register(firstApi);
+
+    expect(firstRegisterHttpRoute).toHaveBeenCalledTimes(1);
+    expect(firstLogger.warn).toHaveBeenCalledWith(
+      "[webhooks] duplicate register skipped; routes already installed.",
+    );
+
+    const secondRegisterHttpRoute = vi.fn();
+    const secondLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    plugin.register(
+      createApi({
+        pluginConfig,
+        registerHttpRoute: secondRegisterHttpRoute,
+        logger: secondLogger,
+      }),
+    );
+
+    expect(secondRegisterHttpRoute).toHaveBeenCalledTimes(1);
+    expect(secondLogger.warn).not.toHaveBeenCalled();
+  });
 });
