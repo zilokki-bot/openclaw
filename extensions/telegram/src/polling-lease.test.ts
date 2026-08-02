@@ -85,6 +85,37 @@ describe("Telegram polling lease", () => {
     await second.release();
   });
 
+  it("refuses concurrent in-memory duplicate acquires without a file lease", async () => {
+    const results = await Promise.allSettled([
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "default",
+      }),
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "ops",
+      }),
+    ]);
+
+    const fulfilled = results.filter(
+      (
+        result,
+      ): result is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof acquireTelegramPollingLease>>
+      > => result.status === "fulfilled",
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0]?.reason?.message ?? rejected[0]?.reason)).toContain(
+      "refusing duplicate poller",
+    );
+
+    await fulfilled[0]?.value.release();
+  });
+
   it("waits for an aborting same-token poller before acquiring", async () => {
     const oldAbort = new AbortController();
     const first = await acquireTelegramPollingLease({
@@ -440,6 +471,16 @@ describe("Telegram polling lease", () => {
     await initial.release();
     await mkdir(lockPath, { recursive: true });
     await mkdir(`${lockPath}.operation`);
+    await writeFile(
+      path.join(`${lockPath}.operation`, "owner.json"),
+      JSON.stringify({
+        accountId: "active-operation",
+        ownerId: "active-operation-owner",
+        pid: process.pid,
+        startedAt: Date.now(),
+      }),
+      "utf8",
+    );
     resetTelegramPollingLeasesForTests();
 
     await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
@@ -454,6 +495,40 @@ describe("Telegram polling lease", () => {
     ).rejects.toThrow("file lease operation already active");
 
     await rm(`${lockPath}.operation`, { force: true, recursive: true });
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("recovers a stale file lease operation whose owner process is gone", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    await mkdir(`${lockPath}.operation`);
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
+    await writeFile(
+      path.join(`${lockPath}.operation`, "owner.json"),
+      JSON.stringify({
+        accountId: "dead-operation",
+        ownerId: "dead-operation-owner",
+        pid: 9_999_999,
+        startedAt: Date.now() - 60_000,
+      }),
+      "utf8",
+    );
+
     const next = await acquireTelegramPollingLease({
       token: "123:abc",
       accountId: "default",
