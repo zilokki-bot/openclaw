@@ -305,7 +305,9 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       });
       await pollingSession.runUntilAbort();
     } finally {
-      pollingLease.release();
+      await pollingLease.release().catch((err: unknown) => {
+        logError(`telegram: failed to release polling lease: ${String(err)}`);
+      });
     }
   } finally {
     unregisterUnhandledRejectionHandler();

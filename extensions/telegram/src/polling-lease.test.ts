@@ -8,6 +8,7 @@ import {
   acquireTelegramPollingLease,
   releaseStoppedTelegramPollingLease,
   resetTelegramPollingLeasesForTests,
+  testing,
 } from "./polling-lease.js";
 
 describe("Telegram polling lease", () => {
@@ -298,7 +299,68 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('refusing duplicate poller for account "ops"');
 
-    first.release();
+    await first.release();
+  });
+
+  it("does not steal a fresh file lease before owner metadata is written", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${first.tokenFingerprint}.lock`);
+    await first.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await expect(
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "ops",
+        leaseDir,
+        fileLeaseStaleMs: 60_000,
+      }),
+    ).rejects.toThrow("still initializing");
+  });
+
+  it("recovers an ownerless file lease only after the stale window", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${first.tokenFingerprint}.lock`);
+    await first.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "ops",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("waits for file lease cleanup before allowing a fast reacquire", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    await first.release();
+    resetTelegramPollingLeasesForTests();
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    await next.release();
   });
 
   it("recovers a stale file lease whose owner process is gone", async () => {
@@ -323,7 +385,14 @@ describe("Telegram polling lease", () => {
       token: "123:abc",
       accountId: "default",
       leaseDir,
+      fileLeaseStaleMs: 0,
     });
-    next.release();
+    await next.release();
+  });
+
+  it("parses Linux process start ticks used to reject pid reuse", () => {
+    const raw = "12345 (node worker) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 424242 20 21";
+
+    expect(testing.parseLinuxProcessStartClockTicks(raw)).toBe("424242");
   });
 });
