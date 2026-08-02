@@ -55,7 +55,13 @@ export class SessionCatalogListCoordinator<T> {
   private activeLoads = 0;
 
   constructor(private readonly options: SessionCatalogListCoordinatorOptions) {
-    this.now = options.now ?? Date.now;
+    // Read the wall clock lazily rather than capturing the Date.now reference at
+    // construction. The module-level singleton is built at import time, before a
+    // test installs fake timers; a captured reference would keep pointing at the
+    // real Date.now and ignore vi.setSystemTime, so time-based cache tests through
+    // the singleton would pass for any TTL. A fresh Date.now() lookup per call is
+    // identical at runtime and lets fake timers drive the cache clock.
+    this.now = options.now ?? (() => Date.now());
     this.maxQueuedLoads = options.maxQueuedLoads ?? options.maxConcurrentLoads * 8;
   }
 
