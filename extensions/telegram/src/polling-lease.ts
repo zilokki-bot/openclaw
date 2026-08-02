@@ -151,19 +151,20 @@ async function acquireTelegramPollingFileLease(params: {
         throw err;
       }
       let existingAccountId = "unknown";
-      let existingPid: number | null = null;
+      let existingPid: number | undefined;
       try {
         const raw = await readFile(path.join(lockPath, "owner.json"), "utf8");
         const parsed = JSON.parse(raw) as { accountId?: unknown; pid?: unknown };
         existingAccountId =
           typeof parsed.accountId === "string" ? parsed.accountId : existingAccountId;
-        existingPid = typeof parsed.pid === "number" ? parsed.pid : null;
+        existingPid = typeof parsed.pid === "number" ? parsed.pid : undefined;
       } catch {
-        existingPid = null;
+        // Missing or corrupt owner metadata is treated as stale and recovered below.
       }
-      if (existingPid !== null && isProcessAlive(existingPid)) {
+      if (existingPid !== undefined && isProcessAlive(existingPid)) {
         throw new Error(
           `Telegram polling already active for bot token ${params.tokenFingerprint} on account "${existingAccountId}" in pid ${existingPid}; refusing duplicate poller for account "${params.accountId}".`,
+          { cause: err },
         );
       }
       await rm(lockPath, { force: true, recursive: true });
