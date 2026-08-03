@@ -320,6 +320,33 @@ export function isDeliverySuspended(entry: SubagentRunRecord): boolean {
   return entry.delivery?.status === "suspended" && typeof entry.delivery.suspendedAt === "number";
 }
 
+/**
+ * Re-arms a suspended final delivery so the announce path stops skipping it.
+ *
+ * Suspension keeps the frozen payload — the completion text the requester never
+ * received — but every automatic path returns early on a suspended entry, so a
+ * finished result sits unreachable until it expires and is pruned. There is no
+ * other way back: the only transition to `pending` is the retry that runs
+ * *before* suspension. Resuming clears the suspension and the spent attempt
+ * budget and leaves `payload` untouched, which is the whole point: the answer is
+ * already stored, only its delivery stopped.
+ *
+ * Returns false when the entry was not suspended, so a caller can report
+ * "nothing to resume" instead of reporting success for a no-op.
+ */
+export function resumeSuspendedDelivery(entry: SubagentRunRecord): boolean {
+  if (!isDeliverySuspended(entry)) {
+    return false;
+  }
+  const delivery = ensureDeliveryState(entry);
+  delivery.status = "pending";
+  delivery.suspendedAt = undefined;
+  delivery.suspendedReason = undefined;
+  delivery.attemptCount = 0;
+  delivery.lastError = null;
+  return true;
+}
+
 /** Reads the current delivery attempt count. */
 export function getDeliveryAttemptCount(entry: SubagentRunRecord): number {
   return entry.delivery?.attemptCount ?? 0;
