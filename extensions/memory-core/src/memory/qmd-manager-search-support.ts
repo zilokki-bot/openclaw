@@ -93,7 +93,7 @@ export abstract class QmdManagerSearchSupport extends QmdManagerLifecycle {
       qmdManagerLog.warn("qmd missing collection repair already scheduled; using fallback");
       return false;
     }
-    let repairPromise: Promise<void>;
+    const repairPromise: Promise<void>;
     repairPromise = this.ensureCollections({ force: true, debugContext })
       .catch((repairErr: unknown) => {
         qmdManagerLog.warn(`qmd missing collection repair failed: ${String(repairErr)}`);
