@@ -42,7 +42,8 @@ describe("workboard gateway methods", () => {
       ),
     } as unknown as OpenClawPluginApi;
 
-    registerWorkboardGatewayMethods({ api, store: new WorkboardStore(createMemoryStore()) });
+    const store = new WorkboardStore(createMemoryStore());
+    registerWorkboardGatewayMethods({ api, store });
 
     expect([...methods.keys()]).toEqual([
       "workboard.cards.list",
@@ -136,6 +137,27 @@ describe("workboard gateway methods", () => {
     expect(listRespond.mock.calls[0]?.[1]).toMatchObject({
       cards: [expect.objectContaining({ title: "Investigate queue drift" })],
     });
+
+    const archived = await store.create({ title: "Archived board history" });
+    await store.archive(archived.id, true);
+
+    const activeOnlyRespond = vi.fn();
+    await listHandler?.({ params: {}, respond: activeOnlyRespond } as never);
+    expect(activeOnlyRespond.mock.calls[0]?.[1]?.cards).toEqual([
+      expect.objectContaining({ title: "Investigate queue drift" }),
+    ]);
+
+    const includeArchivedRespond = vi.fn();
+    await listHandler?.({
+      params: { includeArchived: true },
+      respond: includeArchivedRespond,
+    } as never);
+    expect(includeArchivedRespond.mock.calls[0]?.[1]?.cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "Investigate queue drift" }),
+        expect.objectContaining({ title: "Archived board history" }),
+      ]),
+    );
 
     const eventsRespond = vi.fn();
     await methods.get("workboard.notifications.events")?.handler({
