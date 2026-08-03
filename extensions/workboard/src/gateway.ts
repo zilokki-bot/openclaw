@@ -49,6 +49,11 @@ function readOptionalString(params: Record<string, unknown>, key: string): strin
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function readOptionalBoolean(params: Record<string, unknown>, key: string): boolean | undefined {
+  const value = params[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function assertNoSafeChildCreateEscapeHatches(params: Record<string, unknown>) {
   const agentId = readOptionalString(params, "agentId");
   if (agentId && agentId !== "workboard-worker") {
@@ -206,8 +211,11 @@ export function registerWorkboardGatewayMethods(params: {
     "workboard.cards.list",
     async ({ params: requestParams, respond }) => {
       try {
+        const includeArchived = readOptionalBoolean(requestParams, "includeArchived") === true;
         respond(true, {
-          cards: (await store.list({ boardId: requestParams.boardId })).map(redactClaimToken),
+          cards: (await store.list({ boardId: requestParams.boardId }))
+            .filter((card) => includeArchived || !card.metadata?.archivedAt)
+            .map(redactClaimToken),
           statuses: WORKBOARD_STATUSES,
         });
       } catch (error) {
