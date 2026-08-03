@@ -206,7 +206,10 @@ type CliProcessFailure = Error & {
 };
 describe("CLI help process exit", () => {
   it("exits promptly after root --help", async () => {
-    const result = await runCliProcess({ args: ["--help"], forbidTlsImport: true });
+    // This test covers the lightweight/precomputed root help path. Config-sensitive
+    // plugin rendering is covered by root-help-live-config tests and is intentionally
+    // not part of the cold process-exit budget here.
+    const result = await runCliProcess({ args: ["--help"], config: {}, forbidTlsImport: true });
 
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Usage: openclaw [options] [command]");
