@@ -1140,7 +1140,7 @@ jobs:
           package_args=(
             --output-dir .artifacts/docker-e2e-package
             --output-name openclaw-current.tgz
-            --metadata .artifacts/docker-e2e-package/package-candidate.json
+            --pack-json .artifacts/docker-e2e-package/package-candidate.json
           )
           if grep -Fq -- '--allow-unreleased-changelog' scripts/package-openclaw-for-docker.mjs; then
             package_args=(--allow-unreleased-changelog "${package_args[@]}")
