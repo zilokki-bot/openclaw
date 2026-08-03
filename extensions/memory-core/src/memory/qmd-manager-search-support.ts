@@ -32,6 +32,8 @@ import {
 const SNIPPET_HEADER_RE = /@@\s*-([0-9]+),([0-9]+)/;
 
 export abstract class QmdManagerSearchSupport extends QmdManagerLifecycle {
+  private missingCollectionRepairPromise: Promise<void> | null = null;
+
   protected recordSearchPlanDebug(params: {
     debugContext: QmdSearchRuntimeDebugContext;
     command: "query" | "search" | "vsearch";
@@ -79,16 +81,30 @@ export abstract class QmdManagerSearchSupport extends QmdManagerLifecycle {
   protected async tryRepairMissingCollectionSearch(
     err: unknown,
     debugContext: QmdSearchRuntimeDebugContext,
-    parentSignal?: AbortSignal,
+    _parentSignal?: AbortSignal,
   ): Promise<boolean> {
     if (!isMissingCollectionSearchError(err)) {
       return false;
     }
     qmdManagerLog.warn(
-      "qmd search failed because a managed collection is missing; repairing collections and retrying once",
+      "qmd search failed because a managed collection is missing; scheduling collection repair and using fallback for this search",
     );
-    await this.ensureCollections({ force: true, debugContext, parentSignal });
-    return true;
+    if (this.missingCollectionRepairPromise) {
+      qmdManagerLog.warn("qmd missing collection repair already scheduled; using fallback");
+      return false;
+    }
+    let repairPromise: Promise<void>;
+    repairPromise = this.ensureCollections({ force: true, debugContext })
+      .catch((repairErr: unknown) => {
+        qmdManagerLog.warn(`qmd missing collection repair failed: ${String(repairErr)}`);
+      })
+      .finally(() => {
+        if (this.missingCollectionRepairPromise === repairPromise) {
+          this.missingCollectionRepairPromise = null;
+        }
+      });
+    this.missingCollectionRepairPromise = repairPromise;
+    return false;
   }
 
   protected async runQmdSearch(
