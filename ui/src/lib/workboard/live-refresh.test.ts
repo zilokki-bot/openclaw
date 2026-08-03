@@ -130,7 +130,25 @@ describe("Workboard live refresh", () => {
     state.editingCardId = null;
     resumeWorkboardLiveRefresh(host);
     await waitForFast(() =>
-      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {}),
+      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {
+        includeArchived: true,
+      }),
+    );
+  });
+
+  it("asks the gateway for archived cards so the archive toggle keeps working", async () => {
+    const host = {};
+    const requestUpdate = vi.fn();
+    const client = createClient((method) =>
+      method === "workboard.cards.list" ? { cards: [], statuses: ["todo", "done"] } : { tasks: [] },
+    );
+    configureWorkboardLiveRefresh({ host, client: client as never, requestUpdate });
+
+    handleWorkboardChanged(host, { epoch: "epoch-a", revision: 1 });
+    await waitForFast(() =>
+      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {
+        includeArchived: true,
+      }),
     );
   });
 
@@ -151,7 +169,9 @@ describe("Workboard live refresh", () => {
 
     handleWorkboardChanged(host, { epoch: "epoch-a", revision: 9 });
     await waitForFast(() =>
-      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {}),
+      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {
+        includeArchived: true,
+      }),
     );
     resumeWorkboardLiveRefresh(host);
     configureWorkboardLiveRefresh({ host, client: client as never });
@@ -183,7 +203,9 @@ describe("Workboard live refresh", () => {
     configureWorkboardLiveRefresh({ host, client: client as never });
     handleWorkboardChanged(host, { epoch: "epoch-a", revision: 1 });
     await waitForFast(() =>
-      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {}),
+      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {
+        includeArchived: true,
+      }),
     );
 
     stopWorkboardLiveRefresh(host);
@@ -219,7 +241,9 @@ describe("Workboard live refresh", () => {
     configureWorkboardLiveRefresh({ host, client: client as never });
     const loading = loadWorkboard({ host, client: client as never, force: true });
     await waitForFast(() =>
-      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {}),
+      expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {
+        includeArchived: true,
+      }),
     );
 
     stopWorkboardLiveRefresh(host);
