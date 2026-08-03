@@ -180,7 +180,11 @@ function buildSafeChildCreateTask(cardParams: Record<string, unknown>): string {
   ].join("\n");
 }
 
-async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
+// Exported for the coalescing regression: the gateway handler only ever passes
+// boardId and allowManagedWorktrees, so a handler-level test cannot tell a
+// subset key from a full-options key. The regression has to reach an option the
+// handler does not pass (maxStarts) to observe the difference.
+export async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
   // Key on the whole option set rather than a hand-picked subset. Every option
   // narrows what the dispatch may do (which board, how many starts, whether
   // managed worktrees are allowed), so two calls may only share a run when all
