@@ -1135,12 +1135,33 @@ jobs:
       - name: Pack built runtime artifacts
         run: tar --posix -cf dist-runtime-build.tar.zst --use-compress-program zstdmt dist dist-runtime packages/*/dist
 
+      - name: Pack installable OpenClaw package
+        run: |
+          package_args=(
+            --output-dir .artifacts/docker-e2e-package
+            --output-name openclaw-current.tgz
+            --metadata .artifacts/docker-e2e-package/package-candidate.json
+          )
+          if grep -Fq -- '--allow-unreleased-changelog' scripts/package-openclaw-for-docker.mjs; then
+            package_args=(--allow-unreleased-changelog "${package_args[@]}")
+          fi
+          node scripts/package-openclaw-for-docker.mjs "${package_args[@]}"
+
       - name: Upload built runtime artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist-runtime-build
           path: dist-runtime-build.tar.zst
           retention-days: 1
+
+      - name: Upload installable OpenClaw package artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: docker-e2e-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/docker-e2e-package/openclaw-current.tgz
+            .artifacts/docker-e2e-package/package-candidate.json
+          retention-days: 7
 
       - name: Upload bundled plugin asset artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
