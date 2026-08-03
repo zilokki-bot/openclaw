@@ -51,7 +51,15 @@ export function registerWorkboardGatewayMethods(params: {
     "workboard.cards.list",
     async ({ params: requestParams, respond }) => {
       try {
-        respond(true, await listWorkboardCards(store, requestParams.boardId, redactClaimToken));
+        respond(
+          true,
+          await listWorkboardCards(
+            store,
+            requestParams.boardId,
+            requestParams.includeArchived,
+            redactClaimToken,
+          ),
+        );
       } catch (error) {
         respondError(respond, error);
       }
