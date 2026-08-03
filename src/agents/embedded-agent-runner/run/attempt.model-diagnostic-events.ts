@@ -734,6 +734,12 @@ async function* observeModelCallIterator<T>(
       observeResponseChunk(state, startedAt, next.value);
       maybeEmitModelCallStreamProgress(eventBase, state);
       yield next.value;
+      // Give the event loop one macrotask turn between streamed chunks. Without
+      // this yield, providers that resolve many chunks through microtasks can
+      // monopolize the gateway loop and starve timers, sockets and SQLite work.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
     }
     emitModelCallCompleted(eventBase, startedAt, state);
   } catch (err) {

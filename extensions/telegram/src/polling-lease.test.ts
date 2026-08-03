@@ -1,6 +1,9 @@
 // Telegram tests cover polling lease plugin behavior.
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireTelegramPollingLease,
   releaseStoppedTelegramPollingLease,
@@ -8,9 +11,22 @@ import {
 import { resetTelegramPollingLeasesForTest as resetTelegramPollingLeasesForTests } from "./runtime.test-support.js";
 
 describe("Telegram polling lease", () => {
+  let tempDirs: string[] = [];
+
   beforeEach(() => {
     resetTelegramPollingLeasesForTests();
   });
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((dir) => rm(dir, { force: true, recursive: true })));
+    tempDirs = [];
+  });
+
+  async function createLeaseDir(): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "telegram-polling-lease-test-"));
+    tempDirs.push(dir);
+    return dir;
+  }
 
   it("refuses an active duplicate poller for the same bot token", async () => {
     const first = await acquireTelegramPollingLease({
@@ -25,7 +41,7 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('refusing duplicate poller for account "ops"');
 
-    first.release();
+    await first.release();
   });
 
   it("refuses an old active duplicate poller for the same bot token", async () => {
@@ -47,7 +63,7 @@ describe("Telegram polling lease", () => {
         }),
       ).rejects.toThrow('refusing duplicate poller for account "ops"');
 
-      first.release();
+      await first.release();
     } finally {
       vi.useRealTimers();
     }
@@ -65,8 +81,39 @@ describe("Telegram polling lease", () => {
 
     expect(first.tokenFingerprint).not.toBe(second.tokenFingerprint);
 
-    first.release();
-    second.release();
+    await first.release();
+    await second.release();
+  });
+
+  it("refuses concurrent in-memory duplicate acquires without a file lease", async () => {
+    const results = await Promise.allSettled([
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "default",
+      }),
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "ops",
+      }),
+    ]);
+
+    const fulfilled = results.filter(
+      (
+        result,
+      ): result is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof acquireTelegramPollingLease>>
+      > => result.status === "fulfilled",
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0]?.reason?.message ?? rejected[0]?.reason)).toContain(
+      "refusing duplicate poller",
+    );
+
+    await fulfilled[0]?.value.release();
   });
 
   it("waits for an aborting same-token poller before acquiring", async () => {
@@ -84,13 +131,13 @@ describe("Telegram polling lease", () => {
       waitMs: 1_000,
     });
     await Promise.resolve();
-    first.release();
+    await first.release();
     const second = await acquire;
 
     expect(second.waitedForPrevious).toBe(true);
     expect(second.replacedStoppingPrevious).toBe(false);
 
-    second.release();
+    await second.release();
   });
 
   it("does not let stale release clear a replacement lease", async () => {
@@ -113,7 +160,7 @@ describe("Telegram polling lease", () => {
       const replacement = await acquireReplacement;
       expect(replacement.replacedStoppingPrevious).toBe(true);
 
-      first.release();
+      await first.release();
 
       await expect(
         acquireTelegramPollingLease({
@@ -122,7 +169,7 @@ describe("Telegram polling lease", () => {
         }),
       ).rejects.toThrow('account "new"');
 
-      replacement.release();
+      await replacement.release();
     } finally {
       vi.useRealTimers();
     }
@@ -148,7 +195,7 @@ describe("Telegram polling lease", () => {
       await Promise.resolve();
 
       expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
-      first.release();
+      await first.release();
     } finally {
       vi.useRealTimers();
       vi.restoreAllMocks();
@@ -182,7 +229,7 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('account "default"');
 
-    first.release();
+    await first.release();
   });
 
   it("does not release a non-aborted active lease", async () => {
@@ -207,7 +254,7 @@ describe("Telegram polling lease", () => {
       }),
     ).rejects.toThrow('account "default"');
 
-    first.release();
+    await first.release();
   });
 
   it("releases an aborted same-account lease after the stop wait elapses", async () => {
@@ -233,8 +280,8 @@ describe("Telegram polling lease", () => {
         token: "123:abc",
         accountId: "default",
       });
-      next.release();
-      first.release();
+      await next.release();
+      await first.release();
     } finally {
       vi.useRealTimers();
     }
@@ -261,7 +308,332 @@ describe("Telegram polling lease", () => {
       token: "123:abc",
       accountId: "default",
     });
-    next.release();
-    first.release();
+    await next.release();
+    await first.release();
+  });
+
+  it("refuses duplicate pollers across process registries with a shared file lease", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    resetTelegramPollingLeasesForTests();
+
+    await expect(
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "ops",
+        leaseDir,
+      }),
+    ).rejects.toThrow('refusing duplicate poller for account "ops"');
+
+    await first.release();
+  });
+
+  it("does not steal a fresh file lease before owner metadata is written", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${first.tokenFingerprint}.lock`);
+    await first.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await expect(
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "ops",
+        leaseDir,
+        fileLeaseStaleMs: 60_000,
+      }),
+    ).rejects.toThrow("still initializing");
+  });
+
+  it("recovers an ownerless file lease only after the stale window", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${first.tokenFingerprint}.lock`);
+    await first.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "ops",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("waits for file lease cleanup before allowing a fast reacquire", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    await first.release();
+    resetTelegramPollingLeasesForTests();
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    await next.release();
+  });
+
+  it("recovers a stale file lease whose owner process is gone", async () => {
+    const leaseDir = await createLeaseDir();
+    const first = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+    });
+    await first.release();
+    resetTelegramPollingLeasesForTests();
+
+    const staleLock = path.join(leaseDir, `${first.tokenFingerprint}.lock`);
+    await mkdir(staleLock, { recursive: true });
+    await writeFile(
+      path.join(staleLock, "owner.json"),
+      JSON.stringify({ accountId: "old", pid: 9_999_999, startedAt: Date.now() - 60_000 }),
+      "utf8",
+    );
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("does not let an old file lease release clear a replacement file lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const leaseDir = await createLeaseDir();
+      const oldAbort = new AbortController();
+      const first = await acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "old",
+        abortSignal: oldAbort.signal,
+        leaseDir,
+      });
+      oldAbort.abort();
+
+      const acquireReplacement = acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "new",
+        leaseDir,
+        waitMs: 10,
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      const replacement = await acquireReplacement;
+      expect(replacement.replacedStoppingPrevious).toBe(true);
+
+      await first.release();
+      resetTelegramPollingLeasesForTests();
+
+      await expect(
+        acquireTelegramPollingLease({
+          token: "123:abc",
+          accountId: "third",
+          leaseDir,
+        }),
+      ).rejects.toThrow('account "new"');
+
+      await replacement.release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses stale recovery while another file lease operation is active", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    await mkdir(`${lockPath}.operation`);
+    await writeFile(
+      path.join(`${lockPath}.operation`, "owner.json"),
+      JSON.stringify({
+        accountId: "active-operation",
+        ownerId: "active-operation-owner",
+        pid: process.pid,
+        startedAt: Date.now(),
+      }),
+      "utf8",
+    );
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
+
+    await expect(
+      acquireTelegramPollingLease({
+        token: "123:abc",
+        accountId: "default",
+        leaseDir,
+        fileLeaseStaleMs: 0,
+      }),
+    ).rejects.toThrow("file lease operation already active");
+
+    await rm(`${lockPath}.operation`, { force: true, recursive: true });
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("recovers a stale file lease operation whose owner process is gone", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    await mkdir(`${lockPath}.operation`);
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
+    await writeFile(
+      path.join(`${lockPath}.operation`, "owner.json"),
+      JSON.stringify({
+        accountId: "dead-operation",
+        ownerId: "dead-operation-owner",
+        pid: 9_999_999,
+        startedAt: Date.now() - 60_000,
+      }),
+      "utf8",
+    );
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("recovers a stale file lease with malformed owner metadata", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(path.join(lockPath, "owner.json"), "{not-json", "utf8");
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("recovers a stale file lease with start clock metadata whose owner is gone", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(
+      path.join(lockPath, "owner.json"),
+      JSON.stringify({
+        accountId: "old",
+        ownerId: "dead-owner-with-clock",
+        pid: 9_999_999,
+        processStartClockTicks: "1",
+        startedAt: Date.now() - 60_000,
+      }),
+      "utf8",
+    );
+
+    const next = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "default",
+      leaseDir,
+      fileLeaseStaleMs: 0,
+    });
+    await next.release();
+  });
+
+  it("treats EPERM owner liveness checks as active instead of stale", async () => {
+    const leaseDir = await createLeaseDir();
+    const initial = await acquireTelegramPollingLease({
+      token: "123:abc",
+      accountId: "initial",
+      leaseDir,
+    });
+    const lockPath = path.join(leaseDir, `${initial.tokenFingerprint}.lock`);
+    await initial.release();
+    await mkdir(lockPath, { recursive: true });
+    resetTelegramPollingLeasesForTests();
+
+    await writeFile(
+      path.join(lockPath, "owner.json"),
+      JSON.stringify({
+        accountId: "old",
+        ownerId: "eperm-owner",
+        pid: 42_424,
+        startedAt: Date.now() - 60_000,
+      }),
+      "utf8",
+    );
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid === 42_424 && signal === 0) {
+        throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+      }
+      return true;
+    });
+
+    try {
+      await expect(
+        acquireTelegramPollingLease({
+          token: "123:abc",
+          accountId: "default",
+          leaseDir,
+          fileLeaseStaleMs: 0,
+        }),
+      ).rejects.toThrow("pid 42424");
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });
