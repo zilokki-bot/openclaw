@@ -724,6 +724,14 @@ async function* observeModelCallIterator<T>(
       observeResponseChunk(state, startedAt, next.value);
       maybeEmitModelCallStreamProgress(eventBase, state);
       yield next.value;
+      // Awaiting the iterator and yielding downstream only drain the microtask
+      // queue, so a fast stream keeps observation plus all consumer work in one
+      // uninterrupted chain and macrotasks never run. Timers, socket reads and
+      // gateway RPCs are then starved for the whole streamed turn. Hand the loop
+      // back once per chunk so that queue drains between chunks.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
     }
     emitModelCallCompleted(eventBase, startedAt, state);
   } catch (err) {
