@@ -181,10 +181,14 @@ function buildSafeChildCreateTask(cardParams: Record<string, unknown>): string {
 }
 
 async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
-  const key = stableJson({
-    boardId: params.options?.boardId,
-    allowManagedWorktrees: params.options?.allowManagedWorktrees,
-  });
+  // Key on the whole option set rather than a hand-picked subset. Every option
+  // narrows what the dispatch may do (which board, how many starts, whether
+  // managed worktrees are allowed), so two calls may only share a run when all
+  // of them match. A subset key silently applies the first caller's bounds to a
+  // second caller that asked for something different, and the omission is
+  // invisible at the call site. stableJson sorts keys and drops undefined, so
+  // callers passing the same options in a different order still coalesce.
+  const key = stableJson(params.options ?? {});
   const pending = pendingDispatches.get(key);
   if (pending) {
     return pending;

@@ -811,6 +811,72 @@ describe("workboard gateway methods", () => {
     });
   });
 
+  it("keeps concurrent dispatch calls separate when their options differ", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const methods = new Map<string, RegisteredMethod>();
+    const resolvers: ((value: { runId: string }) => void)[] = [];
+    const run = vi.fn(
+      () =>
+        new Promise<{ runId: string }>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const api = {
+      runtime: {
+        state: {
+          openKeyedStore: vi.fn(() => createMemoryStore()),
+        },
+        subagent: { run },
+      },
+      registerGatewayMethod: vi.fn(
+        (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
+          methods.set(method, { handler, opts });
+        },
+      ),
+    } as unknown as OpenClawPluginApi;
+    const store = new WorkboardStore(createMemoryStore());
+    await store.create({
+      title: "Alpha worker",
+      status: "ready",
+      priority: "urgent",
+      boardId: "alpha",
+      workspace: { kind: "dir", path: "/workspace/alpha" },
+    });
+    await store.create({
+      title: "Beta worker",
+      status: "ready",
+      priority: "urgent",
+      boardId: "beta",
+      workspace: { kind: "dir", path: "/workspace/beta" },
+    });
+
+    registerWorkboardGatewayMethods({ api, store });
+
+    const alphaRespond = vi.fn();
+    const betaRespond = vi.fn();
+    const handler = methods.get("workboard.cards.dispatch")?.handler;
+    // Two boards in flight at the same time must not share one dispatch: the
+    // coalescing key has to separate them, otherwise the second caller receives
+    // the first board's result.
+    const alpha = handler?.({ params: { boardId: "alpha" }, respond: alphaRespond } as never);
+    const beta = handler?.({ params: { boardId: "beta" }, respond: betaRespond } as never);
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    resolvers[0]?.({ runId: "run-alpha" });
+    resolvers[1]?.({ runId: "run-beta" });
+    await Promise.all([alpha, beta]);
+
+    expect(alphaRespond.mock.calls[0]?.[1]).toMatchObject({
+      started: [expect.objectContaining({ runId: "run-alpha" })],
+    });
+    expect(betaRespond.mock.calls[0]?.[1]).toMatchObject({
+      started: [expect.objectContaining({ runId: "run-beta" })],
+    });
+  });
+
   it("requires admin scope for managed-worktree dispatch", async () => {
     type RegisteredMethod = {
       handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
