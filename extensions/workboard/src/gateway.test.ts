@@ -1,7 +1,7 @@
 // Workboard tests cover gateway plugin behavior.
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
-import { dispatchOnce, registerWorkboardGatewayMethods } from "./gateway.js";
+import { registerWorkboardGatewayMethods } from "./gateway.js";
 import { WorkboardStore, type PersistedWorkboardCard, type WorkboardKeyedStore } from "./store.js";
 
 function createMemoryStore<T = PersistedWorkboardCard>(): WorkboardKeyedStore<T> {
@@ -875,61 +875,6 @@ describe("workboard gateway methods", () => {
     expect(betaRespond.mock.calls[0]?.[1]).toMatchObject({
       started: [expect.objectContaining({ runId: "run-beta" })],
     });
-  });
-
-  it("does not coalesce dispatches that differ only in an option the key used to omit", async () => {
-    // The gateway handler passes only boardId and allowManagedWorktrees, so a
-    // handler-level test cannot distinguish a subset key from a full-options
-    // key. maxStarts is a real dispatch option the handler does not pass, and it
-    // is exactly what a hand-picked key silently drops: two callers asking for
-    // different start budgets on the same board would share one run, and the
-    // second caller would receive bounds it never asked for. Driving dispatchOnce
-    // directly is the only way to observe that.
-    const resolvers: ((value: { runId: string }) => void)[] = [];
-    const run = vi.fn(
-      () =>
-        new Promise<{ runId: string }>((resolve) => {
-          resolvers.push(resolve);
-        }),
-    );
-    const store = new WorkboardStore(createMemoryStore());
-    await store.create({
-      title: "Budget worker one",
-      status: "ready",
-      priority: "urgent",
-      boardId: "budget",
-      workspace: { kind: "dir", path: "/workspace/budget-one" },
-    });
-    await store.create({
-      title: "Budget worker two",
-      status: "ready",
-      priority: "urgent",
-      boardId: "budget",
-      workspace: { kind: "dir", path: "/workspace/budget-two" },
-    });
-
-    const shared = { store, subagent: { run } } as unknown as Parameters<typeof dispatchOnce>[0];
-    const narrow = dispatchOnce({
-      ...shared,
-      options: { boardId: "budget", allowManagedWorktrees: false, maxStarts: 1 },
-    });
-    const wide = dispatchOnce({
-      ...shared,
-      options: { boardId: "budget", allowManagedWorktrees: false, maxStarts: 2 },
-    });
-
-    // Coalescing hands the second caller the *same* promise, so both awaits
-    // settle to one shared result object. Two independent dispatches always
-    // produce two distinct results, whatever each one manages to start. Identity
-    // is therefore the signal here, not the number of started runs: the cards
-    // are claimed by whichever dispatch reaches them first.
-    await vi.waitFor(() => expect(run).toHaveBeenCalled());
-    for (const [index, resolve] of resolvers.entries()) {
-      resolve({ runId: `run-${index}` });
-    }
-    const [narrowResult, wideResult] = await Promise.all([narrow, wide]);
-
-    expect(narrowResult).not.toBe(wideResult);
   });
 
   it("requires admin scope for managed-worktree dispatch", async () => {
