@@ -451,14 +451,43 @@ describe("JSON console style process output", () => {
     );
   });
 
-  it("keeps unknown command --help on the help-compatible path", async () => {
-    const result = await runCliProcess({
-      args: ["openclaw-json-console-missing-command", "--help"],
-      config: loggingConfig,
-    });
+  it("structures unknown-command validation with --help and a root help hint", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["openclaw-json-console-missing-command", "--help"],
+        config: loggingConfig,
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
 
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("Usage: openclaw [options] [command]");
+    expect(failure?.status).toBe(1);
+    const lines = parseJsonConsoleLines(failure?.stderr ?? "");
+    expect(lines).toEqual([
+      expect.objectContaining({
+        level: "error",
+        message: "[openclaw] Could not start the CLI.",
+      }),
+      expect.objectContaining({
+        level: "error",
+        message: expect.stringContaining(
+          "Unknown command: openclaw openclaw-json-console-missing-command",
+        ),
+      }),
+      expect.objectContaining({
+        level: "error",
+        message: "[openclaw] Debug: set OPENCLAW_DEBUG=1 to include the stack trace.",
+      }),
+      expect.objectContaining({
+        level: "error",
+        message: "[openclaw] Try: openclaw doctor",
+      }),
+      expect.objectContaining({
+        level: "error",
+        message: "[openclaw] Help: openclaw --help",
+      }),
+    ]);
   });
 
   it("structures unknown-command validation with --version", async () => {
