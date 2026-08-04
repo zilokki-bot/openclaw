@@ -2735,12 +2735,14 @@ describe("QmdMemoryManager", () => {
     await manager.close();
   });
 
-  it("repairs missing managed collections and retries search once", async () => {
+  it("schedules missing managed collection repair outside the current search", async () => {
     configureQmd({ includeDefaultMemory: true, searchMode: "search", paths: [] });
 
     const expectedDocId = "abc123";
-    let missingCollectionSeen = false;
+    let repairStarted = false;
+    let repairFinished = false;
     let addCallsAfterMissing = 0;
+    const pendingRepairAdds: MockChild[] = [];
     spawnMock.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === "collection" && args[1] === "list") {
         const child = createMockChild({ autoClose: false });
@@ -2748,16 +2750,18 @@ describe("QmdMemoryManager", () => {
         return child;
       }
       if (args[0] === "collection" && args[1] === "add") {
-        if (missingCollectionSeen) {
+        if (repairStarted) {
           addCallsAfterMissing += 1;
         }
-        return createMockChild();
+        const child = createMockChild({ autoClose: false });
+        pendingRepairAdds.push(child);
+        return child;
       }
       if (args[0] === "search") {
         const collectionFlagIndex = args.indexOf("-c");
         const collection = collectionFlagIndex >= 0 ? args[collectionFlagIndex + 1] : "";
-        if (collection === "memory-root-main" && !missingCollectionSeen) {
-          missingCollectionSeen = true;
+        if (collection === "memory-root-main" && !repairFinished) {
+          repairStarted = true;
           const child = createMockChild({ autoClose: false });
           queueMicrotask(() => {
             child.stdout.emit("data", "[]");
@@ -2805,22 +2809,29 @@ describe("QmdMemoryManager", () => {
         sessionKey: "agent:main:slack:dm:u123",
         signal: callerController.signal,
       }),
-    ).resolves.toEqual([
-      {
-        path: "MEMORY.md",
-        startLine: 1,
-        endLine: 1,
-        score: 1,
-        snippet: "@@ -1,1\nremember this",
-        source: "memory",
-      },
-    ]);
-    expect(addCallsAfterMissing).toBeGreaterThan(0);
-    expectMockMessageContains(logWarnMock, "repairing collections and retrying once");
+    ).rejects.toThrow("Collection not found: memory-root-main");
+    expectMockMessageContains(
+      logWarnMock,
+      "scheduling collection repair in the background and failing this search",
+    );
+    await vi.waitFor(() => expect(addCallsAfterMissing).toBeGreaterThan(0));
+    expect(addCallsAfterMissing).toBe(1);
+    await expect(
+      manager.search("remember", {
+        sessionKey: "agent:main:slack:dm:u123",
+        signal: callerController.signal,
+      }),
+    ).rejects.toThrow("Collection not found: memory-root-main");
+    expectMockMessageContains(logWarnMock, "qmd missing collection repair already scheduled");
+    expect(addCallsAfterMissing).toBe(1);
+    repairFinished = true;
+    pendingRepairAdds.splice(0).forEach((child) => {
+      child.closeWith(0);
+    });
     const repairLeases = writeLeaseCalls();
     expect(repairLeases.some(([options]) => options.signal?.aborted)).toBe(false);
     callerController.abort();
-    expect(repairLeases.some(([options]) => options.signal?.aborted)).toBe(true);
+    expect(repairLeases.some(([options]) => options.signal?.aborted)).toBe(false);
 
     await manager.close();
   });

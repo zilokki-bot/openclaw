@@ -32,6 +32,8 @@ import {
 const SNIPPET_HEADER_RE = /@@\s*-([0-9]+),([0-9]+)/;
 
 export abstract class QmdManagerSearchSupport extends QmdManagerLifecycle {
+  private missingCollectionRepairPromise: Promise<void> | null = null;
+
   protected recordSearchPlanDebug(params: {
     debugContext: QmdSearchRuntimeDebugContext;
     command: "query" | "search" | "vsearch";
@@ -79,16 +81,38 @@ export abstract class QmdManagerSearchSupport extends QmdManagerLifecycle {
   protected async tryRepairMissingCollectionSearch(
     err: unknown,
     debugContext: QmdSearchRuntimeDebugContext,
-    parentSignal?: AbortSignal,
+    _parentSignal?: AbortSignal,
   ): Promise<boolean> {
     if (!isMissingCollectionSearchError(err)) {
       return false;
     }
     qmdManagerLog.warn(
-      "qmd search failed because a managed collection is missing; repairing collections and retrying once",
+      "qmd search failed because a managed collection is missing; scheduling collection repair in the background and failing this search",
     );
-    await this.ensureCollections({ force: true, debugContext, parentSignal });
-    return true;
+    if (this.missingCollectionRepairPromise) {
+      qmdManagerLog.warn(
+        "qmd missing collection repair already scheduled; failing this search while it runs",
+      );
+      return false;
+    }
+    // Deliberately not the caller's search signal: the repair has to outlive the
+    // search that noticed the problem. It is still bound to the manager, so
+    // close() cancels it instead of leaving a detached qmd child behind.
+    const repairPromise = this.ensureCollections({
+      force: true,
+      debugContext,
+      parentSignal: this.closeAbortController.signal,
+    })
+      .catch((repairErr: unknown) => {
+        qmdManagerLog.warn(`qmd missing collection repair failed: ${String(repairErr)}`);
+      })
+      .finally(() => {
+        if (this.missingCollectionRepairPromise === repairPromise) {
+          this.missingCollectionRepairPromise = null;
+        }
+      });
+    this.missingCollectionRepairPromise = repairPromise;
+    return false;
   }
 
   protected async runQmdSearch(

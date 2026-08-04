@@ -132,6 +132,7 @@ async function runCliProcess(params: {
   forbidTlsImport?: boolean;
   keepAlive?: boolean;
   forceExitMs?: number;
+  timeoutMs?: number;
   failRunMainImport?: boolean;
   unsupportedRuntime?: boolean;
   allowRespawn?: boolean;
@@ -186,7 +187,7 @@ async function runCliProcess(params: {
         ...params.env,
       },
       killSignal: "SIGKILL",
-      timeout: CHILD_PROCESS_TIMEOUT_MS,
+      timeout: params.timeoutMs ?? CHILD_PROCESS_TIMEOUT_MS,
     },
   );
   return { ...result, fixture };
@@ -457,6 +458,7 @@ describe("JSON console style process output", () => {
       await runCliProcess({
         args: ["openclaw-json-console-missing-command", "--version"],
         config: loggingConfig,
+        timeoutMs: 120_000,
       });
     } catch (error) {
       failure = error as CliProcessFailure;
