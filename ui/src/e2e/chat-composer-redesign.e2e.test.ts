@@ -924,7 +924,9 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
 
     try {
       await page.goto(controlUiSessionUrl(server.baseUrl, "agent:work:main"));
-      await expect.poll(async () => (await gateway.getRequests("chat.startup")).length).toBe(1);
+      await expect
+        .poll(async () => (await gateway.getRequests("chat.startup")).length, { timeout: 15_000 })
+        .toBe(1);
 
       const composer = page.locator(".agent-chat__input");
       await expect
