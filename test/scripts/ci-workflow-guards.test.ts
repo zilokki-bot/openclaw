@@ -1493,9 +1493,13 @@ describe("ci workflow guards", () => {
     const action = readFileSync(".github/actions/ensure-base-commit/action.yml", "utf8");
 
     expect(action).toContain("fetch_base_ref()");
-    expect(action).toContain("timeout --signal=TERM --kill-after=10s 30s git");
+    expect(action).toContain('timeout --signal=TERM --kill-after=10s "${FETCH_TIMEOUT:-120s}" git');
     expect(action).toContain("-c protocol.version=2");
     expect(action).not.toContain("if ! git fetch --no-tags");
+    // Базовый коммит берётся по SHA одной ревизией. Догрузка ветки на этом
+    // репозитории не укладывалась в отведённое время и не находила даже
+    // голову main, поэтому прежний путь оставался только запасным.
+    expect(action).toContain('--depth=1 origin -- "$BASE_SHA"');
   });
 
   it("bounds early unauthenticated checkout fetches", () => {
