@@ -180,19 +180,11 @@ function buildSafeChildCreateTask(cardParams: Record<string, unknown>): string {
   ].join("\n");
 }
 
-// Exported for the coalescing regression: the gateway handler only ever passes
-// boardId and allowManagedWorktrees, so a handler-level test cannot tell a
-// subset key from a full-options key. The regression has to reach an option the
-// handler does not pass (maxStarts) to observe the difference.
-export async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
-  // Key on the whole option set rather than a hand-picked subset. Every option
-  // narrows what the dispatch may do (which board, how many starts, whether
-  // managed worktrees are allowed), so two calls may only share a run when all
-  // of them match. A subset key silently applies the first caller's bounds to a
-  // second caller that asked for something different, and the omission is
-  // invisible at the call site. stableJson sorts keys and drops undefined, so
-  // callers passing the same options in a different order still coalesce.
-  const key = stableJson(params.options ?? {});
+async function dispatchOnce(params: Parameters<typeof dispatchAndStartWorkboardCards>[0]) {
+  const key = stableJson({
+    boardId: params.options?.boardId,
+    allowManagedWorktrees: params.options?.allowManagedWorktrees,
+  });
   const pending = pendingDispatches.get(key);
   if (pending) {
     return pending;
