@@ -45,7 +45,7 @@ describe("minimal npm extended-stable workflow", () => {
     const gitFetchLines = source.split("\n").filter((line) => line.includes("git fetch"));
     expect(gitFetchLines).toHaveLength(6);
     expect(
-      gitFetchLines.every((line) => line.includes("timeout --signal=TERM --kill-after=10s 120s")),
+      gitFetchLines.every((line) => line.includes("timeout --signal=TERM --kill-after=10s 300s")),
     ).toBe(true);
   });
 

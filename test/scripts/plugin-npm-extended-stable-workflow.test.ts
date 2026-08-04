@@ -330,7 +330,7 @@ describe("plugin npm extended-stable workflow", () => {
 
     expect(gitFetchLines).toHaveLength(6);
     expect(
-      gitFetchLines.every((line) => line.includes("timeout --signal=TERM --kill-after=10s 120s")),
+      gitFetchLines.every((line) => line.includes("timeout --signal=TERM --kill-after=10s 300s")),
     ).toBe(true);
     expect(npmPublishLines).toEqual([
       '            timeout --signal=TERM --kill-after=10s 300s npm publish "$TARBALL_PATH" \\',

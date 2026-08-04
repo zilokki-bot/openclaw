@@ -339,7 +339,7 @@ function runOpenClawNpmTrustedRefGuard(overrides: Record<string, string>) {
   chmodSync(gitPath, 0o755);
   writeFileSync(
     timeoutPath,
-    `#!/bin/sh\n[ "$1" = "--signal=TERM" ] && [ "$2" = "--kill-after=10s" ] && [ "$3" = "120s" ] || exit 2\nshift 3\nexec "$@"\n`,
+    `#!/bin/sh\n[ "$1" = "--signal=TERM" ] && [ "$2" = "--kill-after=10s" ] && [ "$3" = "300s" ] || exit 2\nshift 3\nexec "$@"\n`,
   );
   chmodSync(timeoutPath, 0o755);
   return spawnSync("bash", ["-c", script], {
@@ -2933,7 +2933,7 @@ describe("package artifact reuse", () => {
     for (const [workflowPath, jobName] of cases) {
       const installStep = workflowStep(workflowJob(workflowPath, jobName), "Install Crabbox CLI");
       expect(installStep.run, workflowPath).toMatch(
-        /timeout --signal=TERM --kill-after=10s 120s git (?:clone|-C .* fetch)/u,
+        /timeout --signal=TERM --kill-after=10s 300s git (?:clone|-C .* fetch)/u,
       );
     }
   });
