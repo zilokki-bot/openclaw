@@ -1031,12 +1031,14 @@ describe("TUI PTY real backends", () => {
         const adoptedSessionPrefix = `session agent:${fixture.agentId}:tui-`;
         await createFreshSession(fixture.run, newSessionPrefix, adoptedSessionPrefix);
         const newSessionKeyMatches = Array.from(
-          fixture.run.output().matchAll(
-            new RegExp(
-              `(?:new session: |session )(agent:${fixture.agentId}:tui-[a-z0-9-]+)`,
-              "g",
+          fixture.run
+            .output()
+            .matchAll(
+              new RegExp(
+                `(?:new session: |session )(agent:${fixture.agentId}:tui-[a-z0-9-]+)`,
+                "g",
+              ),
             ),
-          ),
         );
         const newSessionKey = newSessionKeyMatches.at(-1)?.[1];
         expect(newSessionKey).toBeDefined();
