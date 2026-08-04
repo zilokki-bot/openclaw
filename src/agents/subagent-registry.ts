@@ -47,6 +47,7 @@ import {
   getDeliveryLastAttemptAt,
   getDeliveryLastError,
   isDeliverySuspended,
+  resumeSuspendedDelivery,
 } from "./subagent-delivery-state.js";
 import {
   SUBAGENT_ENDED_OUTCOME_KILLED,
@@ -1813,6 +1814,30 @@ export function addSubagentRunForTests(entry: SubagentRunRecord) {
 
 export function releaseSubagentRun(runId: string) {
   subagentRunManager.releaseSubagentRun(runId);
+}
+
+/**
+ * Hands a suspended final delivery back to the announce path.
+ *
+ * Suspension is terminal for every automatic path, so a completed result whose
+ * delivery ran out of attempts stays stored but unreachable until it expires.
+ * This is the operator entry point for that state: it re-arms one run by id and
+ * persists, leaving the frozen payload alone. Returns false when the run is
+ * unknown or was not suspended, so a caller can say "nothing to resume" rather
+ * than report a no-op as success.
+ */
+export function resumeSuspendedSubagentDelivery(runId: string): boolean {
+  const entry = subagentRuns.get(runId);
+  if (!entry || !resumeSuspendedDelivery(entry)) {
+    return false;
+  }
+  persistSubagentRuns();
+  return true;
+}
+
+/** Lists runs whose final delivery is suspended with a stored payload. */
+export function listSuspendedSubagentDeliveries(): SubagentRunRecord[] {
+  return [...subagentRuns.values()].filter((entry) => isDeliverySuspended(entry));
 }
 
 function hasCompleteSubagentTerminalState(entry: SubagentRunRecord | undefined): boolean {

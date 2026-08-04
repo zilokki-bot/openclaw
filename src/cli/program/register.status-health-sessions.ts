@@ -704,6 +704,25 @@ export function registerStatusHealthSessionsCommands(program: Command) {
       });
     });
 
+  tasksCmd
+    .command("redeliver")
+    .description("Resume a suspended final delivery so its stored result reaches the requester")
+    .argument("<lookup>", "Task id, run id, or session key")
+    .option("--json", "Output as JSON", false)
+    .action(async (lookup, opts, command) => {
+      const parentOpts = command.parent?.opts() as { json?: boolean } | undefined;
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        const { tasksRedeliverCommand } = await loadTasksCommands();
+        await tasksRedeliverCommand(
+          {
+            json: Boolean(opts.json || parentOpts?.json),
+            lookup,
+          },
+          defaultRuntime,
+        );
+      });
+    });
+
   const tasksFlowCmd = tasksCmd
     .command("flow")
     .description("Inspect durable TaskFlow state under tasks");
