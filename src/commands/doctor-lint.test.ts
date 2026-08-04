@@ -7,11 +7,16 @@ import { runDoctorLintCli } from "./doctor-lint.js";
 
 const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(),
+  registerBundledHealthChecks: vi.fn(),
 }));
 
 vi.mock("../config/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../config/config.js")>()),
   readConfigFileSnapshot: mocks.readConfigFileSnapshot,
+}));
+
+vi.mock("../flows/bundled-health-checks.js", () => ({
+  registerBundledHealthChecks: mocks.registerBundledHealthChecks,
 }));
 
 const runtime = {
@@ -225,7 +230,7 @@ describe("runDoctorLintCli", () => {
     }
   });
 
-  it("runs core contribution checks plus registered extension checks", async () => {
+  it("runs core contribution checks plus registered extension checks when requested", async () => {
     mocks.readConfigFileSnapshot.mockResolvedValue({
       exists: true,
       valid: true,
@@ -260,6 +265,73 @@ describe("runDoctorLintCli", () => {
       expect(payload.ok).toBe(true);
       expect(payload.checksRun).toBe(2);
       expect(payload.findings).toEqual([]);
+      expect(mocks.registerBundledHealthChecks).toHaveBeenCalledTimes(1);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("does not register bundled extension checks for default lint", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runDoctorLintCli(runtime, {
+        json: true,
+        onlyIds: ["core/doctor/final-config-validation"],
+      });
+
+      expect(mocks.registerBundledHealthChecks).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("registers bundled extension checks when all checks are requested", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runDoctorLintCli(runtime, {
+        json: true,
+        includeAllChecks: true,
+        onlyIds: ["core/doctor/final-config-validation"],
+      });
+
+      expect(mocks.registerBundledHealthChecks).toHaveBeenCalledTimes(1);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("still runs runtime-heavy projection checks when explicitly selected", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const exitCode = await runDoctorLintCli(runtime, {
+        json: true,
+        onlyIds: ["core/doctor/runtime-tool-schemas"],
+      });
+
+      expect(exitCode).toBe(0);
+      const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
+      expect(payload.checksRun).toBe(1);
     } finally {
       stdout.mockRestore();
     }
@@ -328,7 +400,7 @@ describe("runDoctorLintCli", () => {
       },
     });
 
-    await expect(runDoctorLintCli(runtime, { json: true })).rejects.toThrow(
+    await expect(runDoctorLintCli(runtime, { json: true, includeAllChecks: true })).rejects.toThrow(
       "health check already registered: core/doctor/final-config-validation",
     );
   });
@@ -349,7 +421,7 @@ describe("runDoctorLintCli", () => {
       },
     });
 
-    await expect(runDoctorLintCli(runtime, { json: true })).rejects.toThrow(
+    await expect(runDoctorLintCli(runtime, { json: true, includeAllChecks: true })).rejects.toThrow(
       "health check already registered: core/doctor/final-config-validation",
     );
   });
@@ -370,7 +442,7 @@ describe("runDoctorLintCli", () => {
       },
     });
 
-    await expect(runDoctorLintCli(runtime, { json: true })).rejects.toThrow(
+    await expect(runDoctorLintCli(runtime, { json: true, includeAllChecks: true })).rejects.toThrow(
       "health check already registered: core/doctor/not-yet-owned",
     );
   });
@@ -391,7 +463,7 @@ describe("runDoctorLintCli", () => {
       },
     });
 
-    await expect(runDoctorLintCli(runtime, { json: true })).rejects.toThrow(
+    await expect(runDoctorLintCli(runtime, { json: true, includeAllChecks: true })).rejects.toThrow(
       "health check already registered: core/doctor/not-yet-owned",
     );
   });
