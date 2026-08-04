@@ -45,6 +45,7 @@ class WorkboardPage extends OpenClawLightDomElement {
   private observedAgentScopeId: string | null | undefined;
   private canonicalizedLocation = "";
   private redirectedMissingBoardId = "";
+  private initializedAllAgentScope = false;
   private readonly subscriptions = new SubscriptionsController(this)
     .watch(
       () => this.context?.agents,
@@ -128,6 +129,7 @@ class WorkboardPage extends OpenClawLightDomElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    this.ensureInitialAllAgentScope();
     this.ensureInitialData();
     this.syncWorkboardBoardFilter();
     this.syncCanonicalLocation();
@@ -137,6 +139,7 @@ class WorkboardPage extends OpenClawLightDomElement {
   }
 
   override updated(changed: PropertyValues<this>) {
+    this.ensureInitialAllAgentScope();
     if (changed.has("routeData")) {
       this.syncWorkboardBoardFilter();
       this.syncCanonicalLocation();
@@ -174,6 +177,17 @@ class WorkboardPage extends OpenClawLightDomElement {
   private pluginEnabled(): boolean | null {
     const snapshot = this.context?.runtimeConfig.state.configSnapshot;
     return snapshot ? isWorkboardEnabledInConfigSnapshot(snapshot) : null;
+  }
+
+  private ensureInitialAllAgentScope() {
+    const context = this.context;
+    if (!context || this.initializedAllAgentScope) {
+      return;
+    }
+    this.initializedAllAgentScope = true;
+    if (context.agentSelection.state.scopeId !== null) {
+      context.agentSelection.setScope(null);
+    }
   }
 
   private syncWorkboardRuntime() {

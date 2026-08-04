@@ -35,6 +35,7 @@ function contextWithWorkboard(workboard: WorkboardCapability): ApplicationContex
     lastErrorCode: null,
   };
   const subscribe = () => () => undefined;
+  const agentSelectionState = { selectedId: "main", scopeId: "main" as string | null };
   return {
     basePath: "",
     gateway: {
@@ -63,9 +64,11 @@ function contextWithWorkboard(workboard: WorkboardCapability): ApplicationContex
       refresh: vi.fn(async () => undefined),
     } as unknown as ApplicationContext["sessions"],
     agentSelection: {
-      state: { selectedId: "main", scopeId: "main" },
+      state: agentSelectionState,
       set: () => undefined,
-      setScope: () => undefined,
+      setScope: (agentId: string | null) => {
+        agentSelectionState.scopeId = agentId;
+      },
       subscribe,
     },
     workboard,
@@ -92,6 +95,18 @@ afterEach(() => {
 });
 
 describe("WorkboardPage lifecycle", () => {
+  it("defaults the Workboard page to the all-agent scope", async () => {
+    const workboard = createWorkboardCapability();
+    const context = contextWithWorkboard(workboard);
+    const page = document.createElement("openclaw-workboard-page") as WorkboardPageTestElement;
+    page.context = context;
+
+    document.body.append(page);
+    await page.updateComplete;
+
+    expect(context.agentSelection.state.scopeId).toBeNull();
+  });
+
   it("routes Workboard invalidation events to the active capability", async () => {
     const workboard = createWorkboardCapability();
     const context = contextWithWorkboard(workboard);
