@@ -2846,8 +2846,13 @@ describe("ci workflow guards", () => {
 
     expect(source).toContain("createNodeTestShardBundles");
     expect(workflow.jobs["build-artifacts"]["runs-on"]).toContain("blacksmith-32vcpu-ubuntu-2404");
+    // Исполнитель стал условным: на заявках дешёвый ubuntu-24.04, вне их —
+    // крупный blacksmith. Соседний сторож для jobs.check уже приведён к этой
+    // форме, а этот остался на строгом равенстве со старой строкой. Проверяем
+    // выражение целиком, а не подстроку: иначе сторож перестанет замечать, если
+    // крупный исполнитель когда-нибудь пропадёт из ветки условия.
     expect(buildArtifactsTestbox.jobs["build-artifacts"]["runs-on"]).toBe(
-      "blacksmith-16vcpu-ubuntu-2404",
+      "${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || 'blacksmith-16vcpu-ubuntu-2404' }}",
     );
     expect(
       buildArtifactsTestbox.jobs["build-artifacts"].steps.find(
