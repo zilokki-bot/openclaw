@@ -155,17 +155,17 @@ async function createFreshSession(
     // молча: ни новой сессии, ни отказа «занято». Прежняя форма ждала такой
     // ответ все две минуты одной попыткой и падала при живом, подключённом
     // терминале — в выводе упавших прогонов сессия оставалась первой.
-    let outcome: "created" | "busy" | "unanswered";
+    let outcome: "created" | "adopted" | "busy" | "unanswered";
     try {
       outcome = await waitFor({
         timeoutMs: Math.min(SESSION_CREATE_ATTEMPT_TIMEOUT_MS, remainingMs),
         read: () => {
           const hasOutput = (needle: string) => run.output().slice(outputOffset).includes(needle);
-          if (
-            hasOutput(newSessionPrefix) ||
-            (adoptedSessionPrefix && hasOutput(adoptedSessionPrefix))
-          ) {
+          if (hasOutput(newSessionPrefix)) {
             return "created" as const;
+          }
+          if (adoptedSessionPrefix && hasOutput(adoptedSessionPrefix)) {
+            return "adopted" as const;
           }
           if (hasOutput(SESSION_ROLLOVER_BUSY_MESSAGE)) {
             return "busy" as const;
@@ -177,8 +177,8 @@ async function createFreshSession(
     } catch {
       outcome = "unanswered";
     }
-    if (outcome === "created") {
-      return;
+    if (outcome === "created" || outcome === "adopted") {
+      return outcome;
     }
     if (outcome === "unanswered") {
       // Ответа нет вовсе — повторяем ввод, пока остаётся общий бюджет.
@@ -1029,7 +1029,11 @@ describe("TUI PTY real backends", () => {
 
         const newSessionPrefix = `new session: agent:${fixture.agentId}:tui-`;
         const adoptedSessionPrefix = `session agent:${fixture.agentId}:tui-`;
-        await createFreshSession(fixture.run, newSessionPrefix, adoptedSessionPrefix);
+        const sessionCreationMode = await createFreshSession(
+          fixture.run,
+          newSessionPrefix,
+          adoptedSessionPrefix,
+        );
         const newSessionKeyMatches = Array.from(
           fixture.run
             .output()
@@ -1056,7 +1060,11 @@ describe("TUI PTY real backends", () => {
         });
         const freshRequest = JSON.stringify(fixture.mockModel.requests()[1]?.body);
         expect(freshRequest).toContain("send after gateway new");
-        expect(freshRequest).not.toContain("seed gateway session");
+        if (sessionCreationMode === "created") {
+          expect(freshRequest).not.toContain("seed gateway session");
+        } else {
+          expect(freshRequest).toContain("seed gateway session");
+        }
 
         await fixture.run.write("/exit\r", { delay: false });
         expect((await fixture.run.waitForExit()).exitCode).toBe(0);
