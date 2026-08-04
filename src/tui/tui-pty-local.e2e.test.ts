@@ -98,9 +98,13 @@ type GatewayScenarioId = keyof typeof GATEWAY_SCENARIOS;
 // Запас на создание сессии рассчитан на загруженный конвейер, а не на пустую
 // машину. На `main` этот набор падал примерно в половине прогонов с
 // «timed out creating a fresh session»: `/new` поднимает настоящий шлюз, и под
-// параллельными работами шестидесяти секунд не хватало. Повтор при этом не
-// спасал — он положен только при явном «занято», а просто медленное создание
-// получало ровно одну попытку.
+// параллельными работами шестидесяти секунд не хватало.
+//
+// Одного запаса оказалось мало: прогоны падали и на 120 с, причём в выводе
+// терминал был жив и подключён, а сессия оставалась первой — то есть `/new`
+// пропадала молча, без ответа «занято». Поэтому повтор больше не привязан к
+// явному отказу: попытка получает свой отдельный бюджет, а безответная
+// попытка повторяет ввод, пока не исчерпан общий.
 //
 // Бюджет теста поднят вместе со стартовым, иначе одно падение по времени
 // сменилось бы другим: создание съедало бы почти весь прежний лимит в 150 с.
@@ -109,6 +113,7 @@ const LOCAL_OUTPUT_TIMEOUT_MS = 120_000;
 const LOCAL_EXIT_TIMEOUT_MS = 4_000;
 const LOCAL_TEST_TIMEOUT_MS = 300_000;
 const SUBMISSION_SETTLE_MS = 150;
+const SESSION_CREATE_ATTEMPT_TIMEOUT_MS = 30_000;
 const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 5_000;
 const SESSION_ROLLOVER_BUSY_MESSAGE = "abort the current run before /new";
 
@@ -131,28 +136,47 @@ async function waitForOutputAfter(run: PtyRun, needle: string, offset: number) {
 }
 
 async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
-  const retryDeadline = Date.now() + SESSION_ROLLOVER_RETRY_TIMEOUT_MS;
+  const busyRetryDeadline = Date.now() + SESSION_ROLLOVER_RETRY_TIMEOUT_MS;
+  const overallDeadline = Date.now() + LOCAL_STARTUP_TIMEOUT_MS;
   while (true) {
     const outputOffset = run.output().length;
     await run.write("/new\r", { delay: false });
-    const outcome = await waitFor({
-      timeoutMs: LOCAL_STARTUP_TIMEOUT_MS,
-      read: () => {
-        const hasOutput = (needle: string) => run.output().slice(outputOffset).includes(needle);
-        if (hasOutput(newSessionPrefix)) {
-          return "created" as const;
-        }
-        if (hasOutput(SESSION_ROLLOVER_BUSY_MESSAGE)) {
-          return "busy" as const;
-        }
-        return null;
-      },
-      onTimeout: () => new Error(`timed out creating a fresh session\n${run.output()}`),
-    });
+    const remainingMs = overallDeadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`timed out creating a fresh session\n${run.output()}`);
+    }
+    // Отдельный бюджет на попытку, а не на всё ожидание целиком. Под нагрузкой
+    // `/new` уходит в уже поднимающийся, но ещё не готовый экран и пропадает
+    // молча: ни новой сессии, ни отказа «занято». Прежняя форма ждала такой
+    // ответ все две минуты одной попыткой и падала при живом, подключённом
+    // терминале — в выводе упавших прогонов сессия оставалась первой.
+    let outcome: "created" | "busy" | "unanswered";
+    try {
+      outcome = await waitFor({
+        timeoutMs: Math.min(SESSION_CREATE_ATTEMPT_TIMEOUT_MS, remainingMs),
+        read: () => {
+          const hasOutput = (needle: string) => run.output().slice(outputOffset).includes(needle);
+          if (hasOutput(newSessionPrefix)) {
+            return "created" as const;
+          }
+          if (hasOutput(SESSION_ROLLOVER_BUSY_MESSAGE)) {
+            return "busy" as const;
+          }
+          return null;
+        },
+        onTimeout: () => new Error("session creation attempt elapsed"),
+      });
+    } catch {
+      outcome = "unanswered";
+    }
     if (outcome === "created") {
       return;
     }
-    if (Date.now() >= retryDeadline) {
+    if (outcome === "unanswered") {
+      // Ответа нет вовсе — повторяем ввод, пока остаётся общий бюджет.
+      continue;
+    }
+    if (Date.now() >= busyRetryDeadline) {
       throw new Error(`session rollover stayed busy\n${run.output()}`);
     }
     // The response text can render before terminal lifecycle cleanup. Retry only
