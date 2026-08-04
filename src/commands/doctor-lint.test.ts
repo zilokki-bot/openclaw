@@ -8,6 +8,7 @@ import { runDoctorLintCli } from "./doctor-lint.js";
 const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(),
   registerBundledHealthChecks: vi.fn(),
+  collectRuntimeToolSchemaFindings: vi.fn(async () => []),
 }));
 
 vi.mock("../config/config.js", async (importOriginal) => ({
@@ -17,6 +18,11 @@ vi.mock("../config/config.js", async (importOriginal) => ({
 
 vi.mock("../flows/bundled-health-checks.js", () => ({
   registerBundledHealthChecks: mocks.registerBundledHealthChecks,
+}));
+
+vi.mock("../flows/doctor-core-checks.runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../flows/doctor-core-checks.runtime.js")>()),
+  collectRuntimeToolSchemaFindings: mocks.collectRuntimeToolSchemaFindings,
 }));
 
 const runtime = {
@@ -332,6 +338,7 @@ describe("runDoctorLintCli", () => {
       expect(exitCode).toBe(0);
       const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
       expect(payload.checksRun).toBe(1);
+      expect(mocks.collectRuntimeToolSchemaFindings).toHaveBeenCalledTimes(1);
     } finally {
       stdout.mockRestore();
     }
