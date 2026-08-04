@@ -128,7 +128,13 @@ async function waitForOutputAfter(run: PtyRun, needle: string, offset: number) {
 }
 
 async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
-  const retryDeadline = Date.now() + SESSION_ROLLOVER_RETRY_TIMEOUT_MS;
+  // The retry budget has to cover the retries, not the first attempt. `waitFor`
+  // below blocks for up to LOCAL_STARTUP_TIMEOUT_MS, so a deadline armed before
+  // it is already spent by the time a "busy" answer arrives under load — the
+  // loop then throws "session rollover stayed busy" without ever retrying once.
+  // Observed in CI: busy came back after 37s against a 5s budget, zero retries.
+  // Arm it on the first busy instead, so the budget means what its name says.
+  let retryDeadline: number | undefined;
   while (true) {
     const outputOffset = run.output().length;
     await run.write("/new\r", { delay: false });
@@ -149,6 +155,7 @@ async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
     if (outcome === "created") {
       return;
     }
+    retryDeadline ??= Date.now() + SESSION_ROLLOVER_RETRY_TIMEOUT_MS;
     if (Date.now() >= retryDeadline) {
       throw new Error(`session rollover stayed busy\n${run.output()}`);
     }
