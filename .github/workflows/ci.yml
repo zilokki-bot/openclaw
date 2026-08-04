@@ -161,7 +161,7 @@ jobs:
             local ref="$1"
             local fetch_status
             for attempt in 1 2 3; do
-              timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE" \
+              timeout --signal=TERM --kill-after=10s 300s git -C "$GITHUB_WORKSPACE" \
                 -c protocol.version=2 \
                 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
                 "+${ref}:refs/remotes/origin/checkout" && return 0
@@ -184,7 +184,7 @@ jobs:
           fetch_parent_metadata() {
             local sha="$1"
             for attempt in 1 2 3; do
-              timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE" \
+              timeout --signal=TERM --kill-after=10s 300s git -C "$GITHUB_WORKSPACE" \
                 -c protocol.version=2 \
                 fetch --no-tags --prune --no-recurse-submodules --depth=2 \
                 --filter=blob:none origin "$sha" && return 0
@@ -266,7 +266,7 @@ jobs:
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$RELEASE_GATE" = "true" ]; then
             merge_ref="refs/remotes/origin/release-gate-merge"
-            timeout --signal=TERM --kill-after=10s 120s git fetch \
+            timeout --signal=TERM --kill-after=10s 300s git fetch \
               --no-tags --no-recurse-submodules --depth=2 origin \
               "+refs/pull/${PULL_REQUEST_NUMBER}/merge:${merge_ref}"
             release_gate_head="$(git rev-parse "${merge_ref}^2")"
@@ -820,7 +820,7 @@ jobs:
             local ref="$1"
             local fetch_status
             for attempt in 1 2 3; do
-              timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE" \
+              timeout --signal=TERM --kill-after=10s 300s git -C "$GITHUB_WORKSPACE" \
                 -c protocol.version=2 \
                 fetch --no-tags --prune --no-recurse-submodules --depth=2 origin \
                 "+${ref}:refs/remotes/origin/checkout" && return 0
@@ -895,7 +895,7 @@ jobs:
           # Include the synthetic merge, every pull request commit, and one
           # ancestor so TruffleHog can clone and resolve the bounded range.
           fetch_depth=$((PR_COMMIT_COUNT + 2))
-          timeout --signal=TERM --kill-after=10s 120s git \
+          timeout --signal=TERM --kill-after=10s 300s git \
             -c protocol.version=2 \
             fetch --no-tags --no-recurse-submodules --depth="$fetch_depth" origin "$PR_MERGE_SHA"
 
@@ -1019,7 +1019,7 @@ jobs:
             git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
             git -C "$workdir" config gc.auto 0
 
-            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+            timeout --signal=TERM --kill-after=10s 300s git -C "$workdir" \
               -c protocol.version=2 \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
@@ -1495,7 +1495,7 @@ jobs:
           # Base freshness belongs to the landing gate; chasing moving main here can never converge.
           prepared=false
           for attempt in {1..6}; do
-            if timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=2 origin \
+            if timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=2 origin \
               "+refs/pull/${PULL_REQUEST_NUMBER}/merge:refs/remotes/origin/ci-max-lines-merge"; then
               merge_sha="$(git rev-parse refs/remotes/origin/ci-max-lines-merge)"
               read -r frozen_base_sha merge_head extra_parent <<<"$(git show -s --format=%P "$merge_sha")"
@@ -1633,21 +1633,21 @@ jobs:
                   exit 1
                 fi
                 merge_base="${merge_parents[0]}"
-                timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin \
+                timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin \
                   "+${merge_base}:refs/remotes/origin/ci-max-lines-base"
                 base_ref="refs/remotes/origin/ci-max-lines-base"
               elif [[ -n "$base_sha" ]]; then
-                timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin \
+                timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin \
                   "+${base_sha}:refs/remotes/origin/ci-max-lines-base"
                 base_ref="refs/remotes/origin/ci-max-lines-base"
               elif [[ -n "${RATCHET_MANUAL_TARGET_SHA:-}" ]]; then
                 merge_base_sha="$(resolve_manual_merge_base)"
-                timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin \
+                timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin \
                   "+${merge_base_sha}:refs/remotes/origin/ci-max-lines-base"
                 base_ref="refs/remotes/origin/ci-max-lines-base"
               else
                 default_branch="${RATCHET_DEFAULT_BRANCH:-main}"
-                timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin \
+                timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin \
                   "+refs/heads/${default_branch}:refs/remotes/origin/ci-max-lines-base"
                 base_ref="refs/remotes/origin/ci-max-lines-base"
               fi
@@ -2077,7 +2077,7 @@ jobs:
             fi
             harness_root="${RUNNER_TEMP}/openclaw-ci-shard-runner"
             workflow_remote="https://github.com/${job_workflow_repository}.git"
-            timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 "$workflow_remote" "$job_workflow_sha"
+            timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 "$workflow_remote" "$job_workflow_sha"
             for file in \
               scripts/ci-run-node-test-shard.mjs \
               scripts/lib/direct-run.mjs \
@@ -2220,7 +2220,7 @@ jobs:
               pnpm check:host-env-policy:swift
               pnpm dup:check:coverage
               if [ -n "$PR_BASE_SHA" ]; then
-                timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin "+${PR_BASE_SHA}:refs/remotes/origin/ci-base"
+                timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin "+${PR_BASE_SHA}:refs/remotes/origin/ci-base"
                 node scripts/report-test-temp-creations.mjs --base refs/remotes/origin/ci-base --head HEAD --no-merge-base
               fi
               pnpm deps:patches:check
@@ -2684,7 +2684,7 @@ jobs:
             git -C "$workdir" config gc.auto 0
             git -C "$workdir" remote add origin "https://github.com/openclaw/clawhub.git"
 
-            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+            timeout --signal=TERM --kill-after=10s 300s git -C "$workdir" \
               -c protocol.version=2 \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+refs/heads/main:refs/remotes/origin/checkout" || return 1
@@ -2731,7 +2731,7 @@ jobs:
           fetch_checkout_ref() {
             local fetch_status
             for attempt in 1 2 3; do
-              timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE" \
+              timeout --signal=TERM --kill-after=10s 300s git -C "$GITHUB_WORKSPACE" \
                 -c protocol.version=2 \
                 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
                 "+${CHECKOUT_SHA}:refs/remotes/origin/checkout" && return 0
@@ -3359,7 +3359,7 @@ jobs:
             git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
             git -C "$workdir" config gc.auto 0
 
-            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+            timeout --signal=TERM --kill-after=10s 300s git -C "$workdir" \
               -c protocol.version=2 \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1

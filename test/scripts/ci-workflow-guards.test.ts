@@ -1335,7 +1335,7 @@ describe("ci workflow guards", () => {
     );
     expect(actionPublishStep.run).toContain("trap cleanup_git_auth EXIT");
     expect(actionPublishStep.run).not.toContain("gh auth setup-git");
-    expect(actionPublishStep.run).toContain("timeout --signal=TERM --kill-after=10s 120s");
+    expect(actionPublishStep.run).toContain("timeout --signal=TERM --kill-after=10s 300s");
     expect(actionPublishStep.run).toContain("--force-with-lease=refs/heads/");
     expect(actionPublishStep.run).toContain(
       "GH013|repository rule violations|required status check",
@@ -3213,11 +3213,11 @@ describe("ci workflow guards", () => {
 
   it("kills timed manual checkout fetches after the grace period", () => {
     const workflowPaths = [
-      [".github/workflows/ci.yml", "120s"],
+      [".github/workflows/ci.yml", "300s"],
       [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", "120s"],
-      [".github/workflows/ci-check-arm-testbox.yml", "120s"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "120s"],
+      [".github/workflows/ci-check-testbox.yml", "300s"],
+      [".github/workflows/ci-check-arm-testbox.yml", "300s"],
+      [".github/workflows/ci-build-artifacts-testbox.yml", "300s"],
       [".github/workflows/crabbox-hydrate.yml", "30s"],
     ] as const;
 
@@ -3256,7 +3256,7 @@ describe("ci workflow guards", () => {
         'git_args+=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}")',
       );
       expect(step?.run, stepName).toContain(
-        'timeout --signal=TERM --kill-after=10s 120s "${git_args[@]}" fetch "$@"',
+        'timeout --signal=TERM --kill-after=10s 300s "${git_args[@]}" fetch "$@"',
       );
       expect(step?.run, stepName).not.toContain('git -c "http.https://github.com/.extraheader');
     }
@@ -3285,7 +3285,7 @@ describe("ci workflow guards", () => {
       );
 
       expect(checkoutStep.run, jobName).toContain(
-        'timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE"',
+        'timeout --signal=TERM --kill-after=10s 300s git -C "$GITHUB_WORKSPACE"',
       );
       expect(checkoutStep.run, jobName).toContain("for attempt in 1 2 3");
       expect(checkoutStep.run, jobName).toContain("timed out on attempt $attempt; retrying");
@@ -3715,7 +3715,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       "${{ github.event_name == 'pull_request' && needs.preflight.outputs.diff_base_revision || '' }}",
     );
     expect(checkShardStep.run).toContain(
-      'timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin "+${PR_BASE_SHA}:refs/remotes/origin/ci-base"',
+      'timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin "+${PR_BASE_SHA}:refs/remotes/origin/ci-base"',
     );
   });
 
@@ -3857,7 +3857,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(releaseGateMerge.run).toContain('"$merge_head" == "$TARGET_SHA"');
     expect(releaseGateMerge.run).toContain('git show -s --format=%P "$merge_sha"');
     expect(releaseGateMerge.run).toContain(
-      "timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=2 origin \\",
+      "timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=2 origin \\",
     );
     expect(releaseGateMerge.run).toContain(
       "Freeze GitHub's canonical merge snapshot once it contains the exact head",
@@ -3878,7 +3878,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     );
     expect(
       checksFastRun.run.match(
-        /timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 origin \\/gu,
+        /timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 origin \\/gu,
       ),
     ).toHaveLength(4);
     expect(checksFastRun.run).toContain('git ls-remote origin "refs/heads/${default_branch}"');
@@ -4563,7 +4563,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       'if [[ ! -f "$runner" ]]',
       "job_workflow_repository=$(jq -r '.workflow_repository // empty' <<<\"$JOB_CONTEXT_JSON\")",
       "job_workflow_sha=$(jq -r '.workflow_sha // empty' <<<\"$JOB_CONTEXT_JSON\")",
-      'timeout --signal=TERM --kill-after=10s 120s git fetch --no-tags --depth=1 "$workflow_remote" "$job_workflow_sha"',
+      'timeout --signal=TERM --kill-after=10s 300s git fetch --no-tags --depth=1 "$workflow_remote" "$job_workflow_sha"',
       'git show "${job_workflow_sha}:${file}" > "${harness_root}/${file}"',
       'node "$runner"',
     ]) {
@@ -4679,7 +4679,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(gitFetchLines).toHaveLength(2);
     expect(
       gitFetchLines.every((line: string) =>
-        line.trimStart().startsWith("timeout --signal=TERM --kill-after=10s 120s git fetch"),
+        line.trimStart().startsWith("timeout --signal=TERM --kill-after=10s 300s git fetch"),
       ),
     ).toBe(true);
   });
