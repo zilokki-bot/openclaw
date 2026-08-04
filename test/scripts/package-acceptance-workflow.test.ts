@@ -2398,8 +2398,15 @@ describe("package artifact reuse", () => {
     );
     expect(runTestboxStep.uses).toContain("useblacksmith/run-testbox@");
     expect(runTestboxStep.if).toBe("github.event_name == 'workflow_dispatch' && always()");
-    expect(runArmTestboxStep.if).toBe("always()");
-    expect(runBuildArtifactsTestboxStep.if).toBe("always()");
+    // The arm and build-artifacts lanes now run on GitHub-hosted capacity for
+    // pull requests, so their Blacksmith Testbox step is dispatch-only. The
+    // Windows lane still has Blacksmith capacity and keeps the bare guard.
+    expect(runArmTestboxStep.if).toBe(
+      "${{ always() && github.event_name == 'workflow_dispatch' }}",
+    );
+    expect(runBuildArtifactsTestboxStep.if).toBe(
+      "${{ always() && github.event_name == 'workflow_dispatch' }}",
+    );
     expect(runWindowsTestboxStep.if).toBe("always()");
     expect(runTestboxStep["continue-on-error"]).toBeUndefined();
   });
