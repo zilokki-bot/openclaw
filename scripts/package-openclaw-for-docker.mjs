@@ -22,6 +22,7 @@ const DEFAULT_TIMEOUT_KILL_AFTER_MS = 5_000;
 const PROCESS_GROUP_EXIT_POLL_MS = 25;
 const POST_FORCE_KILL_WAIT_MS = 1_000;
 const DEFAULT_CAPTURED_STDOUT_MAX_BYTES = 1024 * 1024;
+const PACK_JSON_CAPTURED_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
 const MAX_TIMER_TIMEOUT_MS = 2_147_000_000;
 const AI_RUNTIME_PACKAGE = "@openclaw/ai";
 const AI_RUNTIME_BACKUP_DIR = ".openclaw-ai-package-backup";
@@ -705,6 +706,9 @@ export async function packOpenClawPackageForDocker(sourceDir, outputDir, options
           ];
     packOutput = await runCaptureImpl(packTool, packArgs, sourceDir, {
       deferForwardedSignalExit: true,
+      maxCapturedStdoutBytes: options.packJsonPath
+        ? PACK_JSON_CAPTURED_STDOUT_MAX_BYTES
+        : undefined,
       timeoutMs: resolveTimeoutMs(
         "OPENCLAW_DOCKER_PACKAGE_PACK_TIMEOUT_MS",
         DEFAULT_PACKAGE_PACK_TIMEOUT_MS,

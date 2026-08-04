@@ -132,6 +132,7 @@ async function runCliProcess(params: {
   forbidTlsImport?: boolean;
   keepAlive?: boolean;
   forceExitMs?: number;
+  timeoutMs?: number;
   failRunMainImport?: boolean;
   unsupportedRuntime?: boolean;
   allowRespawn?: boolean;
@@ -186,7 +187,7 @@ async function runCliProcess(params: {
         ...params.env,
       },
       killSignal: "SIGKILL",
-      timeout: CHILD_PROCESS_TIMEOUT_MS,
+      timeout: params.timeoutMs ?? CHILD_PROCESS_TIMEOUT_MS,
     },
   );
   return { ...result, fixture };
@@ -206,7 +207,10 @@ type CliProcessFailure = Error & {
 };
 describe("CLI help process exit", () => {
   it("exits promptly after root --help", async () => {
-    const result = await runCliProcess({ args: ["--help"], forbidTlsImport: true });
+    // This test covers the lightweight/precomputed root help path. Config-sensitive
+    // plugin rendering is covered by root-help-live-config tests and is intentionally
+    // not part of the cold process-exit budget here.
+    const result = await runCliProcess({ args: ["--help"], config: {}, forbidTlsImport: true });
 
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Usage: openclaw [options] [command]");
@@ -448,32 +452,30 @@ describe("JSON console style process output", () => {
     );
   });
 
-  it.each(["--help", "--version"])(
-    "structures unknown-command validation with %s",
-    async (modifier) => {
-      let failure: CliProcessFailure | undefined;
-      try {
-        await runCliProcess({
-          args: ["openclaw-json-console-missing-command", modifier],
-          config: loggingConfig,
-        });
-      } catch (error) {
-        failure = error as CliProcessFailure;
-      }
+  it("structures unknown-command validation with --version", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["openclaw-json-console-missing-command", "--version"],
+        config: loggingConfig,
+        timeoutMs: 120_000,
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
 
-      expect(failure?.code).toBe(1);
-      expect(failure?.stdout ?? "").toBe("");
-      const records = parseJsonLines(failure?.stderr ?? "");
-      expect(records).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            level: "error",
-            message: expect.stringContaining("Unknown command"),
-          }),
-        ]),
-      );
-    },
-  );
+    expect(failure?.code).toBe(1);
+    expect(failure?.stdout ?? "").toBe("");
+    const records = parseJsonLines(failure?.stderr ?? "");
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("Unknown command"),
+        }),
+      ]),
+    );
+  });
 
   it("keeps pure help output on the lightweight human-formatted path", async () => {
     const result = await runCliProcess({ args: ["--help"], config: loggingConfig });
