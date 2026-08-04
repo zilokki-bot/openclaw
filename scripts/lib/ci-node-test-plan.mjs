@@ -51,7 +51,8 @@ const KEEP_LARGE_NODE_TEST_RUNNER = new Set([
   "agentic-gateway-core",
   "agentic-gateway-methods",
   "auto-reply-reply-dispatch",
-  "core-runtime-media-ui",
+  "core-runtime-media",
+  "core-runtime-ui",
   "core-unit-fast",
 ]);
 const RELEASE_ONLY_PLUGIN_SHARDS = new Set(["agentic-plugins"]);
@@ -821,19 +822,36 @@ const SPLIT_NODE_SHARDS = new Map([
         runner: "blacksmith-4vcpu-ubuntu-2404",
       },
       {
+        // Поднимает настоящий шлюз и ждёт живого ответа. На четырёх ядрах не
+        // укладывался: из последних 30 прогонов CI на `main` красными были
+        // шесть, и во всех шести упала ровно эта работа и только она
+        // («timed out creating a fresh session»). Локально тот же набор
+        // проходит 8/8 за 34 секунды — дело не в коде, а в тесноте.
         shardName: "core-runtime-tui-pty",
         configs: ["test/vitest/vitest.tui-pty.config.ts"],
         env: {
           OPENCLAW_TUI_PTY_INCLUDE_LOCAL: "1",
         },
         requiresDist: false,
-        runner: "blacksmith-4vcpu-ubuntu-2404",
+        runner: "blacksmith-8vcpu-ubuntu-2404",
       },
       {
-        shardName: "core-runtime-media-ui",
+        // Разведено надвое НЕ по падению: за последние 30 прогонов `main` эта
+        // работа не падала ни разу. Причина в объёме — пять целых наборов в
+        // одной работе были самой плотной упаковкой в матрице, а именно
+        // теснота губит наборы, зависящие от пределов системы. Профилактика,
+        // а не починка. Цена честная: обе половины остаются в списке крупных,
+        // то есть вместо одной работы на восьми ядрах их теперь две.
+        shardName: "core-runtime-media",
         configs: [
           "test/vitest/vitest.media.config.ts",
           "test/vitest/vitest.media-understanding.config.ts",
+        ],
+        requiresDist: false,
+      },
+      {
+        shardName: "core-runtime-ui",
+        configs: [
           "test/vitest/vitest.tui.config.ts",
           "test/vitest/vitest.ui.config.ts",
           "test/vitest/vitest.wizard.config.ts",
