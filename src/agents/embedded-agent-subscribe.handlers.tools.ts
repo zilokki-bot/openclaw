@@ -164,9 +164,11 @@ function readUpdatePlanResult(
  * Reserving and delivering only for CLI meant a channel `ask_user` was never
  * shown to the human while the tool kept waiting, so it could only time out.
  */
-function hasAskUserPromptSurface(
-  params: Pick<ToolHandlerParams, "onToolResult" | "onBlockReply" | "onPartialReply">,
-): boolean {
+function hasAskUserPromptSurface(params: {
+  onToolResult?: unknown;
+  onBlockReply?: unknown;
+  onPartialReply?: unknown;
+}): boolean {
   return Boolean(params.onToolResult ?? params.onBlockReply ?? params.onPartialReply);
 }
 
