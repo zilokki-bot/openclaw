@@ -95,10 +95,19 @@ const GATEWAY_SCENARIOS = {
 
 type GatewayScenarioId = keyof typeof GATEWAY_SCENARIOS;
 
-const LOCAL_STARTUP_TIMEOUT_MS = 60_000;
+// Запас на создание сессии рассчитан на загруженный конвейер, а не на пустую
+// машину. На `main` этот набор падал примерно в половине прогонов с
+// «timed out creating a fresh session»: `/new` поднимает настоящий шлюз, и под
+// параллельными работами шестидесяти секунд не хватало. Повтор при этом не
+// спасал — он положен только при явном «занято», а просто медленное создание
+// получало ровно одну попытку.
+//
+// Бюджет теста поднят вместе со стартовым, иначе одно падение по времени
+// сменилось бы другим: создание съедало бы почти весь прежний лимит в 150 с.
+const LOCAL_STARTUP_TIMEOUT_MS = 120_000;
 const LOCAL_OUTPUT_TIMEOUT_MS = 120_000;
 const LOCAL_EXIT_TIMEOUT_MS = 4_000;
-const LOCAL_TEST_TIMEOUT_MS = 150_000;
+const LOCAL_TEST_TIMEOUT_MS = 300_000;
 const SUBMISSION_SETTLE_MS = 150;
 const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 5_000;
 const SESSION_ROLLOVER_BUSY_MESSAGE = "abort the current run before /new";
