@@ -250,6 +250,40 @@ describe("provider model route auth", () => {
     ).toMatchObject({ kind: "rejected", reason: "explicit-order" });
   });
 
+  it("names the profiles it considered when an explicit order has none usable", () => {
+    const decision = selectProviderModelRouteAuth({
+      provider: "anthropic",
+      resolution: routes,
+      sourcePlan: buildProviderModelAuthSourcePlan({
+        profiles: [
+          profile("anthropic:manual", "api_key", "unavailable"),
+          profile("anthropic:default", "api_key", "unavailable"),
+        ],
+        explicitOrder: true,
+        fallback: direct("api-key"),
+      }),
+    });
+
+    expect(decision).toMatchObject({ kind: "rejected", reason: "explicit-order" });
+    expect(decision.kind === "rejected" && decision.message).toContain("anthropic:manual");
+    expect(decision.kind === "rejected" && decision.message).toContain("anthropic:default");
+  });
+
+  it("keeps the message clean when there was nothing to consider", () => {
+    const decision = selectProviderModelRouteAuth({
+      provider: "anthropic",
+      resolution: routes,
+      sourcePlan: buildProviderModelAuthSourcePlan({
+        profiles: [],
+        explicitOrder: true,
+        fallback: direct("api-key"),
+      }),
+    });
+
+    expect(decision).toMatchObject({ kind: "rejected", reason: "explicit-order" });
+    expect(decision.kind === "rejected" && decision.message).not.toContain("Considered:");
+  });
+
   it("keeps a required profile authoritative over configured auth", () => {
     expect(
       selectProviderModelRouteAuth({
