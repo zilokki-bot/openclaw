@@ -942,7 +942,9 @@ describe("ci workflow guards", () => {
     );
     expect(actionPublishStep.run).toContain("trap cleanup_git_auth EXIT");
     expect(actionPublishStep.run).not.toContain("gh auth setup-git");
-    expect(actionPublishStep.run).toContain("timeout --signal=TERM --kill-after=10s 120s");
+    expect(actionPublishStep.run).toContain(
+      'timeout --signal=TERM --kill-after=10s "${CHECKOUT_FETCH_TIMEOUT:-300s}"',
+    );
     expect(actionPublishStep.run).toContain("--force-with-lease=refs/heads/");
     expect(actionPublishStep.run).toContain(
       "GH013|repository rule violations|required status check",
@@ -1462,19 +1464,35 @@ describe("ci workflow guards", () => {
 
   it("kills timed manual checkout fetches after the grace period", () => {
     const workflowPaths = [
-      [".github/workflows/ci.yml", "120s"],
-      [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", "120s"],
-      [".github/workflows/ci-check-arm-testbox.yml", "120s"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "120s"],
-      [".github/workflows/crabbox-hydrate.yml", "30s"],
+      [
+        ".github/workflows/ci.yml",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
+      ],
+      [".github/workflows/workflow-sanity.yml", "30s", "30s"],
+      [
+        ".github/workflows/ci-check-testbox.yml",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
+      ],
+      [
+        ".github/workflows/ci-check-arm-testbox.yml",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
+      ],
+      [
+        ".github/workflows/ci-build-artifacts-testbox.yml",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
+      ],
+      [".github/workflows/crabbox-hydrate.yml", "30s", "30s"],
     ] as const;
 
-    for (const [workflowPath, timeoutSeconds] of workflowPaths) {
+    for (const [workflowPath, timeoutPattern, timeoutExpression] of workflowPaths) {
       const workflow = readFileSync(workflowPath, "utf8");
       const fetchTimeouts = workflow.match(
         new RegExp(
-          `timeout --signal=TERM[^\\n]* ${timeoutSeconds} git(?: -C "(?:\\$workdir|\\$GITHUB_WORKSPACE|clawhub-source)")?`,
+          `timeout --signal=TERM[^\n]* ${timeoutPattern} git(?: -C "(?:$workdir|$GITHUB_WORKSPACE|clawhub-source)")?`,
           "g",
         ),
       );
@@ -1482,7 +1500,7 @@ describe("ci workflow guards", () => {
       expect(fetchTimeouts?.length, workflowPath).toBeGreaterThan(0);
       expect(
         fetchTimeouts?.every((line) =>
-          line.startsWith(`timeout --signal=TERM --kill-after=10s ${timeoutSeconds} git`),
+          line.startsWith(`timeout --signal=TERM --kill-after=10s ${timeoutExpression} git`),
         ),
         workflowPath,
       ).toBe(true);
@@ -1511,7 +1529,7 @@ describe("ci workflow guards", () => {
       );
 
       expect(checkoutStep.run, jobName).toContain(
-        'timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE"',
+        'timeout --signal=TERM --kill-after=10s "${CHECKOUT_FETCH_TIMEOUT:-300s}" git -C "$GITHUB_WORKSPACE"',
       );
       expect(checkoutStep.run, jobName).toContain("for attempt in 1 2 3");
       expect(checkoutStep.run, jobName).toContain("timed out on attempt $attempt; retrying");

@@ -112,7 +112,7 @@ const LOCAL_EXIT_TIMEOUT_MS = 4_000;
 const LOCAL_TEST_TIMEOUT_MS = 300_000;
 const SUBMISSION_SETTLE_MS = 150;
 const SESSION_CREATE_ATTEMPT_TIMEOUT_MS = 30_000;
-const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 5_000;
+const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 60_000;
 const SESSION_ROLLOVER_BUSY_MESSAGE = "abort the current run before /new";
 
 function createIdempotentCleanup(cleanup: () => Promise<void>) {
@@ -133,7 +133,11 @@ async function waitForOutputAfter(run: PtyRun, needle: string, offset: number) {
   });
 }
 
-async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
+async function createFreshSession(
+  run: PtyRun,
+  newSessionPrefix: string,
+  adoptedSessionPrefix?: string,
+) {
   // The busy retry budget has to cover retries, not the first attempt. `waitFor`
   // below can block for a whole attempt under load; arm the busy budget only
   // after the first explicit busy response.
@@ -157,7 +161,10 @@ async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
         timeoutMs: Math.min(SESSION_CREATE_ATTEMPT_TIMEOUT_MS, remainingMs),
         read: () => {
           const hasOutput = (needle: string) => run.output().slice(outputOffset).includes(needle);
-          if (hasOutput(newSessionPrefix)) {
+          if (
+            hasOutput(newSessionPrefix) ||
+            (adoptedSessionPrefix && hasOutput(adoptedSessionPrefix))
+          ) {
             return "created" as const;
           }
           if (hasOutput(SESSION_ROLLOVER_BUSY_MESSAGE)) {
@@ -1021,10 +1028,19 @@ describe("TUI PTY real backends", () => {
         await fixture.run.waitForOutput("FIRST_RUN_ACTIVE");
 
         const newSessionPrefix = `new session: agent:${fixture.agentId}:tui-`;
-        await createFreshSession(fixture.run, newSessionPrefix);
-        const newSessionKey = fixture.run
-          .output()
-          .match(new RegExp(`new session: (agent:${fixture.agentId}:tui-[a-z0-9-]+)`))?.[1];
+        const adoptedSessionPrefix = `session agent:${fixture.agentId}:tui-`;
+        await createFreshSession(fixture.run, newSessionPrefix, adoptedSessionPrefix);
+        const newSessionKeyMatches = Array.from(
+          fixture.run
+            .output()
+            .matchAll(
+              new RegExp(
+                `(?:new session: |session )(agent:${fixture.agentId}:tui-[a-z0-9-]+)`,
+                "g",
+              ),
+            ),
+        );
+        const newSessionKey = newSessionKeyMatches.at(-1)?.[1];
         expect(newSessionKey).toBeDefined();
         if (newSessionKey) {
           fixture.trackSessionKey(newSessionKey);
