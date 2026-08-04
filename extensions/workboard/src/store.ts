@@ -4691,11 +4691,11 @@ export class WorkboardStore {
     sharedSqliteStore ??= WorkboardStore.openSqlite();
     return sharedSqliteStore;
   }
+
+  /** Drops the memoized process-wide store. Tests only. */
+  static resetShared(): void {
+    sharedSqliteStore = undefined;
+  }
 }
 
 let sharedSqliteStore: WorkboardStore | undefined;
-
-/** Drops the memoized process-wide store. Tests only. */
-export function resetSharedWorkboardStore(): void {
-  sharedSqliteStore = undefined;
-}

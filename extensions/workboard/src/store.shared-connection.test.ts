@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetSharedWorkboardStore, WorkboardStore } from "./store.js";
+import { WorkboardStore } from "./store.js";
 
 afterEach(() => {
-  resetSharedWorkboardStore();
+  WorkboardStore.resetShared();
   vi.restoreAllMocks();
 });
 
@@ -30,7 +30,7 @@ describe("WorkboardStore.shared", () => {
 
   it("reopens after the memo is reset", () => {
     const first = WorkboardStore.shared();
-    resetSharedWorkboardStore();
+    WorkboardStore.resetShared();
     const second = WorkboardStore.shared();
 
     expect(second).not.toBe(first);
