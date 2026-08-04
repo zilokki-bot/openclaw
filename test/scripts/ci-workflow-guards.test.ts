@@ -1464,9 +1464,12 @@ describe("ci workflow guards", () => {
     const workflowPaths = [
       [".github/workflows/ci.yml", "120s"],
       [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", "120s"],
-      [".github/workflows/ci-check-arm-testbox.yml", "120s"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "120s"],
+      // Выкачивание нашего форка в 120 с не укладывалось: пять попыток подряд
+      // обрывались ровно по таймауту (~126 с между попытками в логе), и джоба
+      // падала до единой строки кода. Потолок сохраняется — он поднят, а не снят.
+      [".github/workflows/ci-check-testbox.yml", "300s"],
+      [".github/workflows/ci-check-arm-testbox.yml", "300s"],
+      [".github/workflows/ci-build-artifacts-testbox.yml", "300s"],
       [".github/workflows/crabbox-hydrate.yml", "30s"],
     ] as const;
 
