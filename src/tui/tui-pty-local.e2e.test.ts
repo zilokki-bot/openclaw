@@ -112,7 +112,7 @@ const LOCAL_EXIT_TIMEOUT_MS = 4_000;
 const LOCAL_TEST_TIMEOUT_MS = 300_000;
 const SUBMISSION_SETTLE_MS = 150;
 const SESSION_CREATE_ATTEMPT_TIMEOUT_MS = 30_000;
-const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 5_000;
+const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 60_000;
 const SESSION_ROLLOVER_BUSY_MESSAGE = "abort the current run before /new";
 
 function createIdempotentCleanup(cleanup: () => Promise<void>) {
