@@ -136,7 +136,7 @@ async function waitForOutputAfter(run: PtyRun, needle: string, offset: number) {
 async function createFreshSession(
   run: PtyRun,
   newSessionPrefix: string,
-  adoptedSessionPrefix: string,
+  adoptedSessionPrefix?: string,
 ) {
   // The busy retry budget has to cover retries, not the first attempt. `waitFor`
   // below can block for a whole attempt under load; arm the busy budget only
@@ -161,7 +161,7 @@ async function createFreshSession(
         timeoutMs: Math.min(SESSION_CREATE_ATTEMPT_TIMEOUT_MS, remainingMs),
         read: () => {
           const hasOutput = (needle: string) => run.output().slice(outputOffset).includes(needle);
-          if (hasOutput(newSessionPrefix) || hasOutput(adoptedSessionPrefix)) {
+          if (hasOutput(newSessionPrefix) || (adoptedSessionPrefix && hasOutput(adoptedSessionPrefix))) {
             return "created" as const;
           }
           if (hasOutput(SESSION_ROLLOVER_BUSY_MESSAGE)) {
@@ -1027,11 +1027,15 @@ describe("TUI PTY real backends", () => {
         const newSessionPrefix = `new session: agent:${fixture.agentId}:tui-`;
         const adoptedSessionPrefix = `session agent:${fixture.agentId}:tui-`;
         await createFreshSession(fixture.run, newSessionPrefix, adoptedSessionPrefix);
-        const newSessionKey = fixture.run.output().match(
-          new RegExp(
-            `(?:new session: |session )(agent:${fixture.agentId}:tui-[a-z0-9-]+)`,
+        const newSessionKeyMatches = Array.from(
+          fixture.run.output().matchAll(
+            new RegExp(
+              `(?:new session: |session )(agent:${fixture.agentId}:tui-[a-z0-9-]+)`,
+              "g",
+            ),
           ),
-        )?.[1];
+        );
+        const newSessionKey = newSessionKeyMatches.at(-1)?.[1];
         expect(newSessionKey).toBeDefined();
         if (newSessionKey) {
           fixture.trackSessionKey(newSessionKey);
