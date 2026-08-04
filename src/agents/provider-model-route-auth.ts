@@ -171,10 +171,12 @@ export function selectProviderModelAuthSources(params: {
     profiles.explicitOrder &&
     (profiles.kind === "empty" || profiles.kind === "all-unavailable")
   ) {
+    const considered = profiles.consideredProfileIds ?? [];
+    const detail = considered.length > 0 ? ` Considered: ${considered.join(", ")}.` : "";
     return {
       kind: "rejected",
       reason: "explicit-order",
-      message: `Explicit auth order for ${params.provider} has no usable profiles.`,
+      message: `Explicit auth order for ${params.provider} has no usable profiles.${detail}`,
       ...(profiles.kind === "all-unavailable" ? { source: profiles.first } : {}),
     };
   }
