@@ -1464,49 +1464,35 @@ describe("ci workflow guards", () => {
 
   it("kills timed manual checkout fetches after the grace period", () => {
     const workflowPaths = [
-      [".github/workflows/ci.yml", '"${CHECKOUT_FETCH_TIMEOUT:-300s}"'],
-      [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", '"${CHECKOUT_FETCH_TIMEOUT:-300s}"'],
-      [".github/workflows/ci-check-arm-testbox.yml", '"${CHECKOUT_FETCH_TIMEOUT:-300s}"'],
-      [".github/workflows/ci-build-artifacts-testbox.yml", '"${CHECKOUT_FETCH_TIMEOUT:-300s}"'],
-      [".github/workflows/crabbox-hydrate.yml", "30s"],
+      [
+        ".github/workflows/ci.yml",
+        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
+        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+      ],
+      [".github/workflows/workflow-sanity.yml", "30s", "30s"],
+      [
+        ".github/workflows/ci-check-testbox.yml",
+        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
+        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+      ],
+      [
+        ".github/workflows/ci-check-arm-testbox.yml",
+        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
+        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+      ],
+      [
+        ".github/workflows/ci-build-artifacts-testbox.yml",
+        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
+        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+      ],
+      [".github/workflows/crabbox-hydrate.yml", "30s", "30s"],
     ] as const;
 
-    for (const [workflowPath, timeoutExpression] of workflowPaths) {
-      const workflow = readFileSync(workflowPath, "utf8");
-      const escapedTimeoutExpression = timeoutExpression.replace(/[.*+?^${}()|[\]\]/g, "\\  it("kills timed manual checkout fetches after the grace period", () => {
-    const workflowPaths = [
-      [".github/workflows/ci.yml", "120s"],
-      [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", "120s"],
-      [".github/workflows/ci-check-arm-testbox.yml", "120s"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "120s"],
-      [".github/workflows/crabbox-hydrate.yml", "30s"],
-    ] as const;
-
-    for (const [workflowPath, timeoutSeconds] of workflowPaths) {
+    for (const [workflowPath, timeoutPattern, timeoutExpression] of workflowPaths) {
       const workflow = readFileSync(workflowPath, "utf8");
       const fetchTimeouts = workflow.match(
         new RegExp(
-          `timeout --signal=TERM[^\\n]* ${timeoutSeconds} git(?: -C "(?:\\$workdir|\\$GITHUB_WORKSPACE|clawhub-source)")?`,
-          "g",
-        ),
-      );
-
-      expect(fetchTimeouts?.length, workflowPath).toBeGreaterThan(0);
-      expect(
-        fetchTimeouts?.every((line) =>
-          line.startsWith(`timeout --signal=TERM --kill-after=10s ${timeoutSeconds} git`),
-        ),
-        workflowPath,
-      ).toBe(true);
-    }
-  });
-
-  it("bounds shared base commit fetches"");
-      const fetchTimeouts = workflow.match(
-        new RegExp(
-          `timeout --signal=TERM[^\n]* ${escapedTimeoutExpression} git(?: -C "(?:\$workdir|\$GITHUB_WORKSPACE|clawhub-source)")?`,
+          `timeout --signal=TERM[^\n]* ${timeoutPattern} git(?: -C "(?:\$workdir|\$GITHUB_WORKSPACE|clawhub-source)")?`,
           "g",
         ),
       );
