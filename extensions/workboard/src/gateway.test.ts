@@ -43,7 +43,8 @@ describe("workboard gateway methods", () => {
       ),
     } as unknown as OpenClawPluginApi;
 
-    registerWorkboardGatewayMethods({ api, store: new WorkboardStore(createMemoryStore()) });
+    const store = new WorkboardStore(createMemoryStore());
+    registerWorkboardGatewayMethods({ api, store });
 
     expect([...methods.keys()]).toEqual([
       "workboard.cards.list",
@@ -134,6 +135,29 @@ describe("workboard gateway methods", () => {
     expect(listRespond.mock.calls[0]?.[1]).toMatchObject({
       cards: [expect.objectContaining({ title: "Investigate queue drift" })],
       boards: [expect.objectContaining({ id: "default", total: 1, active: 1 })],
+    });
+
+    const archived = await store.create({ title: "Archived board history" });
+    await store.archive(archived.id, true);
+
+    const activeOnlyRespond = vi.fn();
+    await listHandler?.({ params: {}, respond: activeOnlyRespond } as never);
+    expect(activeOnlyRespond.mock.calls[0]?.[1]).toMatchObject({
+      cards: [expect.objectContaining({ title: "Investigate queue drift" })],
+      boards: [expect.objectContaining({ id: "default", total: 2, active: 1, archived: 1 })],
+    });
+
+    const includeArchivedRespond = vi.fn();
+    await listHandler?.({
+      params: { includeArchived: true },
+      respond: includeArchivedRespond,
+    } as never);
+    expect(includeArchivedRespond.mock.calls[0]?.[1]).toMatchObject({
+      cards: expect.arrayContaining([
+        expect.objectContaining({ title: "Investigate queue drift" }),
+        expect.objectContaining({ title: "Archived board history" }),
+      ]),
+      boards: [expect.objectContaining({ id: "default", total: 2, active: 1, archived: 1 })],
     });
 
     const eventsRespond = vi.fn();

@@ -108,7 +108,10 @@ async function loadWorkboardInternal(
           }
         }
       }
-      const payload = await client.request("workboard.cards.list", {});
+      // The board renders archived cards behind the "show archived" toggle and
+      // reports archived counts in the board filter, so the UI needs the full
+      // set. The gateway now hides archived cards unless asked explicitly.
+      const payload = await client.request("workboard.cards.list", { includeArchived: true });
       const normalized = normalizeCardsPayload(payload);
       if (!isCurrentWorkboardLoadGeneration(params.host, generation)) {
         return false;
