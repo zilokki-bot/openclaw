@@ -235,8 +235,21 @@ export function createSubagentRunManager(params: {
     accountId?: string;
     triggerCleanup: boolean;
     startedAt?: number;
+    completionSnapshot?: { resultText: string | null; capturedAt: number };
   }): Promise<void>;
   resolveSubagentTask(entry: SubagentRunRecord): DetachedTaskFindResult;
+  resolveTerminalTaskCompletion?(
+    entry: SubagentRunRecord,
+    task: DetachedTaskFindResult["task"],
+  ):
+    | {
+        startedAt?: number;
+        endedAt: number;
+        outcome: SubagentRunOutcome;
+        reason: SubagentLifecycleEndedReason;
+        completionSnapshot: { resultText: string | null; capturedAt: number };
+      }
+    | undefined;
 }) {
   const markOlderKillReconciliationsSuperseded = (next: SubagentRunRecord) => {
     const snapshots = new Map<SubagentRunRecord, SubagentRunRecord["killReconciliation"]>();
@@ -400,6 +413,34 @@ export function createSubagentRunManager(params: {
             endedAt: completion.endedAt,
             outcome: completion.outcome,
             reason: completion.reason,
+            sendFarewell: true,
+            accountId: entry.requesterOrigin?.accountId,
+            triggerCleanup: true,
+            startedAt: completionStartedAt,
+          };
+          await params.completeSubagentRun(completionForRetry);
+          return;
+        }
+        const taskResolution = params.resolveSubagentTask(entry);
+        const taskCompletion = params.resolveTerminalTaskCompletion?.(
+          entry,
+          taskResolution.lookup === "available" ? taskResolution.task : undefined,
+        );
+        if (taskCompletion) {
+          const completionStartedAt = observedStartedAt ?? taskCompletion.startedAt;
+          const completionAfterDeadline = resolveCompletionAfterHardRunDeadline({
+            entry,
+            observedStartedAt: completionStartedAt,
+            observedEndedAt: taskCompletion.endedAt,
+            now,
+          });
+          if (completionAfterDeadline !== undefined) {
+            await completeAsRunTimeout(completionAfterDeadline, completionStartedAt);
+            return;
+          }
+          completionForRetry = {
+            runId,
+            ...taskCompletion,
             sendFarewell: true,
             accountId: entry.requesterOrigin?.accountId,
             triggerCleanup: true,

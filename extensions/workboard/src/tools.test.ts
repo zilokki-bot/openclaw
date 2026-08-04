@@ -223,6 +223,242 @@ describe("workboard tools", () => {
     ).rejects.toThrow(/active child/);
   });
 
+  it("records sandbox workspace access on tool-created cards", async () => {
+    const keyed = createMemoryStore();
+    const api = {
+      runtime: {
+        state: {
+          openKeyedStore: vi.fn(() => keyed),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+    const store = new WorkboardStore(keyed);
+    const tools = new Map(
+      createWorkboardTools({
+        api,
+        store,
+        context: {
+          agentId: "workboard-worker",
+          sessionKey: "agent:workboard-worker:safe-create",
+          sessionId: "session-safe-create",
+          sandboxed: true,
+        } as never,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    const payload = readPayload(
+      await tools.get("workboard_create")?.execute("call-safe-create", {
+        title: "Safe pilot card",
+        idempotencyKey: "br-wb:v1:test-safe-create",
+      }),
+    );
+
+    expect(payload.card).toMatchObject({
+      metadata: {
+        automation: {
+          idempotencyKey: "br-wb:v1:test-safe-create",
+          workspaceAccess: {
+            unrestricted: false,
+            sandboxed: true,
+            agentId: "workboard-worker",
+            sessionKey: "agent:workboard-worker:safe-create",
+            sessionId: "session-safe-create",
+          },
+        },
+      },
+    });
+  });
+
+  it("exposes safe child-create as an agent tool that delegates to the safe gateway surface", async () => {
+    const keyed = createMemoryStore();
+    const gatewayRequest = vi.fn(async () => ({
+      receipt: {
+        taskId: "run-safe-create",
+        runId: "run-safe-create",
+        childSessionKey: "agent:workboard-worker:subagent:create",
+        agentId: "workboard-worker",
+        argsHash: "a".repeat(64),
+        sandboxPosture: {
+          sandbox: "require",
+          context: "isolated",
+          mode: "run",
+          cleanup: "keep",
+          inheritedToolAllowlist: ["workboard_create"],
+          singleRequest: true,
+        },
+        toolResult: {
+          card: {
+            id: "card-safe",
+            workspaceAccess: { unrestricted: false, sandboxed: true },
+          },
+        },
+        readback: {
+          card: { id: "card-safe", title: "Safe pilot card" },
+          workspaceAccess: { unrestricted: false, sandboxed: true },
+        },
+      },
+    }));
+    const api = {
+      runtime: {
+        gateway: {
+          request: gatewayRequest,
+        },
+        state: {
+          openKeyedStore: vi.fn(() => keyed),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+    const store = new WorkboardStore(keyed);
+    const tools = new Map(
+      createWorkboardTools({
+        api,
+        store,
+        context: {
+          agentId: "main",
+          sessionKey: "agent:main:codex-coord",
+        } as never,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    const payload = readPayload(
+      await tools.get("workboard_safe_child_create")?.execute("call-safe-child-create", {
+        card: {
+          title: "Safe pilot card",
+          notes: "Create only through sandbox child.",
+          labels: ["pilot"],
+          idempotencyKey: "br-wb:v1:test-safe-child-create",
+        },
+        taskName: "safe-pilot",
+        label: "safe pilot",
+      }),
+    );
+
+    expect(gatewayRequest).toHaveBeenCalledWith(
+      "workboard.cards.safeChildCreate",
+      {
+        card: {
+          title: "Safe pilot card",
+          notes: "Create only through sandbox child.",
+          labels: ["pilot"],
+          idempotencyKey: "br-wb:v1:test-safe-child-create",
+        },
+        taskName: "safe-pilot",
+        label: "safe pilot",
+      },
+      { scopes: ["operator.write"] },
+    );
+    expect(payload).toMatchObject({
+      receipt: {
+        runId: "run-safe-create",
+        childSessionKey: "agent:workboard-worker:subagent:create",
+        agentId: "workboard-worker",
+        toolResult: {
+          card: {
+            id: "card-safe",
+            workspaceAccess: { unrestricted: false },
+          },
+        },
+        readback: {
+          workspaceAccess: { unrestricted: false },
+        },
+      },
+    });
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("rejects safe child-create tool escape hatches before gateway dispatch", async () => {
+    const keyed = createMemoryStore();
+    const gatewayRequest = vi.fn();
+    const api = {
+      runtime: {
+        gateway: {
+          request: gatewayRequest,
+        },
+        state: {
+          openKeyedStore: vi.fn(() => keyed),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+    const tools = new Map(
+      createWorkboardTools({
+        api,
+        store: new WorkboardStore(keyed),
+        context: { agentId: "main" } as never,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("call-wrong-agent", {
+        agentId: "developer",
+        card: {
+          title: "Wrong worker",
+          idempotencyKey: "br-wb:v1:wrong-agent",
+        },
+      }),
+    ).rejects.toThrow("caller-provided agentId");
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("call-wrong-card-agent", {
+        card: {
+          title: "Wrong card worker",
+          agentId: "developer",
+          idempotencyKey: "br-wb:v1:wrong-card-agent",
+        },
+      }),
+    ).rejects.toThrow("caller-provided agentId");
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("call-wrong-workspace", {
+        workspaceDir: "/tmp/unsafe",
+        card: {
+          title: "Wrong workspace",
+          idempotencyKey: "br-wb:v1:wrong-workspace",
+        },
+      }),
+    ).rejects.toThrow("workspace paths");
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("call-missing-key", {
+        card: {
+          title: "Missing key",
+        },
+      }),
+    ).rejects.toThrow("idempotencyKey");
+    expect(gatewayRequest).not.toHaveBeenCalled();
+  });
+
+  it("propagates safe child-create gateway errors without direct create fallback", async () => {
+    const keyed = createMemoryStore();
+    const gatewayRequest = vi.fn(async () => {
+      throw new Error("authenticated agent runtime identity required");
+    });
+    const api = {
+      runtime: {
+        gateway: {
+          request: gatewayRequest,
+        },
+        state: {
+          openKeyedStore: vi.fn(() => keyed),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+    const store = new WorkboardStore(keyed);
+    const tools = new Map(
+      createWorkboardTools({
+        api,
+        store,
+        context: { agentId: "main" } as never,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    await expect(
+      tools.get("workboard_safe_child_create")?.execute("call-gateway-error", {
+        card: {
+          title: "No fallback",
+          idempotencyKey: "br-wb:v1:no-fallback",
+        },
+      }),
+    ).rejects.toThrow("authenticated agent runtime identity required");
+    expect(await store.list()).toEqual([]);
+  });
+
   it("creates dependent cards and completes claimed work through tools", async () => {
     const keyed = createMemoryStore();
     const api = {

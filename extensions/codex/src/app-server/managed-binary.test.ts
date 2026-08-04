@@ -185,6 +185,27 @@ describe("managed Codex app-server binary", () => {
     });
   });
 
+  it("falls back to the system Codex binary on Linux when the package binary is absent", async () => {
+    const installRoot = path.join("/tmp", "openclaw-plugin-package", "codex");
+    const pluginRoot = path.join(installRoot, "dist", "extensions", "codex");
+    const systemCommand = "/usr/bin/codex";
+    const pathExists = vi.fn(async (filePath: string) => filePath === systemCommand);
+
+    await expect(
+      resolveManagedCodexAppServerStartOptions(startOptions("managed"), {
+        platform: "linux",
+        pluginRoot,
+        pathExists,
+      }),
+    ).resolves.toEqual({
+      ...startOptions("managed"),
+      command: systemCommand,
+      commandSource: "resolved-managed",
+    });
+    expect(pathExists).toHaveBeenCalledWith(managedCommandPath(installRoot, "linux"), "linux");
+    expect(pathExists).toHaveBeenCalledWith(systemCommand, "linux");
+  });
+
   it("finds Codex bins hoisted into an isolated npm project root", async () => {
     const projectRoot = path.join("/tmp", "state", "npm", "projects", "openclaw-codex-hash");
     const pluginRoot = path.join(projectRoot, "node_modules", "@openclaw", "codex");

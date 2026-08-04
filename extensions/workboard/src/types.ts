@@ -253,6 +253,13 @@ export type WorkboardAutomation = {
   idempotencyKey?: string;
   skills?: string[];
   workspace?: WorkboardWorkspace;
+  workspaceAccess?: {
+    unrestricted?: boolean;
+    sandboxed?: boolean;
+    agentId?: string;
+    sessionKey?: string;
+    sessionId?: string;
+  };
   maxRuntimeSeconds?: number;
   maxRetries?: number;
   scheduledAt?: number;

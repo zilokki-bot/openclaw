@@ -1218,4 +1218,60 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expectNumberField(completedEvent, "durationMs");
     expect(events[1]).not.toHaveProperty("errorCategory");
   });
+
+  it("yields to the macrotask queue between streamed chunks", async () => {
+    // Regression guard for event-loop starvation: observing a fast stream used to
+    // keep every chunk in one microtask chain, so timers and socket reads could
+    // not run until the whole turn finished.
+    const CHUNKS = 200;
+    async function* stream() {
+      for (let index = 0; index < CHUNKS; index += 1) {
+        yield { type: "text", text: `chunk-${index}` };
+      }
+    }
+    const originalStream = stream() as unknown as AsyncIterable<unknown> & {
+      result: () => Promise<string>;
+    };
+    originalStream.result = async () => "done";
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => originalStream) as unknown as StreamFn,
+      {
+        runId: "run-yield",
+        sessionKey: "session-yield",
+        sessionId: "session-yield",
+        provider: "openai",
+        model: "gpt-5.4",
+        api: "openai-responses",
+        transport: "http",
+        trace: createDiagnosticTraceContext({
+          traceId: "4bf92f3577b34da6a3ce929d0e0e4737",
+          spanId: "00f067aa0ba902b8",
+        }),
+        nextCallId: () => "call-yield",
+      },
+    );
+
+    let macrotaskRan = false;
+    setImmediate(() => {
+      macrotaskRan = true;
+    });
+
+    let consumed = 0;
+    let macrotaskRanMidStream = false;
+    const streamed = (await wrapped(
+      undefined as unknown as Parameters<StreamFn>[0],
+      undefined as unknown as Parameters<StreamFn>[1],
+      undefined as unknown as Parameters<StreamFn>[2],
+    )) as AsyncIterable<unknown>;
+    for await (const chunk of streamed) {
+      void chunk;
+      consumed += 1;
+      if (consumed === CHUNKS / 2) {
+        macrotaskRanMidStream = macrotaskRan;
+      }
+    }
+
+    expect(consumed).toBe(CHUNKS);
+    expect(macrotaskRanMidStream).toBe(true);
+  });
 });

@@ -5,6 +5,7 @@ import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 
 const TTL_MS = 5 * 60_000;
+const MAX_REPLY_USAGE_STATE_ENTRIES = 1_024;
 
 const store = new Map<string, { snapshot: PluginHookReplyUsageState; expiresAt: number }>();
 
@@ -22,6 +23,8 @@ export function buildReplyUsageState(params: {
   sessionId: string;
   chatType?: string;
   authMode?: string;
+  authProfileId?: string;
+  gitBranch?: string | null;
   overrideSource?: string;
   requestedProvider?: string;
   requestedModel?: string;
@@ -53,6 +56,7 @@ export function buildReplyUsageState(params: {
     sessionId: params.sessionId,
     chatType: params.chatType,
     authMode: params.authMode,
+    authProfileId: params.authProfileId,
     overrideSource: params.overrideSource,
     requested:
       params.requestedProvider && params.requestedModel
@@ -70,6 +74,7 @@ export function buildReplyUsageState(params: {
       : undefined,
     durationMs: params.durationMs,
     identity: resolveAgentIdentity(params.config, params.agentId),
+    gitBranch: params.gitBranch ?? undefined,
     compactionCount: params.compactionCount,
     contextTokenBudget:
       typeof params.contextTokenBudget === "number" && Number.isFinite(params.contextTokenBudget)
@@ -110,6 +115,15 @@ function prune(now: number): void {
       store.delete(key);
     }
   }
+  // This handoff is best-effort metadata for an optional hook. Bound bursts so
+  // completed runs cannot retain one full snapshot each for the whole TTL.
+  while (store.size > MAX_REPLY_USAGE_STATE_ENTRIES) {
+    const oldest = store.keys().next();
+    if (oldest.done) {
+      return;
+    }
+    store.delete(oldest.value);
+  }
 }
 
 export function recordReplyUsageState(
@@ -124,14 +138,14 @@ export function recordReplyUsageState(
   prune(now);
 }
 
+export function clearReplyUsageStateForTest(): void {
+  store.clear();
+}
+
 export function consumeReplyUsageState(runId?: string): PluginHookReplyUsageState | undefined {
   if (!runId) {
     return undefined;
   }
   const value = store.get(runId);
   return value && value.expiresAt >= Date.now() ? value.snapshot : undefined;
-}
-
-export function clearReplyUsageStateForTest(): void {
-  store.clear();
 }

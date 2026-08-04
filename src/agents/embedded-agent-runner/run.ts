@@ -441,6 +441,7 @@ async function resetNoRealConversationTokenSnapshot(params: {
   try {
     await updateSessionEntry(
       {
+        ...(params.agentId ? { agentId: params.agentId } : {}),
         storePath,
         sessionKey: params.sessionKey,
       },

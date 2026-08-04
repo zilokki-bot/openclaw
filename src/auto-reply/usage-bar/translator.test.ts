@@ -60,6 +60,14 @@ describe("usage-bar verbs", () => {
     expect(render([{ text: "{x|meter:1:moon}" }], { x: 100 })).toBe("🌕");
   });
 
+  it("meter — preserves default and supported explicit widths", () => {
+    expect(render([{ text: "{x|meter::braille}" }], { x: 75 })).toBe("⣿⣿⣿⣧⠐");
+    expect(render([{ text: "{x|meter:   :braille}" }], { x: 75 })).toBe("⣿⣿⣿⣧⠐");
+    expect(render([{ text: "{x|meter:+5:braille}" }], { x: 75 })).toBe("⣿⣿⣿⣧⠐");
+    expect(render([{ text: "{x|meter: 5 :braille}" }], { x: 75 })).toBe("⣿⣿⣿⣧⠐");
+    expect(render([{ text: "{x|meter:100:braille}" }], { x: 50 })).toHaveLength(100);
+  });
+
   it("alias — listed shortens, unlisted echoes through", () => {
     expect(render([{ text: "{m|alias:models}" }], { m: "claude-opus-4-6" })).toBe("opus46");
     expect(render([{ text: "{m|alias:models}" }], { m: "some-new-model" })).toBe("some-new-model");
@@ -142,6 +150,9 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
         reasoningEffort: "medium",
         fastMode: false,
         fallbackUsed: false,
+        authProfileId: "openai:owner@example.com",
+        gitBranch: "codex/usage-footer-auth-profile-20260730",
+        compactionCount: 3,
         contextTokenBudget: 272000,
         contextUsedTokens: 204000,
         usage: { input: 204000, output: 15, cacheRead: 0, cacheWrite: 0, total: 204015 },
@@ -153,11 +164,64 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
       { text: "{model.display_name|alias:models}" },
       { map: "model.is_fallback", cases: { true: "🔄" } },
       { text: " | " },
+      { when: "runtime.branch", text: "🌿{runtime.branch} | " },
+      { when: "model.auth_profile", text: "🔑{model.auth_profile} | " },
       { when: "model.reasoning", text: "{model.reasoning|alias:reasoning}" },
       { map: "state.fast_mode", cases: { true: "⚡", false: "🐌" } },
+      { when: "state.compactions", text: "🧹{state.compactions}" },
       { text: " | 📚 [{context.pct_used|meter:5:braille}]{context.max_tokens|num}" },
       { text: " | ${cost.turn_usd|fixed:4}" },
     ];
-    expect(renderUsageBar(tpl(pieces), contract)).toBe("opus46 | med🐌 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377");
+    expect(renderUsageBar(tpl(pieces), contract)).toBe(
+      "opus46 | 🌿codex/usage-footer-auth-profi… | 🔑openai:owner@… | med🐌🧹3 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377",
+    );
+  });
+
+  it("omits mainline branches from the footer contract", () => {
+    const pieces = [{ when: "runtime.branch", text: "🌿{runtime.branch}" }];
+
+    for (const branch of ["main", "master", "HEAD"]) {
+      const contract = buildUsageContract(
+        { provider: "openai", model: "gpt-5.5", gitBranch: branch },
+        "discord",
+      );
+
+      expect(renderUsageBar(tpl(pieces), contract)).toBe("");
+    }
+  });
+
+  it("keeps non-mainline branches in the footer contract", () => {
+    const contract = buildUsageContract(
+      { provider: "openai", model: "gpt-5.5", gitBranch: "fix/usage-footer" },
+      "discord",
+    );
+
+    expect(
+      renderUsageBar(tpl([{ when: "runtime.branch", text: "🌿{runtime.branch}" }]), contract),
+    ).toBe("🌿fix/usage-footer");
+  });
+
+  it("omits the compaction marker when nothing was compacted", () => {
+    const pieces = [{ when: "state.compactions", text: "🧹{state.compactions}" }];
+
+    for (const compactionCount of [0, undefined]) {
+      const contract = buildUsageContract(
+        { provider: "openai", model: "gpt-5.5", compactionCount },
+        "discord",
+      );
+
+      expect(renderUsageBar(tpl(pieces), contract)).toBe("");
+    }
+  });
+
+  it("shows the compaction marker once compactions happened", () => {
+    const contract = buildUsageContract(
+      { provider: "openai", model: "gpt-5.5", compactionCount: 1 },
+      "discord",
+    );
+
+    expect(
+      renderUsageBar(tpl([{ when: "state.compactions", text: "🧹{state.compactions}" }]), contract),
+    ).toBe("🧹1");
   });
 });

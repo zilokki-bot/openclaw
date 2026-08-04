@@ -784,6 +784,145 @@ describe("task-registry maintenance issue #60299", () => {
     expectTaskStatus(currentTasks, task.taskId, "running");
   });
 
+  it("recovers terminal cli session tasks before marking them lost", async () => {
+    const childSessionKey = "agent:strazh:main";
+    const endedAt = Date.now() - 20_000;
+    const task = makeStaleTask({
+      taskId: "task-cli-terminal-session",
+      runtime: "cli",
+      sourceId: "run-cli-terminal-session",
+      runId: "run-cli-terminal-session",
+      ownerKey: childSessionKey,
+      requesterSessionKey: childSessionKey,
+      childSessionKey,
+      lastEventAt: endedAt - 10_000,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [childSessionKey]: {
+          sessionId: "strazh-terminal-session",
+          updatedAt: endedAt,
+          startedAt: endedAt - 60_000,
+          endedAt,
+          status: "done",
+        },
+      },
+    });
+
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 0, recovered: 1 });
+    const recovered = requireTaskRecord(currentTasks, task.taskId);
+    expect(recovered.status).toBe("succeeded");
+    expect(recovered.endedAt).toBe(endedAt);
+    expect(recovered.terminalSummary).toBe("completed");
+  });
+
+  it("recovers terminal subagent session tasks before treating the backing session as live", async () => {
+    const childSessionKey = "agent:analyst:subagent:terminal-child";
+    const endedAt = Date.now() - 20_000;
+    const task = makeStaleTask({
+      taskId: "task-subagent-terminal-session",
+      runtime: "subagent",
+      sourceId: "run-subagent-terminal-session",
+      runId: "run-subagent-terminal-session",
+      ownerKey: "agent:analyst:main",
+      requesterSessionKey: "agent:analyst:main",
+      childSessionKey,
+      lastEventAt: endedAt - 10_000,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [childSessionKey]: {
+          sessionId: "analyst-terminal-subagent-session",
+          updatedAt: endedAt,
+          startedAt: endedAt - 60_000,
+          endedAt,
+          status: "done",
+        },
+      },
+    });
+
+    expect(previewTaskRegistryMaintenance()).toMatchObject({ recovered: 1, reconciled: 0 });
+    expect(getTaskRegistryMaintenanceDiagnostics().staleRunningTasks).toHaveLength(0);
+    expect(getInspectableActiveTaskRestartBlockers()).toHaveLength(0);
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 0, recovered: 1 });
+    const recovered = requireTaskRecord(currentTasks, task.taskId);
+    expect(recovered.status).toBe("succeeded");
+    expect(recovered.endedAt).toBe(endedAt);
+    expect(recovered.terminalSummary).toBe("completed");
+  });
+
+  it("keeps stale subagent tasks running while their child session entry is still running", async () => {
+    const childSessionKey = "agent:analyst:subagent:still-running-child";
+    const task = makeStaleTask({
+      taskId: "task-subagent-still-running-session",
+      runtime: "subagent",
+      sourceId: "run-subagent-still-running-session",
+      runId: "run-subagent-still-running-session",
+      ownerKey: "agent:analyst:main",
+      requesterSessionKey: "agent:analyst:main",
+      childSessionKey,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [childSessionKey]: {
+          sessionId: "analyst-running-subagent-session",
+          updatedAt: Date.now(),
+          startedAt: Date.now() - 60_000,
+          status: "running",
+        },
+      },
+    });
+
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 0, recovered: 0 });
+    expectTaskStatus(currentTasks, task.taskId, "running");
+  });
+
+  it("marks a stale subagent task lost when its parent session ended but the child row is still running", async () => {
+    const parentSessionKey = "agent:analyst:main";
+    const childSessionKey = "agent:analyst:subagent:still-running-after-parent-ended";
+    const endedAt = Date.now() - 20_000;
+    const task = makeStaleTask({
+      taskId: "task-subagent-running-after-parent-ended",
+      runtime: "subagent",
+      sourceId: "run-subagent-running-after-parent-ended",
+      runId: "run-subagent-running-after-parent-ended",
+      ownerKey: parentSessionKey,
+      requesterSessionKey: parentSessionKey,
+      childSessionKey,
+    });
+
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({
+      tasks: [task],
+      sessionStore: {
+        [parentSessionKey]: {
+          sessionId: "analyst-terminal-parent-session",
+          updatedAt: endedAt,
+          startedAt: endedAt - 60_000,
+          endedAt,
+          status: "done",
+        },
+        [childSessionKey]: {
+          sessionId: "analyst-running-subagent-session",
+          updatedAt: Date.now(),
+          startedAt: Date.now() - 60_000,
+          status: "running",
+        },
+      },
+    });
+
+    expect(previewTaskRegistryMaintenance()).toMatchObject({ recovered: 0, reconciled: 1 });
+    expectMaintenanceCounts(await runTaskRegistryMaintenance(), { reconciled: 1, recovered: 0 });
+    const reconciled = requireTaskRecord(currentTasks, task.taskId);
+    expect(reconciled.status).toBe("lost");
+    expect(reconciled.error).toBe("parent session ended while subagent session remained running");
+  });
+
   it("keeps detached media cli tasks live while their tool run context is active", async () => {
     const channelKey = "agent:main:discord:channel:1456744319972282449";
     const runId = "tool:video_generate:ac88dfc5-c2a9-4630-ab48-384e6450a12b";
@@ -934,6 +1073,27 @@ describe("task-registry maintenance issue #60299", () => {
     expect(result.pruned).toBe(1);
     expect(currentTasks.has(oldTask.taskId)).toBe(false);
     expect(currentTasks.has(freshTask.taskId)).toBe(true);
+  });
+
+  it("stamps fresh terminal cron rows with cleanupAfter", async () => {
+    const endedAt = Date.now();
+    const task = makeStaleTask({
+      taskId: "cron-history-cleanup-stamp",
+      runtime: "cron",
+      sourceId: "cron-history-cleanup-job",
+      status: "succeeded",
+      endedAt,
+      lastEventAt: endedAt,
+      cleanupAfter: undefined,
+    });
+    const { currentTasks } = createTaskRegistryMaintenanceHarness({ tasks: [task] });
+
+    const result = await runTaskRegistryMaintenance();
+
+    expect(result.cleanupStamped).toBe(1);
+    expect(requireTaskRecord(currentTasks, task.taskId).cleanupAfter).toBe(
+      endedAt + 7 * 24 * 60 * 60_000,
+    );
   });
 
   it("still stamps non-cron terminal rows with default retention", async () => {

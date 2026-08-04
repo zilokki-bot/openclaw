@@ -12,7 +12,10 @@ import {
   runOpenClawStateWriteTransaction,
 } from "../state/openclaw-state-db.js";
 import { parseDeliveryContextJson } from "./task-registry.sqlite.shared.js";
-import type { TaskRegistryStoreSnapshot } from "./task-registry.store.types.js";
+import type {
+  TaskRecordPageParams,
+  TaskRegistryStoreSnapshot,
+} from "./task-registry.store.types.js";
 import {
   parseOptionalTaskTerminalOutcome,
   parseTaskDeliveryStatus,
@@ -232,6 +235,31 @@ function selectTaskRowsByOwnerKey(db: DatabaseSync, ownerKey: string): TaskRegis
     .all(ownerKey) as TaskRegistryRow[];
 }
 
+function selectTaskRowsPage(db: DatabaseSync, params: TaskRecordPageParams): TaskRegistryRow[] {
+  const selectColumns = TASK_RUN_SELECT_COLUMNS.join(", ");
+  const whereClauses: string[] = [];
+  const bindings: Array<number | string> = [];
+  if (params.runtime) {
+    whereClauses.push("runtime = ?");
+    bindings.push(params.runtime);
+  }
+  if (params.statuses && params.statuses.length > 0) {
+    whereClauses.push(`status IN (${params.statuses.map(() => "?").join(", ")})`);
+    bindings.push(...params.statuses);
+  }
+  const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  bindings.push(params.limit + 1, Math.max(0, params.cursor ?? 0));
+  return db
+    .prepare(
+      `SELECT ${selectColumns}
+       FROM task_runs
+       ${where}
+       ORDER BY COALESCE(last_event_at, ended_at, started_at, created_at) DESC, task_id ASC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...bindings) as TaskRegistryRow[];
+}
+
 function selectTaskDeliveryStateRows(db: DatabaseSync): TaskDeliveryStateRow[] {
   const query = getTaskRegistryKysely(db)
     .selectFrom("task_delivery_state")
@@ -354,6 +382,18 @@ export function listTaskRegistryRecordsByOwnerKeyFromSqlite(ownerKey: string): T
   }
   const { db } = openTaskRegistryDatabase();
   return selectTaskRowsByOwnerKey(db, key).map(rowToTaskRecord);
+}
+
+export function listTaskRegistryRecordsPageFromSqlite(params: TaskRecordPageParams) {
+  const limit = Math.max(1, Math.floor(params.limit));
+  const cursor = Math.max(0, Math.floor(params.cursor ?? 0));
+  const { db } = openTaskRegistryDatabase();
+  const rows = selectTaskRowsPage(db, { ...params, limit, cursor });
+  const pageRows = rows.slice(0, limit);
+  return {
+    tasks: pageRows.map(rowToTaskRecord),
+    ...(rows.length > limit ? { nextCursor: String(cursor + pageRows.length) } : {}),
+  };
 }
 
 export function saveTaskRegistryStateToSqlite(snapshot: TaskRegistryStoreSnapshot) {

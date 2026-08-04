@@ -104,7 +104,15 @@ overrides:
   hono: 4.12.25
   "@hono/node-server": 1.19.14
   axios: 1.18.1
-  fast-uri: 4.1.1
+  fast-uri: 4.1.2
+  # Две ветки живут рядом намеренно. Единый override на 8.9.0 перебрасывал
+  # через мажор потребителей 7.x — packages/media-core,
+  # media-generation-core, media-understanding-common — и их воркер падал
+  # при загрузке (checks-node-core-runtime-media-ui). Обе версии выбраны
+  # как первые вне диапазона уязвимости GHSA-4cwx-7wf7-3272:
+  # >=7.0.0 <7.29.0 и >=8.0.0 <8.9.0.
+  "undici@7": 7.29.0
+  "undici@8": 8.9.0
   follow-redirects: 1.16.0
   defu: 6.1.5
   fast-xml-parser: 5.7.0
@@ -113,9 +121,9 @@ overrides:
   basic-ftp: 6.0.1
   file-type: 22.0.1
   form-data: 2.5.6
-  ip-address: 10.2.0
+  ip-address: 10.3.1
   minimatch: 10.2.5
-  brace-expansion: 5.0.8
+  brace-expansion: 5.0.9
   postcss: 8.5.23
   path-to-regexp: 8.4.0
   qs: 6.15.2

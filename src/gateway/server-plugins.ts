@@ -5,12 +5,7 @@ import { performance } from "node:perf_hooks";
 import { parseModelCatalogRef } from "@openclaw/model-catalog-core/model-catalog-refs";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { GatewayClientRequestError } from "../../packages/gateway-client/src/index.js";
-import {
-  GATEWAY_CLIENT_IDS,
-  GATEWAY_CLIENT_MODES,
-} from "../../packages/gateway-protocol/src/client-info.js";
 import type { ErrorShape } from "../../packages/gateway-protocol/src/schema/frames.js";
-import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/version.js";
 import { normalizeModelRef, parseModelRef } from "../agents/model-selection.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -27,10 +22,11 @@ import type { PluginRuntime, RuntimeGatewayRequestOptions } from "../plugins/run
 import type { PluginLogger, PluginOrigin } from "../plugins/types.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
-import { ADMIN_SCOPE, APPROVALS_SCOPE, WRITE_SCOPE } from "./method-scopes.js";
+import { ADMIN_SCOPE } from "./method-scopes.js";
 import { normalizeOperatorScopeList, type OperatorScope } from "./operator-scopes.js";
 import type { GatewayRequestHandler, GatewayRequestOptions } from "./server-methods/types.js";
 import { getFallbackGatewayContext } from "./server-plugin-fallback-context.js";
+import { createSyntheticOperatorClient } from "./synthetic-operator-client.js";
 
 export {
   clearFallbackGatewayContext,
@@ -190,40 +186,6 @@ function resolveRequestedFallbackModelRef(params: {
 
 // ── Internal gateway dispatch for plugin runtime ────────────────────
 
-function createSyntheticOperatorClient(params?: {
-  allowModelOverride?: boolean;
-  agentRunTracking?: "plugin_subagent";
-  cronRunContinuation?: boolean;
-  pluginRuntimeOwnerId?: string;
-  scopes?: string[];
-}): GatewayRequestOptions["client"] {
-  const pluginRuntimeOwnerId =
-    typeof params?.pluginRuntimeOwnerId === "string" && params.pluginRuntimeOwnerId.trim()
-      ? params.pluginRuntimeOwnerId.trim()
-      : undefined;
-  return {
-    connect: {
-      minProtocol: PROTOCOL_VERSION,
-      maxProtocol: PROTOCOL_VERSION,
-      client: {
-        id: GATEWAY_CLIENT_IDS.GATEWAY_CLIENT,
-        version: "internal",
-        platform: "node",
-        mode: GATEWAY_CLIENT_MODES.BACKEND,
-      },
-      role: "operator",
-      scopes: params?.scopes ?? [WRITE_SCOPE],
-    },
-    internal: {
-      allowModelOverride: params?.allowModelOverride === true,
-      ...(params?.agentRunTracking ? { agentRunTracking: params.agentRunTracking } : {}),
-      ...(params?.cronRunContinuation === true ? { cronRunContinuation: true } : {}),
-      ...(params?.scopes?.includes(APPROVALS_SCOPE) ? { approvalRuntime: true } : {}),
-      ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
-    },
-  };
-}
-
 function hasAdminScope(client: GatewayRequestOptions["client"] | undefined): boolean {
   const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
   return scopes.includes(ADMIN_SCOPE);
@@ -281,6 +243,9 @@ function mergeGatewayClientInternal(
 }
 
 type DispatchGatewayMethodInProcessOptions = {
+  agentRuntimeIdentity?: NonNullable<
+    NonNullable<GatewayRequestOptions["client"]>["internal"]
+  >["agentRuntimeIdentity"];
   allowSyntheticModelOverride?: boolean;
   allowSyntheticCronRunContinuation?: boolean;
   agentRunTracking?: "plugin_subagent";
@@ -396,6 +361,7 @@ export async function dispatchGatewayMethodInProcessRaw(
       ? options.pluginRuntimeOwnerId.trim()
       : undefined;
   const syntheticClient = createSyntheticOperatorClient({
+    agentRuntimeIdentity: options?.agentRuntimeIdentity,
     allowModelOverride: options?.allowSyntheticModelOverride === true,
     agentRunTracking: options?.agentRunTracking,
     cronRunContinuation: options?.allowSyntheticCronRunContinuation === true,
@@ -532,6 +498,7 @@ export async function dispatchTrustedPluginGatewayMethod<T>(
   const syntheticScopes = normalizeOperatorScopeList(options?.scopes);
   return await dispatchGatewayMethod<T>(method, params, {
     forceSyntheticClient: true,
+    agentRuntimeIdentity: scope?.client?.internal?.agentRuntimeIdentity,
     pluginRuntimeOwnerId: pluginId,
     ...(syntheticScopes ? { syntheticScopes } : {}),
     ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
@@ -612,6 +579,55 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
       }
       return { runId };
     },
+    async spawnSafe(params) {
+      const scope = getPluginRuntimeGatewayRequestScope();
+      if (!canTrustedOfficialPluginRequestScopes(scope ?? {})) {
+        throw new Error(
+          "Safe subagent spawn is only available to bundled or trusted official plugins.",
+        );
+      }
+      const controllerIdentity = scope?.client?.internal?.agentRuntimeIdentity;
+      const controllerSessionKey = controllerIdentity?.sessionKey?.trim();
+      const controllerAgentId = controllerIdentity?.agentId?.trim();
+      if (!controllerSessionKey || !controllerAgentId) {
+        throw new Error("safe subagent spawn requires authenticated agent runtime identity.");
+      }
+      const targetAgentId = params.agentId?.trim() || "workboard-worker";
+      if (targetAgentId !== "workboard-worker") {
+        throw new Error("safe subagent spawn only supports agentId=workboard-worker.");
+      }
+      const { spawnSubagentDirect } = await import("../agents/subagent-spawn.js");
+      const result = await spawnSubagentDirect(
+        {
+          task: params.task,
+          label: params.label,
+          agentId: targetAgentId,
+          taskName: params.taskName,
+          runTimeoutSeconds: params.runTimeoutSeconds,
+          mode: "run",
+          cleanup: "keep",
+          sandbox: "require",
+          context: "isolated",
+          lightContext: params.lightContext ?? true,
+          expectsCompletionMessage: params.expectsCompletionMessage ?? false,
+        },
+        {
+          agentSessionKey: controllerSessionKey,
+          completionOwnerKey: controllerSessionKey,
+          requesterAgentIdOverride: controllerAgentId,
+          inheritedToolAllowlist: ["workboard_create"],
+        },
+      );
+      return {
+        status: result.status,
+        ...(result.childSessionKey ? { childSessionKey: result.childSessionKey } : {}),
+        ...(result.runId ? { runId: result.runId } : {}),
+        ...(result.mode ? { mode: result.mode } : {}),
+        ...(result.taskName ? { taskName: result.taskName } : {}),
+        ...(result.note ? { note: result.note } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      };
+    },
     async waitForRun(params) {
       const payload = await dispatchGatewayMethod<{ status?: string; error?: string }>(
         "agent.wait",
@@ -665,6 +681,10 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
         },
         pluginOwnedCleanupOptions,
       );
+    },
+    async getToolReceipts(params) {
+      const { listSubagentToolReceipts } = await import("../agents/subagent-tool-receipts.js");
+      return { receipts: listSubagentToolReceipts(params) };
     },
   };
 }
