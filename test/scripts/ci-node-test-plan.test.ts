@@ -234,7 +234,7 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
     );
     expect(
       largeJobs.map((shard) => shard.groups.filter((group) => !group.includePatterns).length),
-    ).toEqual([2, 2, 2]);
+    ).toEqual([3, 2, 2]);
     expect(
       compact.some((shard) => shard.checkName.startsWith("checks-node-compact-large-whole-")),
     ).toBe(false);
@@ -582,20 +582,27 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
       {
         configs: ["test/vitest/vitest.tui-pty.config.ts"],
         requiresDist: false,
-        runner: "blacksmith-4vcpu-ubuntu-2404",
+        runner: "blacksmith-8vcpu-ubuntu-2404",
         shardName: "core-runtime-tui-pty",
       },
       {
         configs: [
           "test/vitest/vitest.media.config.ts",
           "test/vitest/vitest.media-understanding.config.ts",
+        ],
+        requiresDist: false,
+        runner: DEFAULT_NODE_TEST_RUNNER,
+        shardName: "core-runtime-media",
+      },
+      {
+        configs: [
           "test/vitest/vitest.tui.config.ts",
           "test/vitest/vitest.ui.config.ts",
           "test/vitest/vitest.wizard.config.ts",
         ],
         requiresDist: false,
         runner: DEFAULT_NODE_TEST_RUNNER,
-        shardName: "core-runtime-media-ui",
+        shardName: "core-runtime-ui",
       },
       {
         configs: [
