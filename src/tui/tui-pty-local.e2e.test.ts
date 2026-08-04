@@ -161,7 +161,10 @@ async function createFreshSession(
         timeoutMs: Math.min(SESSION_CREATE_ATTEMPT_TIMEOUT_MS, remainingMs),
         read: () => {
           const hasOutput = (needle: string) => run.output().slice(outputOffset).includes(needle);
-          if (hasOutput(newSessionPrefix) || (adoptedSessionPrefix && hasOutput(adoptedSessionPrefix))) {
+          if (
+            hasOutput(newSessionPrefix) ||
+            (adoptedSessionPrefix && hasOutput(adoptedSessionPrefix))
+          ) {
             return "created" as const;
           }
           if (hasOutput(SESSION_ROLLOVER_BUSY_MESSAGE)) {
