@@ -134,7 +134,10 @@ async function waitForOutputAfter(run: PtyRun, needle: string, offset: number) {
 }
 
 async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
-  const busyRetryDeadline = Date.now() + SESSION_ROLLOVER_RETRY_TIMEOUT_MS;
+  // The busy retry budget has to cover retries, not the first attempt. `waitFor`
+  // below can block for a whole attempt under load; arm the busy budget only
+  // after the first explicit busy response.
+  let busyRetryDeadline: number | undefined;
   const overallDeadline = Date.now() + LOCAL_STARTUP_TIMEOUT_MS;
   while (true) {
     const outputOffset = run.output().length;
@@ -174,6 +177,7 @@ async function createFreshSession(run: PtyRun, newSessionPrefix: string) {
       // Ответа нет вовсе — повторяем ввод, пока остаётся общий бюджет.
       continue;
     }
+    busyRetryDeadline ??= Date.now() + SESSION_ROLLOVER_RETRY_TIMEOUT_MS;
     if (Date.now() >= busyRetryDeadline) {
       throw new Error(`session rollover stayed busy\n${run.output()}`);
     }
