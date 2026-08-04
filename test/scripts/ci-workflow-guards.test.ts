@@ -3214,31 +3214,44 @@ describe("ci workflow guards", () => {
   });
 
   it("kills timed manual checkout fetches after the grace period", () => {
+    // Потолок выкачивания стал переопределяемым, поэтому в части файлов вместо
+    // голого числа стоит `"${CHECKOUT_FETCH_TIMEOUT:-300s}"`. Договор должен
+    // сторожить то же самое свойство — «каждая выкачка ограничена по времени и
+    // добивается через 10 с» — а не конкретную форму записи. Иначе он ломается
+    // на каждой правке значения, что и случилось.
+    const OVERRIDE_VAR = "CHECKOUT_FETCH_TIMEOUT";
     const workflowPaths = [
-      [".github/workflows/ci.yml", "300s"],
-      [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", "300s"],
-      [".github/workflows/ci-check-arm-testbox.yml", "300s"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "300s"],
-      [".github/workflows/crabbox-hydrate.yml", "30s"],
+      [".github/workflows/ci.yml", "300s", true],
+      [".github/workflows/workflow-sanity.yml", "30s", false],
+      [".github/workflows/ci-check-testbox.yml", "300s", true],
+      [".github/workflows/ci-check-arm-testbox.yml", "300s", true],
+      [".github/workflows/ci-build-artifacts-testbox.yml", "300s", true],
+      [".github/workflows/crabbox-hydrate.yml", "30s", false],
     ] as const;
 
-    for (const [workflowPath, timeoutSeconds] of workflowPaths) {
+    for (const [workflowPath, timeoutSeconds, overridable] of workflowPaths) {
       const workflow = readFileSync(workflowPath, "utf8");
+      const budget = overridable ? `"\\$\\{${OVERRIDE_VAR}:-${timeoutSeconds}\\}"` : timeoutSeconds;
       const fetchTimeouts = workflow.match(
         new RegExp(
-          `timeout --signal=TERM[^\\n]* ${timeoutSeconds} git(?: -C "(?:\\$workdir|\\$GITHUB_WORKSPACE|clawhub-source)")?`,
+          `timeout --signal=TERM[^\\n]* ${budget} git(?: -C "(?:\\$workdir|\\$GITHUB_WORKSPACE|clawhub-source)")?`,
           "g",
         ),
       );
 
       expect(fetchTimeouts?.length, workflowPath).toBeGreaterThan(0);
+      const expectedPrefix = overridable
+        ? `timeout --signal=TERM --kill-after=10s "\${${OVERRIDE_VAR}:-${timeoutSeconds}}" git`
+        : `timeout --signal=TERM --kill-after=10s ${timeoutSeconds} git`;
       expect(
-        fetchTimeouts?.every((line) =>
-          line.startsWith(`timeout --signal=TERM --kill-after=10s ${timeoutSeconds} git`),
-        ),
+        fetchTimeouts?.every((line) => line.startsWith(expectedPrefix)),
         workflowPath,
       ).toBe(true);
+      // Переопределяемая форма не должна тихо превратиться в безлимитную:
+      // значение по умолчанию обязано остаться в записи.
+      if (overridable) {
+        expect(workflow.includes(`${OVERRIDE_VAR}:-${timeoutSeconds}`), workflowPath).toBe(true);
+      }
     }
   });
 
@@ -3880,7 +3893,7 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     );
     expect(
       checksFastRun.run.match(
-        /timeout --signal=TERM --kill-after=10s \"${CHECKOUT_FETCH_TIMEOUT:-300s}\" git fetch --no-tags --depth=1 origin \\/gu,
+        /timeout --signal=TERM --kill-after=10s "\$\{CHECKOUT_FETCH_TIMEOUT:-300s\}" git fetch --no-tags --depth=1 origin \\/gu,
       ),
     ).toHaveLength(4);
     expect(checksFastRun.run).toContain('git ls-remote origin "refs/heads/${default_branch}"');
