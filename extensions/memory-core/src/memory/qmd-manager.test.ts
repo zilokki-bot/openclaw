@@ -2812,7 +2812,7 @@ describe("QmdMemoryManager", () => {
     ).rejects.toThrow("Collection not found: memory-root-main");
     expectMockMessageContains(
       logWarnMock,
-      "scheduling collection repair and using fallback for this search",
+      "scheduling collection repair in the background and failing this search",
     );
     await vi.waitFor(() => expect(addCallsAfterMissing).toBeGreaterThan(0));
     expect(addCallsAfterMissing).toBe(1);

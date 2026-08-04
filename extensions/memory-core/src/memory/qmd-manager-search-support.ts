@@ -87,13 +87,22 @@ export abstract class QmdManagerSearchSupport extends QmdManagerLifecycle {
       return false;
     }
     qmdManagerLog.warn(
-      "qmd search failed because a managed collection is missing; scheduling collection repair and using fallback for this search",
+      "qmd search failed because a managed collection is missing; scheduling collection repair in the background and failing this search",
     );
     if (this.missingCollectionRepairPromise) {
-      qmdManagerLog.warn("qmd missing collection repair already scheduled; using fallback");
+      qmdManagerLog.warn(
+        "qmd missing collection repair already scheduled; failing this search while it runs",
+      );
       return false;
     }
-    const repairPromise = this.ensureCollections({ force: true, debugContext })
+    // Deliberately not the caller's search signal: the repair has to outlive the
+    // search that noticed the problem. It is still bound to the manager, so
+    // close() cancels it instead of leaving a detached qmd child behind.
+    const repairPromise = this.ensureCollections({
+      force: true,
+      debugContext,
+      parentSignal: this.closeAbortController.signal,
+    })
       .catch((repairErr: unknown) => {
         qmdManagerLog.warn(`qmd missing collection repair failed: ${String(repairErr)}`);
       })
