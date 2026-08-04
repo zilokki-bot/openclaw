@@ -942,7 +942,7 @@ describe("ci workflow guards", () => {
     );
     expect(actionPublishStep.run).toContain("trap cleanup_git_auth EXIT");
     expect(actionPublishStep.run).not.toContain("gh auth setup-git");
-    expect(actionPublishStep.run).toContain("timeout --signal=TERM --kill-after=10s "${CHECKOUT_FETCH_TIMEOUT:-300s}"");
+    expect(actionPublishStep.run).toContain('timeout --signal=TERM --kill-after=10s "${CHECKOUT_FETCH_TIMEOUT:-300s}"');
     expect(actionPublishStep.run).toContain("--force-with-lease=refs/heads/");
     expect(actionPublishStep.run).toContain(
       "GH013|repository rule violations|required status check",
