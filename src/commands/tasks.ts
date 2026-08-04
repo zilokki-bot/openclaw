@@ -469,6 +469,47 @@ export async function tasksNotifyCommand(
 }
 
 /** Cancels a detached task run by lookup token. */
+export async function tasksRedeliverCommand(
+  opts: { json?: boolean; lookup: string },
+  runtime: RuntimeEnv,
+) {
+  const task = reconcileTaskLookupToken(opts.lookup);
+  if (!task) {
+    runtime.error(formatTaskLookupMiss(opts.lookup));
+    runtime.exit(1);
+    return;
+  }
+  // Приостановленную доставку держит запись прогона, а не запись задачи:
+  // результат заморожен в её payload. Без runId возвращать нечего.
+  const runId = normalizeOptionalString(task.runId);
+  if (!runId) {
+    runtime.error(
+      `Task ${task.taskId} has no run id, so there is no suspended delivery to resume.`,
+    );
+    runtime.exit(1);
+    return;
+  }
+  const { listSuspendedSubagentDeliveries, resumeSuspendedSubagentDelivery } =
+    await import("../agents/subagent-registry.js");
+  const resumed = resumeSuspendedSubagentDelivery(runId);
+  if (opts.json) {
+    runtime.log(JSON.stringify({ taskId: task.taskId, runId, resumed }, null, 2));
+    return;
+  }
+  if (!resumed) {
+    // Отличаем «нечего возобновлять» от «возобновили»: молчаливый успех на
+    // no-op читается как доставка, которой не было. Заодно показываем, что
+    // вообще ждёт возобновления — иначе оператору некуда идти дальше.
+    const waiting = listSuspendedSubagentDeliveries().length;
+    runtime.error(
+      `No suspended delivery for run ${runId}; nothing was resumed. Delivery status: ${task.deliveryStatus}. Suspended deliveries waiting: ${waiting}.`,
+    );
+    runtime.exit(1);
+    return;
+  }
+  runtime.log(`Resumed suspended delivery for run ${runId} (task ${task.taskId}).`);
+}
+
 export async function tasksCancelCommand(opts: { lookup: string }, runtime: RuntimeEnv) {
   const task = reconcileTaskLookupToken(opts.lookup);
   if (!task) {
