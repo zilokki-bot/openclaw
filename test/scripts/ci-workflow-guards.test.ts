@@ -1466,24 +1466,24 @@ describe("ci workflow guards", () => {
     const workflowPaths = [
       [
         ".github/workflows/ci.yml",
-        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
-        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
       ],
       [".github/workflows/workflow-sanity.yml", "30s", "30s"],
       [
         ".github/workflows/ci-check-testbox.yml",
-        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
-        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
       ],
       [
         ".github/workflows/ci-check-arm-testbox.yml",
-        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
-        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
       ],
       [
         ".github/workflows/ci-build-artifacts-testbox.yml",
-        "\"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}\"",
-        "\"${CHECKOUT_FETCH_TIMEOUT:-300s}\"",
+        '"\\$\\{CHECKOUT_FETCH_TIMEOUT:-300s\\}"',
+        '"${CHECKOUT_FETCH_TIMEOUT:-300s}"',
       ],
       [".github/workflows/crabbox-hydrate.yml", "30s", "30s"],
     ] as const;
@@ -1500,9 +1500,7 @@ describe("ci workflow guards", () => {
       expect(fetchTimeouts?.length, workflowPath).toBeGreaterThan(0);
       expect(
         fetchTimeouts?.every((line) =>
-          line.startsWith(
-            `timeout --signal=TERM --kill-after=10s ${timeoutExpression} git`,
-          ),
+          line.startsWith(`timeout --signal=TERM --kill-after=10s ${timeoutExpression} git`),
         ),
         workflowPath,
       ).toBe(true);
