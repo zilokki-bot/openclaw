@@ -2854,6 +2854,7 @@ describe("ci workflow guards", () => {
     expect(buildArtifactsTestbox.jobs["build-artifacts"]["runs-on"]).toBe(
       "${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || 'blacksmith-16vcpu-ubuntu-2404' }}",
     );
+    expect(buildArtifactsTestbox.jobs["build-artifacts"]["runs-on"]).toContain("ubuntu-24.04");
     expect(
       buildArtifactsTestbox.jobs["build-artifacts"].steps.find(
         (step: { name?: string }) => step.name === "Build dist on cache miss",
