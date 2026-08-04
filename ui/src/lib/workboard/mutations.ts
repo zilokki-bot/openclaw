@@ -295,7 +295,12 @@ export async function dispatchWorkboard(params: {
       "workboard.cards.dispatch",
       selectedWorkboardBoardParams(state),
     );
-    const payload = await params.client.request("workboard.cards.list", {});
+    // Same contract as the initial load: the page owns the archive toggle, so it
+    // needs the archived cards too. Refetching without the flag would silently
+    // empty the archive view until the next full reload.
+    const payload = await params.client.request("workboard.cards.list", {
+      includeArchived: true,
+    });
     const normalized = normalizeCardsPayload(payload);
     state.cards = normalized.cards;
     state.statuses = normalized.statuses;
