@@ -1332,6 +1332,26 @@ describe("workboard controller", () => {
     expect(client.request).toHaveBeenCalledWith("workboard.cards.dispatch", { boardId: "ops" });
   });
 
+  it("keeps archived cards in the post-dispatch reload", async () => {
+    const client = createClient({
+      "workboard.cards.dispatch": {
+        promoted: [],
+        reclaimed: [],
+        blocked: [],
+        orchestrated: [],
+        count: 0,
+      },
+      "workboard.cards.list": { cards: [sampleCard], statuses: ["todo", "done"] },
+      "tasks.list": { tasks: [] },
+    });
+
+    await dispatchWorkboard({ host, client: client as never });
+
+    expect(client.request).toHaveBeenCalledWith("workboard.cards.list", {
+      includeArchived: true,
+    });
+  });
+
   it("clears stale refresh errors after a successful dispatch reload", async () => {
     state.lastRefreshError = "poll unavailable";
     const client = createClient({
