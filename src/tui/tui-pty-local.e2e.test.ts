@@ -95,10 +95,16 @@ const GATEWAY_SCENARIOS = {
 
 type GatewayScenarioId = keyof typeof GATEWAY_SCENARIOS;
 
-const LOCAL_STARTUP_TIMEOUT_MS = 60_000;
+// Measured on the 8 vCPU runner: a real gateway took 66.7s to hand back a
+// fresh session, so 60s failed by six seconds. More cores alone did not fix
+// it — the budget is the second half of the same problem.
+const LOCAL_STARTUP_TIMEOUT_MS = 120_000;
 const LOCAL_OUTPUT_TIMEOUT_MS = 120_000;
 const LOCAL_EXIT_TIMEOUT_MS = 4_000;
-const LOCAL_TEST_TIMEOUT_MS = 150_000;
+// Raised together with the startup budget: otherwise a slow-but-successful
+// startup would eat almost all of the old 150s and the test itself would time
+// out instead.
+const LOCAL_TEST_TIMEOUT_MS = 300_000;
 const SUBMISSION_SETTLE_MS = 150;
 const SESSION_ROLLOVER_RETRY_TIMEOUT_MS = 5_000;
 const SESSION_ROLLOVER_BUSY_MESSAGE = "abort the current run before /new";
