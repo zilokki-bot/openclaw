@@ -86,6 +86,7 @@ import {
   sanitizeToolResult,
   truncateLiveExecOutput,
 } from "./embedded-agent-subscribe.tools.js";
+import type { SubscribeEmbeddedAgentSessionParams } from "./embedded-agent-subscribe.types.js";
 import { inferToolMetaFromArgs } from "./embedded-agent-utils.js";
 import { parseExecApprovalResultText } from "./exec-approval-result.js";
 import {
@@ -164,11 +165,12 @@ function readUpdatePlanResult(
  * Reserving and delivering only for CLI meant a channel `ask_user` was never
  * shown to the human while the tool kept waiting, so it could only time out.
  */
-function hasAskUserPromptSurface(params: {
-  onToolResult?: unknown;
-  onBlockReply?: unknown;
-  onPartialReply?: unknown;
-}): boolean {
+function hasAskUserPromptSurface(
+  params: Pick<
+    SubscribeEmbeddedAgentSessionParams,
+    "onToolResult" | "onBlockReply" | "onPartialReply"
+  >,
+): boolean {
   return Boolean(params.onToolResult ?? params.onBlockReply ?? params.onPartialReply);
 }
 
