@@ -1492,7 +1492,7 @@ describe("ci workflow guards", () => {
       const workflow = readFileSync(workflowPath, "utf8");
       const fetchTimeouts = workflow.match(
         new RegExp(
-          `timeout --signal=TERM[^\n]* ${timeoutPattern} git(?: -C "(?:\$workdir|\$GITHUB_WORKSPACE|clawhub-source)")?`,
+          `timeout --signal=TERM[^\n]* ${timeoutPattern} git(?: -C "(?:$workdir|$GITHUB_WORKSPACE|clawhub-source)")?`,
           "g",
         ),
       );
