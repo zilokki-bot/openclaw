@@ -205,7 +205,7 @@ export function registerWorkboardGatewayMethods(params: {
   store?: WorkboardStore;
 }) {
   const { api } = params;
-  const store = params.store ?? WorkboardStore.openSqlite();
+  const store = params.store ?? WorkboardStore.shared();
 
   api.registerGatewayMethod(
     "workboard.cards.list",

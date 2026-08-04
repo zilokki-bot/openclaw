@@ -11,7 +11,7 @@ export default definePluginEntry({
   name: "Workboard",
   description: "Dashboard workboard for agent-owned issues and sessions.",
   register(api) {
-    const store = WorkboardStore.openSqlite();
+    const store = WorkboardStore.shared();
     registerWorkboardGatewayMethods({ api, store });
     registerWorkboardCommand({ api, store });
     api.on("subagent_ended", async (event) => {
