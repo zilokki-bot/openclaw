@@ -2933,7 +2933,7 @@ describe("package artifact reuse", () => {
     for (const [workflowPath, jobName] of cases) {
       const installStep = workflowStep(workflowJob(workflowPath, jobName), "Install Crabbox CLI");
       expect(installStep.run, workflowPath).toMatch(
-        /timeout --signal=TERM --kill-after=10s 300s git (?:clone|-C .* fetch)/u,
+        /timeout --signal=TERM --kill-after=10s \"${CHECKOUT_FETCH_TIMEOUT:-300s}\" git (?:clone|-C .* fetch)/u,
       );
     }
   });
