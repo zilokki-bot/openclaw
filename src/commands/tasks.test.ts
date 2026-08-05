@@ -363,6 +363,47 @@ describe("tasks commands", () => {
     });
   });
 
+  it("routes active CLI task cancellation through the live gateway before local fallback", async () => {
+    await withTaskCommandStateDir(async () => {
+      const task = createTaskRecord({
+        runtime: "cli",
+        ownerKey: "agent:analyst:subagent:workboard-exact",
+        scopeKind: "session",
+        childSessionKey: "agent:analyst:subagent:workboard-exact",
+        runId: "workboard-exact:card-123:456",
+        task: "Cancel Workboard exact runner child",
+        status: "running",
+        deliveryStatus: "not_applicable",
+        notifyPolicy: "silent",
+      });
+      mocks.callGateway.mockResolvedValueOnce({
+        found: true,
+        cancelled: true,
+        task: {
+          taskId: task.taskId,
+          runtime: "cli",
+          runId: task.runId,
+        },
+      });
+      const runtime = createRuntime();
+
+      await tasksCancelCommand({ lookup: task.taskId }, runtime);
+
+      expect(mocks.callGateway).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "tasks.cancel",
+          params: { taskId: task.taskId },
+          timeoutMs: 5_000,
+        }),
+      );
+      expect(runtime.log).toHaveBeenCalledWith(
+        `Cancelled ${task.taskId} (cli) run workboard-exact:card-123:456.`,
+      );
+      expect(runtime.error).not.toHaveBeenCalled();
+      expect(runtime.exit).not.toHaveBeenCalled();
+    });
+  });
+
   it("routes ACP task cancellation through the live gateway before local fallback", async () => {
     await withTaskCommandStateDir(async () => {
       const task = createTaskRecord({

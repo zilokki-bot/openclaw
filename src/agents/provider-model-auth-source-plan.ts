@@ -45,7 +45,11 @@ export type ProviderModelAuthSource =
 type ProviderModelAuthRequiredReason = "configured-auth" | "provider-binding" | "user-lock";
 
 type ProviderModelAuthAutomaticProfiles =
-  | { kind: "empty"; explicitOrder: boolean }
+  // `consideredProfileIds` нужен только тексту отказа. Без него сообщение
+  // одинаково для двух разных болезней: имени профиля не существует, либо
+  // профиль есть, но не готов. Починки у них разные, а различить по тексту
+  // было нельзя — разбор упирался в ручное сравнение конфига с хранилищем.
+  | { kind: "empty"; explicitOrder: boolean; consideredProfileIds?: readonly string[] }
   | {
       kind: "usable";
       explicitOrder: boolean;
@@ -55,6 +59,7 @@ type ProviderModelAuthAutomaticProfiles =
       kind: "all-unavailable";
       explicitOrder: boolean;
       first: ProviderModelAuthProfileSource;
+      consideredProfileIds?: readonly string[];
     }
   | {
       kind: "all-cooldown";
@@ -149,6 +154,7 @@ export function buildProviderModelAuthSourcePlan(params: {
   }
   const explicitOrder = params.explicitOrder === true;
   const ordered = reorderPreferredProfile(params.profiles, params.preferredProfileId);
+  const consideredProfileIds = ordered.map((profile) => profile.profileId);
   let profiles: ProviderModelAuthAutomaticProfiles;
   if (ordered.length === 0) {
     profiles = { kind: "empty", explicitOrder };
@@ -157,8 +163,8 @@ export function buildProviderModelAuthSourcePlan(params: {
     if (available.length === 0) {
       const [firstOrdered] = ordered;
       profiles = firstOrdered
-        ? { kind: "all-unavailable", explicitOrder, first: firstOrdered }
-        : { kind: "empty", explicitOrder };
+        ? { kind: "all-unavailable", explicitOrder, first: firstOrdered, consideredProfileIds }
+        : { kind: "empty", explicitOrder, consideredProfileIds };
     } else {
       const outsideCooldown = available.filter((profile) => profile.cooldown === "clear");
       if (outsideCooldown.length > 0) {

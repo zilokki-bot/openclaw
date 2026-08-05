@@ -302,6 +302,8 @@ type ToolHandlerParams = Pick<
   | "onAgentToolResult"
   | "observeToolTerminal"
   | "onToolResult"
+  | "onBlockReply"
+  | "onPartialReply"
   | "config"
   | "messageChannel"
   | "sessionKey"
