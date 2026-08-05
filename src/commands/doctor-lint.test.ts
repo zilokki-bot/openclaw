@@ -6,11 +6,22 @@ import { runDoctorLintCli } from "./doctor-lint.js";
 
 const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(),
+  registerBundledHealthChecks: vi.fn(),
+  collectRuntimeToolSchemaFindings: vi.fn(async () => []),
 }));
 
 vi.mock("../config/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../config/config.js")>()),
   readConfigFileSnapshot: mocks.readConfigFileSnapshot,
+}));
+
+vi.mock("../flows/bundled-health-checks.js", () => ({
+  registerBundledHealthChecks: mocks.registerBundledHealthChecks,
+}));
+
+vi.mock("../flows/doctor-core-checks.runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../flows/doctor-core-checks.runtime.js")>()),
+  collectRuntimeToolSchemaFindings: mocks.collectRuntimeToolSchemaFindings,
 }));
 
 const runtime = {
@@ -260,6 +271,96 @@ describe("runDoctorLintCli", () => {
       expect(payload.ok).toBe(true);
       expect(payload.checksRun).toBe(2);
       expect(payload.findings).toEqual([]);
+      expect(mocks.registerBundledHealthChecks).toHaveBeenCalledTimes(1);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("does not register bundled extension checks for explicit core-only lint", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runDoctorLintCli(runtime, {
+        json: true,
+        onlyIds: ["core/doctor/final-config-validation"],
+      });
+
+      expect(mocks.registerBundledHealthChecks).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("does not run runtime-heavy projection checks for default lint", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runDoctorLintCli(runtime, {
+        json: true,
+      });
+
+      const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
+      expect(payload.checksRun).toBeGreaterThan(0);
+      expect(mocks.collectRuntimeToolSchemaFindings).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("registers bundled extension checks when all checks are requested", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runDoctorLintCli(runtime, {
+        json: true,
+        includeAllChecks: true,
+        onlyIds: ["core/doctor/final-config-validation"],
+      });
+
+      expect(mocks.registerBundledHealthChecks).toHaveBeenCalledTimes(1);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("still runs runtime-heavy projection checks when explicitly selected", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const exitCode = await runDoctorLintCli(runtime, {
+        json: true,
+        onlyIds: ["core/doctor/runtime-tool-schemas"],
+      });
+
+      expect(exitCode).toBe(0);
+      const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
+      expect(payload.checksRun).toBe(1);
+      expect(mocks.collectRuntimeToolSchemaFindings).toHaveBeenCalledTimes(1);
     } finally {
       stdout.mockRestore();
     }

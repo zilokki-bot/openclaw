@@ -152,7 +152,16 @@ export function resolveFinalDoctorHealthContributions(params: {
     createDoctorHealthContribution({
       id: "doctor:runtime-tool-schemas",
       label: "Runtime tool schemas",
-      healthCheckIds: ["core/doctor/runtime-tool-schemas"],
+      healthChecks: {
+        id: "core/doctor/runtime-tool-schemas",
+        description: "Runtime tool schema projection diagnostics are exposed as findings.",
+        defaultEnabled: false,
+        async detect(ctx) {
+          const { collectRuntimeToolSchemaFindings } =
+            await import("./doctor-core-checks.runtime.js");
+          return collectRuntimeToolSchemaFindings(ctx);
+        },
+      },
       run: (ctx) => runCoreHealthFindingNote(ctx, "core/doctor/runtime-tool-schemas"),
     }),
     createDoctorHealthContribution({
