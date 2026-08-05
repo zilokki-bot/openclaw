@@ -1845,6 +1845,57 @@ describe("TelegramPollingSession", () => {
     await runPromise;
   });
 
+  it("releases isolated ingress singleflight owner when bot init fails", async () => {
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    const log = vi.fn();
+    const firstBot = makeIsolatedBot({
+      init: async () => {
+        throw new Error("init failed");
+      },
+    });
+    const secondBot = makeIsolatedBot({ init: async () => undefined });
+    createTelegramBotMock.mockReturnValueOnce(firstBot).mockReturnValueOnce(secondBot);
+
+    let secondWorkerDone: (() => void) | undefined;
+    const secondWorkerWait = new Promise<void>((resolve) => {
+      secondWorkerDone = resolve;
+    });
+    const secondCreateWorker = vi.fn(() => ({
+      onMessage: vi.fn(() => () => undefined),
+      stop: vi.fn(async () => undefined),
+      task: vi.fn(async () => {
+        await secondWorkerWait;
+      }),
+    }));
+
+    const firstSession = createPollingSession({
+      abortSignal: firstAbort.signal,
+      log,
+      isolatedIngress: { enabled: true },
+    });
+
+    sleepWithAbortMock.mockImplementationOnce(async () => {
+      firstAbort.abort();
+    });
+    await firstSession.runUntilAbort();
+
+    const secondSession = createPollingSession({
+      abortSignal: secondAbort.signal,
+      log,
+      isolatedIngress: {
+        enabled: true,
+        createWorker: secondCreateWorker,
+      },
+    });
+    const secondRun = secondSession.runUntilAbort();
+    await vi.waitFor(() => expect(secondCreateWorker).toHaveBeenCalledTimes(1));
+
+    secondAbort.abort();
+    secondWorkerDone?.();
+    await secondRun;
+  });
+
   it("singleflights isolated ingress workers per account in one gateway process", async () => {
     const firstAbort = new AbortController();
     const secondAbort = new AbortController();
