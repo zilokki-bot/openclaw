@@ -687,6 +687,18 @@ describe("discoverOpenClawPlugins", () => {
     mkdirSafe(disabledDir);
     fs.writeFileSync(path.join(disabledDir, "index.ts"), "export default function () {}", "utf-8");
 
+    const disabledHyphenDir = path.join(globalExt, "pulse-footer.disabled-20260619");
+    mkdirSafe(disabledHyphenDir);
+    fs.writeFileSync(
+      path.join(disabledHyphenDir, "index.ts"),
+      "export default function () {}",
+      "utf-8",
+    );
+
+    const retiredDir = path.join(globalExt, "pulse-footer.retired-20260619");
+    mkdirSafe(retiredDir);
+    fs.writeFileSync(path.join(retiredDir, "index.ts"), "export default function () {}", "utf-8");
+
     const bakDir = path.join(globalExt, "discord.bak");
     mkdirSafe(bakDir);
     fs.writeFileSync(path.join(bakDir, "index.ts"), "export default function () {}", "utf-8");
@@ -698,8 +710,38 @@ describe("discoverOpenClawPlugins", () => {
     const { candidates } = await discoverWithStateDir(stateDir, {});
     expectCandidateIds(candidates, {
       includes: ["live"],
-      excludes: ["feishu.backup-20260222", "telegram.disabled.20260222", "discord.bak"],
+      excludes: [
+        "feishu.backup-20260222",
+        "telegram.disabled.20260222",
+        "pulse-footer.disabled-20260619",
+        "pulse-footer.retired-20260619",
+        "discord.bak",
+      ],
     });
+  });
+
+  it("ignores retired and disabled plugin directories in explicit load paths", () => {
+    const stateDir = makeTempDir();
+    const disabledDir = path.join(stateDir, "pulse-footer.disabled-20260619");
+    mkdirSafe(disabledDir);
+    fs.writeFileSync(path.join(disabledDir, "index.ts"), "export default function () {}", "utf-8");
+
+    const retiredDir = path.join(stateDir, "pulse-footer.retired-20260619");
+    mkdirSafe(retiredDir);
+    fs.writeFileSync(path.join(retiredDir, "index.ts"), "export default function () {}", "utf-8");
+
+    const result = discoverOpenClawPlugins({
+      extraPaths: [disabledDir, retiredDir],
+      env: buildDiscoveryEnv(stateDir),
+    });
+
+    expectCandidateIds(result.candidates, {
+      excludes: ["pulse-footer.disabled-20260619", "pulse-footer.retired-20260619"],
+    });
+    expect(result.diagnostics.map((diag) => diag.message)).toEqual([
+      `ignored retired/disabled plugin path: ${disabledDir}`,
+      `ignored retired/disabled plugin path: ${retiredDir}`,
+    ]);
   });
 
   it("does not warn about source checkout deps when bundled plugins are disabled", () => {

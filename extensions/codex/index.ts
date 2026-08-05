@@ -59,6 +59,10 @@ export default definePluginEntry({
   description:
     "Codex app-server harness, Codex-managed GPT catalog, and native session supervision.",
   register(api) {
+    if (api.registrationMode === "cli-metadata") {
+      registerCodexCliMetadata(api);
+      return;
+    }
     const resolveCurrentConfig = () =>
       api.runtime.config?.current ? (api.runtime.config.current() as OpenClawConfig) : undefined;
     const resolvePluginConfig = (resolveConfig: () => OpenClawConfig | undefined) => {

@@ -992,6 +992,66 @@ module.exports = {
     expect(loaded?.error).toContain("plugin register must be synchronous");
   });
 
+  it("keeps collecting CLI metadata when one plugin requires a newer runtime ABI", async () => {
+    useNoBundledPlugins();
+    const staleCodex = writePlugin({
+      id: "stale-codex",
+      filename: "stale-codex.cjs",
+      body: `module.exports = {
+  id: "stale-codex",
+  register(api) {
+    api.runtime.state.openSyncKeyedStore({ namespace: "codex", maxEntries: 1 });
+    api.registerCli(() => {}, {
+      descriptors: [
+        {
+          name: "stale-codex",
+          description: "Stale Codex CLI metadata",
+          hasSubcommands: true,
+        },
+      ],
+    });
+  },
+};`,
+    });
+    const healthy = writePlugin({
+      id: "healthy-cli",
+      filename: "healthy-cli.cjs",
+      body: `module.exports = {
+  id: "healthy-cli",
+  register(api) {
+    api.registerCli(() => {}, {
+      descriptors: [
+        {
+          name: "healthy-cli",
+          description: "Healthy CLI metadata",
+          hasSubcommands: true,
+        },
+      ],
+    });
+  },
+};`,
+    });
+
+    const registry = await loadOpenClawPluginCliRegistry({
+      cache: false,
+      config: {
+        plugins: {
+          load: { paths: [staleCodex.file, healthy.file] },
+          allow: ["stale-codex", "healthy-cli"],
+        },
+      },
+    });
+
+    expect(registry.cliRegistrars.flatMap((entry) => entry.commands)).toContain("healthy-cli");
+    expect(registry.cliRegistrars.flatMap((entry) => entry.commands)).not.toContain("stale-codex");
+    const stale = registry.plugins.find((entry) => entry.id === "stale-codex");
+    expect(stale?.status).toBe("error");
+    expect(stale?.failurePhase).toBe("register");
+    expect(stale?.error).toContain("openSyncKeyedStore");
+    const healthyRecord = registry.plugins.find((entry) => entry.id === "healthy-cli");
+    expect(healthyRecord?.status).toBe("loaded");
+  });
+
   it("applies memory slot gating to non-bundled CLI metadata loads", async () => {
     useNoBundledPlugins();
     const plugin = writePlugin({

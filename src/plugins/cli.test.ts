@@ -189,6 +189,23 @@ describe("registerPluginCliCommands", () => {
     expect(mocks.otherRegister).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps selected primary plugin CLI registration failures fail-closed", async () => {
+    const program = createProgram();
+    mocks.resolveManifestActivationPluginIds.mockReturnValue(["memory-core"]);
+    mocks.memoryRegister.mockImplementation(() => {
+      throw new Error("stale plugin ABI");
+    });
+
+    await expect(
+      registerPluginCliCommands(program, {} as OpenClawConfig, undefined, undefined, {
+        mode: "lazy",
+        primary: "memory",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.otherRegister).toHaveBeenCalledTimes(1);
+  });
+
   it("forwards an explicit env to plugin loading", async () => {
     const env = { OPENCLAW_HOME: "/srv/openclaw-home" } as NodeJS.ProcessEnv;
 
