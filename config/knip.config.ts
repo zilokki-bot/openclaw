@@ -254,6 +254,22 @@ const config = {
       entry: ["index.js!", "scripts/postinstall.js!"],
       project: ["index.js!", "scripts/**/*.js!"],
     },
+    "extensions/onepassword": {
+      entry: [
+        "index.ts!",
+        "onepassword-op-path.js!",
+        "onepassword-secret-id.js!",
+        "onepassword-secret-ref-resolver.js!",
+        "src/**/*.ts!",
+      ],
+      project: ["index.ts!", "onepassword-*.js!", "src/**/*.ts!"],
+      ignoreDependencies: [
+        // Static resolver asset imports execa at runtime; Knip does not treat
+        // plugin static assets as production entry points unless listed here.
+        "execa",
+        "openclaw",
+      ],
+    },
     [`${BUNDLED_PLUGIN_ROOT_DIR}/llama-cpp`]: {
       entry: bundledPluginEntries,
       project: ["index.ts!", "src/**/*.{js,mjs,ts}!"],

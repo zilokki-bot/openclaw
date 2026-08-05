@@ -1325,6 +1325,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/onepassword:
+    dependencies:
+      '@openclaw/fs-safe':
+        specifier: 0.5.0
+        version: 0.5.0
+      execa:
+        specifier: 10.0.0
+        version: 10.0.0
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/open-prose:
     devDependencies:
       '@openclaw/plugin-sdk':
@@ -3512,6 +3525,10 @@ packages:
     resolution: {integrity: sha512-hQi+BxO10KdRFlYUot1syC+hTaUnGeQNdqX5kwkKJig8CFq1tKsYJLPm+zkiiGsSKOprPAquQl/txejEhpKPgg==}
     engines: {node: '>=22'}
 
+  '@openclaw/fs-safe@0.5.0':
+    resolution: {integrity: sha512-TPpFG8PkAKlM/eP7glzHhCeZnDX3sSqyjXgeoc0jeyii0y957/zePB62BIwc75gOFmxaeKLWkd4iF41/Ghlgjg==}
+    engines: {node: '>=22'}
+
   '@openclaw/libterminal@0.3.1':
     resolution: {integrity: sha512-nKEreLY6sdRvn+9UEcZhFpLYg3mJA4tmqNLZiYSMfislU11skiPWJfT7fn6ERsgAJsVMOSxeiVjBb5AX7dLKdQ==}
     engines: {node: ^22.18.0 || >=24.11.0}
@@ -5638,6 +5655,10 @@ packages:
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
+
+  execa@10.0.0:
+    resolution: {integrity: sha512-Cxl6MKxB1dr1H0FHmiizJ+lavKF7pV+fcDZFyqMB8d5m7qUPm/OtZYcD5vPWePKxSnTQ57KuBd9mtdZ3oNCvyQ==}
+    engines: {node: '>=22'}
 
   execa@4.1.0:
     resolution: {integrity: sha512-j5W0//W7f8UxAn8hXVnwG8tLwdiUy4FJLcSupCg6maBYZDpyBvTApK7KyuI4bKj8KOh1r2YH+6ucuYtJv1bTZA==}
@@ -8043,6 +8064,11 @@ packages:
   whatwg-url@5.0.0:
     resolution: {integrity: sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==}
 
+  which-command@0.1.0:
+    resolution: {integrity: sha512-XZyoF5/5hZtXitIwzrU4NKK+Wtbb9aB9CezUEw2Q0wlYK8NUYQxC1rRXgNueYLtBAJwXIb+/tFVk4dozciNJMA==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   which-module@2.0.1:
     resolution: {integrity: sha512-iBdZ57RDvnOR9AGBhML2vFZf7h8vmBjhoaZqODJBFWHVtKkDmKuHai3cx5PgVMrX5YDNp27AofYbAwctSS+vhQ==}
 
@@ -9814,6 +9840,11 @@ snapshots:
       - utf-8-validate
 
   '@openclaw/fs-safe@0.4.1(patch_hash=e49004277fcb3e714125baf15a996682c7310e8e9269c865cc5bcb9fef46a57c)':
+    optionalDependencies:
+      jszip: 3.10.1
+      tar: 7.5.19
+
+  '@openclaw/fs-safe@0.5.0':
     optionalDependencies:
       jszip: 3.10.1
       tar: 7.5.19
@@ -11881,6 +11912,22 @@ snapshots:
   eventsource@3.0.7:
     dependencies:
       eventsource-parser: 3.1.0
+
+  execa@10.0.0:
+    dependencies:
+      '@sindresorhus/merge-streams': 4.0.0
+      figures: 6.1.0
+      get-stream: 9.0.1
+      human-signals: 8.0.1
+      is-plain-obj: 4.1.0
+      is-stream: 4.0.1
+      npm-run-path: 6.0.0
+      path-key: 4.0.0
+      pretty-ms: 9.3.0
+      signal-exit: 4.1.0
+      strip-final-newline: 4.0.0
+      which-command: 0.1.0
+      yoctocolors: 2.1.2
 
   execa@4.1.0:
     dependencies:
@@ -14699,6 +14746,8 @@ snapshots:
     dependencies:
       tr46: 0.0.3
       webidl-conversions: 3.0.1
+
+  which-command@0.1.0: {}
 
   which-module@2.0.1: {}
 
