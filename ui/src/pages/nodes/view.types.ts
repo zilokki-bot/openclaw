@@ -30,7 +30,6 @@ export type NodesProps = {
   execApprovalsSelectedAgent: string | null;
   execApprovalsTarget: "gateway" | "node";
   execApprovalsTargetNodeId: string | null;
-  onRefresh: () => void;
   onDevicePairSetupOpen: () => void;
   onDeviceApprove: (requestId: string) => void;
   onDeviceReject: (requestId: string) => void;
@@ -43,7 +42,7 @@ export type NodesProps = {
   onLoadConfig: () => void;
   onLoadExecApprovals: () => void;
   onBindDefault: (nodeId: string | null) => void;
-  onBindAgent: (agentIndex: number, nodeId: string | null) => void;
+  onBindAgent: (agentId: string, nodeId: string | null) => void;
   onSaveBindings: () => void;
   onExecApprovalsTargetChange: (kind: "gateway" | "node", nodeId: string | null) => void;
   onExecApprovalsSelectAgent: (agentId: string) => void;

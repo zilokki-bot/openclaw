@@ -610,7 +610,3 @@ export async function releaseStoppedTelegramPollingLease(
   existing.resolveDone();
   return true;
 }
-
-export function resetTelegramPollingLeasesForTests(): void {
-  pollingLeaseRegistry().clear();
-}

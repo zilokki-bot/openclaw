@@ -18,11 +18,11 @@ import type { MigrationApplyResult, MigrationPlan } from "../plugins/types.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { writeRuntimeJson } from "../runtime.js";
 import { runMigrationApply } from "./migrate/apply.js";
+import { applyMigrationItemSelection } from "./migrate/item-selection.js";
 import { formatMigrationPreview } from "./migrate/output.js";
 import { createMigrationPlan, resolveMigrationProvider } from "./migrate/providers.js";
 import {
   applyMigrationPluginSelection,
-  applyExplicitMigrationSelectionBoundary,
   applyMigrationSelectedPluginItemIds,
   applyMigrationSelectedSkillItemIds,
   applyMigrationSkillSelection,
@@ -50,9 +50,9 @@ import type {
 } from "./migrate/types.js";
 
 function selectMigrationItems(plan: MigrationPlan, opts: MigrateCommonOptions): MigrationPlan {
-  return applyExplicitMigrationSelectionBoundary(
+  return applyMigrationItemSelection(
     applyMigrationPluginSelection(applyMigrationSkillSelection(plan, opts.skills), opts.plugins),
-    opts,
+    opts.itemIds,
   );
 }
 
@@ -204,7 +204,6 @@ async function promptCodexMigrationSkillSelection(
       },
     ],
     initialValues: getDefaultMigrationSkillSelectionValues(skillItems),
-    required: false,
     selectableValues: skillItems.map(getMigrationSkillSelectionValue),
     cursorAt: MIGRATION_SELECTION_ACCEPT,
   });
@@ -265,7 +264,6 @@ async function promptCodexMigrationPluginSelection(
       },
     ],
     initialValues: getDefaultMigrationPluginSelectionValues(pluginItems),
-    required: false,
     selectableValues: pluginItems.map(getMigrationPluginSelectionValue),
     cursorAt: MIGRATION_SELECTION_ACCEPT,
   });
@@ -300,7 +298,7 @@ function hasSelectedCodexMigrationWork(plan: MigrationPlan): boolean {
       item.status === "planned" &&
       (item.kind === "auth" ||
         item.kind === "secret" ||
-        (item.kind === "skill" && (item.action === "copy" || item.action === "create")) ||
+        (item.kind === "skill" && item.action === "copy") ||
         (item.kind === "plugin" && item.action === "install")),
   );
 }
@@ -383,13 +381,12 @@ export async function migratePlanCommand(
     ...resolvedOpts,
     provider: providerId,
   });
-  const selectedPlan = selectMigrationItems(plan, resolvedOpts);
   if (resolvedOpts.json) {
-    writeRuntimeJson(runtime, redactMigrationPlan(selectedPlan));
+    writeRuntimeJson(runtime, redactMigrationPlan(plan));
   } else if (resolvedOpts.suppressPlanLog !== true) {
-    log.message(formatMigrationPreview(selectedPlan).join("\n"));
+    log.message(formatMigrationPreview(plan).join("\n"));
   }
-  return selectedPlan;
+  return plan;
 }
 
 /** Applies a migration non-interactively when `yes` is true. */

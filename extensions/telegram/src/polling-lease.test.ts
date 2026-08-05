@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireTelegramPollingLease,
   releaseStoppedTelegramPollingLease,
-  resetTelegramPollingLeasesForTests,
 } from "./polling-lease.js";
+import { resetTelegramPollingLeasesForTest as resetTelegramPollingLeasesForTests } from "./runtime.test-support.js";
 
 describe("Telegram polling lease", () => {
   let tempDirs: string[] = [];

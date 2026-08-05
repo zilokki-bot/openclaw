@@ -3,21 +3,18 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it } from "vitest";
 import type { MigrationItem, MigrationPlan } from "../../plugins/types.js";
+import { applyMigrationItemSelection } from "./item-selection.js";
 import {
-  applyExplicitMigrationSelectionBoundary,
   applyMigrationPluginSelection,
   applyMigrationSelectedPluginItemIds,
   applyMigrationSelectedSkillItemIds,
   applyMigrationSkillSelection,
   formatMigrationPluginSelectionHint,
   getDefaultMigrationPluginSelectionValues,
-  getSelectableMigrationSkillItems,
   getSelectableMigrationPluginItems,
   getDefaultMigrationSkillSelectionValues,
-  MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
-  MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
-  MIGRATION_PLUGIN_NOT_SELECTED_REASON,
-  MIGRATION_SKILL_NOT_SELECTED_REASON,
+  MIGRATION_SELECTION_TOGGLE_ALL_OFF,
+  MIGRATION_SELECTION_TOGGLE_ALL_ON,
   reconcileInteractiveMigrationEnterValues,
   reconcileInteractiveMigrationShortcutValues,
   reconcileInteractiveMigrationSkillToggleValues,
@@ -25,19 +22,18 @@ import {
   resolveInteractiveMigrationSkillSelection,
 } from "./selection.js";
 
-const MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON = "outside explicit migration selection";
+const MIGRATION_NOT_SELECTED_REASON = "not selected for migration";
 
 function skillItem(params: {
   id: string;
   name: string;
-  action?: MigrationItem["action"];
   status?: MigrationItem["status"];
   reason?: string;
 }): MigrationItem {
   return {
     id: params.id,
     kind: "skill",
-    action: params.action ?? "copy",
+    action: "copy",
     status: params.status ?? "planned",
     source: `/tmp/codex/skills/${params.name}`,
     target: `/tmp/openclaw/workspace/skills/${params.name}`,
@@ -173,32 +169,38 @@ function requireCodexPluginConfigPlugins(item: MigrationItem): Record<string, un
   return requireRecord(codexPlugins.plugins, "configured plugins");
 }
 
-describe("applyMigrationSkillSelection", () => {
-  it("selects Claude-created skills passed through the shared CLI selector", () => {
-    const selected = applyMigrationSkillSelection(
+describe("applyMigrationItemSelection", () => {
+  it("keeps exact selected ids and skips other planned or conflicting items", () => {
+    const selected = applyMigrationItemSelection(
       plan([
+        skillItem({ id: "memory:one", name: "one" }),
+        skillItem({ id: "memory:two", name: "two" }),
         skillItem({
-          id: "skill:claude-command-design-review",
-          name: "claude-command-design-review",
-          action: "create",
+          id: "memory:existing",
+          name: "existing",
+          status: "conflict",
+          reason: "target exists",
         }),
-        skillItem({ id: "skill:codex-helper", name: "codex-helper" }),
       ]),
-      ["claude-command-design-review"],
+      ["memory:two"],
     );
 
-    expect(getSelectableMigrationSkillItems(selected).map((item) => item.id)).toEqual([
-      "skill:claude-command-design-review",
-    ]);
-    expectItemStatus(selected.items, "skill:claude-command-design-review", "planned");
-    expectItemStatus(
-      selected.items,
-      "skill:codex-helper",
-      "skipped",
-      MIGRATION_SKILL_NOT_SELECTED_REASON,
-    );
+    expectItemStatus(selected.items, "memory:one", "skipped", MIGRATION_NOT_SELECTED_REASON);
+    expectItemStatus(selected.items, "memory:two", "planned");
+    expectItemStatus(selected.items, "memory:existing", "skipped", MIGRATION_NOT_SELECTED_REASON);
+    expectSummaryFields(selected.summary, { planned: 1, skipped: 2, conflicts: 0 });
   });
 
+  it("rejects stale or unavailable item ids", () => {
+    expect(() =>
+      applyMigrationItemSelection(plan([skillItem({ id: "memory:one", name: "one" })]), [
+        "memory:stale",
+      ]),
+    ).toThrow('Unknown or unavailable migration item ids: "memory:stale".');
+  });
+});
+
+describe("applyMigrationSkillSelection", () => {
   it("keeps selected skills and skips unselected skill copy items", () => {
     const selected = applyMigrationSkillSelection(
       plan([
@@ -227,7 +229,7 @@ describe("applyMigrationSkillSelection", () => {
       conflicts: 0,
     });
     expectItemStatus(selected.items, "skill:alpha", "planned");
-    expectItemStatus(selected.items, "skill:beta", "skipped", MIGRATION_SKILL_NOT_SELECTED_REASON);
+    expectItemStatus(selected.items, "skill:beta", "skipped", MIGRATION_NOT_SELECTED_REASON);
     expectItemStatus(selected.items, "archive:config.toml", "planned");
   });
 
@@ -239,83 +241,6 @@ describe("applyMigrationSkillSelection", () => {
 
     expect(selected.items).toHaveLength(1);
     expectItemStatus(selected.items, "skill:alpha", "planned");
-  });
-
-  it("treats generated command skills as selectable skill items", () => {
-    const selected = applyMigrationSkillSelection(
-      plan([
-        skillItem({
-          id: "skill:claude-command-ship",
-          name: "claude-command-ship",
-          action: "create",
-        }),
-        skillItem({ id: "skill:review", name: "review", action: "copy" }),
-      ]),
-      ["claude-command-ship"],
-    );
-
-    expectItemStatus(selected.items, "skill:claude-command-ship", "planned");
-    expectItemStatus(
-      selected.items,
-      "skill:review",
-      "skipped",
-      MIGRATION_SKILL_NOT_SELECTED_REASON,
-    );
-    expectSummaryFields(selected.summary, { planned: 1, skipped: 1 });
-  });
-
-  it("skips non-skill planned items outside explicit skill selection", () => {
-    const selected = applyExplicitMigrationSelectionBoundary(
-      applyMigrationSkillSelection(
-        plan([
-          skillItem({ id: "skill:alpha", name: "alpha" }),
-          skillItem({ id: "skill:beta", name: "beta" }),
-          {
-            id: "memory:codex:notes.md",
-            kind: "memory",
-            action: "copy",
-            status: "planned",
-          },
-          {
-            id: "config:mcp-server:codex",
-            kind: "config",
-            action: "merge",
-            status: "planned",
-          },
-          {
-            id: "archive:config.toml",
-            kind: "archive",
-            action: "archive",
-            status: "planned",
-          },
-          {
-            id: "workspace:USER.md",
-            kind: "workspace",
-            action: "append",
-            status: "planned",
-          },
-        ]),
-        ["alpha"],
-      ),
-      { skills: ["alpha"] },
-    );
-
-    expectItemStatus(selected.items, "skill:alpha", "planned");
-    expectItemStatus(selected.items, "skill:beta", "skipped", MIGRATION_SKILL_NOT_SELECTED_REASON);
-    for (const id of [
-      "memory:codex:notes.md",
-      "config:mcp-server:codex",
-      "archive:config.toml",
-      "workspace:USER.md",
-    ]) {
-      expectItemStatus(
-        selected.items,
-        id,
-        "skipped",
-        MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON,
-      );
-    }
-    expectSummaryFields(selected.summary, { planned: 1, skipped: 5 });
   });
 
   it("can skip conflicting skills before apply conflict checks run", () => {
@@ -334,7 +259,7 @@ describe("applyMigrationSkillSelection", () => {
 
     expect(selected.summary.conflicts).toBe(0);
     expectItemStatus(selected.items, "skill:alpha", "planned");
-    expectItemStatus(selected.items, "skill:beta", "skipped", MIGRATION_SKILL_NOT_SELECTED_REASON);
+    expectItemStatus(selected.items, "skill:beta", "skipped", MIGRATION_NOT_SELECTED_REASON);
   });
 
   it("allows interactive selection to choose no skills", () => {
@@ -377,12 +302,12 @@ describe("applyMigrationSkillSelection", () => {
 
     expect(
       resolveInteractiveMigrationSkillSelection(items, [
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
+        MIGRATION_SELECTION_TOGGLE_ALL_ON,
+        MIGRATION_SELECTION_TOGGLE_ALL_OFF,
       ]),
     ).toEqual({ action: "select", selectedItemIds: new Set() });
     expect(
-      resolveInteractiveMigrationSkillSelection(items, [MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON]),
+      resolveInteractiveMigrationSkillSelection(items, [MIGRATION_SELECTION_TOGGLE_ALL_ON]),
     ).toEqual({
       action: "select",
       selectedItemIds: new Set(["skill:alpha", "skill:beta"]),
@@ -394,28 +319,28 @@ describe("applyMigrationSkillSelection", () => {
 
     expect(
       reconcileInteractiveMigrationSkillToggleValues(
-        [MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON],
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
+        [MIGRATION_SELECTION_TOGGLE_ALL_ON],
+        MIGRATION_SELECTION_TOGGLE_ALL_ON,
         selectable,
       ),
-    ).toEqual([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON, "skill:alpha", "skill:beta"]);
+    ).toEqual([MIGRATION_SELECTION_TOGGLE_ALL_ON, "skill:alpha", "skill:beta"]);
 
     expect(
       reconcileInteractiveMigrationSkillToggleValues(
         [
-          MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
+          MIGRATION_SELECTION_TOGGLE_ALL_ON,
           "skill:alpha",
           "skill:beta",
-          MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
+          MIGRATION_SELECTION_TOGGLE_ALL_OFF,
         ],
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
+        MIGRATION_SELECTION_TOGGLE_ALL_OFF,
         selectable,
       ),
-    ).toEqual([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF]);
+    ).toEqual([MIGRATION_SELECTION_TOGGLE_ALL_OFF]);
 
     expect(
       reconcileInteractiveMigrationSkillToggleValues(
-        [MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF, "skill:alpha"],
+        [MIGRATION_SELECTION_TOGGLE_ALL_OFF, "skill:alpha"],
         "skill:alpha",
         selectable,
       ),
@@ -425,24 +350,24 @@ describe("applyMigrationSkillSelection", () => {
       reconcileInteractiveMigrationShortcutValues(
         ["skill:alpha", "skill:beta"],
         [
-          MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
-          MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
+          MIGRATION_SELECTION_TOGGLE_ALL_ON,
+          MIGRATION_SELECTION_TOGGLE_ALL_OFF,
           "skill:alpha",
           "skill:beta",
         ],
         selectable,
         "a",
       ),
-    ).toEqual([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF]);
+    ).toEqual([MIGRATION_SELECTION_TOGGLE_ALL_OFF]);
 
     expect(
       reconcileInteractiveMigrationShortcutValues(
-        [MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF],
-        [MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF, MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON],
+        [MIGRATION_SELECTION_TOGGLE_ALL_OFF],
+        [MIGRATION_SELECTION_TOGGLE_ALL_OFF, MIGRATION_SELECTION_TOGGLE_ALL_ON],
         selectable,
         "i",
       ),
-    ).toEqual([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF]);
+    ).toEqual([MIGRATION_SELECTION_TOGGLE_ALL_OFF]);
   });
 
   it("reconciles enter as activating the cursor row without toggling it off", () => {
@@ -451,18 +376,18 @@ describe("applyMigrationSkillSelection", () => {
     expect(
       reconcileInteractiveMigrationEnterValues(
         ["skill:alpha"],
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
+        MIGRATION_SELECTION_TOGGLE_ALL_ON,
         selectable,
       ),
-    ).toEqual([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON, "skill:alpha", "skill:beta"]);
+    ).toEqual([MIGRATION_SELECTION_TOGGLE_ALL_ON, "skill:alpha", "skill:beta"]);
 
     expect(
       reconcileInteractiveMigrationEnterValues(
         ["skill:alpha"],
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
+        MIGRATION_SELECTION_TOGGLE_ALL_OFF,
         selectable,
       ),
-    ).toEqual([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF]);
+    ).toEqual([MIGRATION_SELECTION_TOGGLE_ALL_OFF]);
 
     expect(
       reconcileInteractiveMigrationEnterValues(["skill:alpha"], "skill:beta", selectable),
@@ -509,12 +434,7 @@ describe("applyMigrationPluginSelection", () => {
 
     expectSummaryFields(selected.summary, { planned: 2, skipped: 1, conflicts: 0 });
     expectItemStatus(selected.items, "plugin:google-calendar", "planned");
-    expectItemStatus(
-      selected.items,
-      "plugin:gmail",
-      "skipped",
-      MIGRATION_PLUGIN_NOT_SELECTED_REASON,
-    );
+    expectItemStatus(selected.items, "plugin:gmail", "skipped", MIGRATION_NOT_SELECTED_REASON);
     const configItem = requireItem(selected.items, "config:codex-plugins");
     expect(configItem.status).toBe("planned");
     const plugins = requireCodexPluginConfigPlugins(configItem);
@@ -541,19 +461,14 @@ describe("applyMigrationPluginSelection", () => {
       selected.items,
       "plugin:google-calendar",
       "skipped",
-      MIGRATION_PLUGIN_NOT_SELECTED_REASON,
+      MIGRATION_NOT_SELECTED_REASON,
     );
-    expectItemStatus(
-      selected.items,
-      "plugin:gmail",
-      "skipped",
-      MIGRATION_PLUGIN_NOT_SELECTED_REASON,
-    );
+    expectItemStatus(selected.items, "plugin:gmail", "skipped", MIGRATION_NOT_SELECTED_REASON);
     expectItemStatus(
       selected.items,
       "config:codex-plugins",
       "skipped",
-      MIGRATION_PLUGIN_NOT_SELECTED_REASON,
+      MIGRATION_NOT_SELECTED_REASON,
     );
   });
 
@@ -613,12 +528,12 @@ describe("applyMigrationPluginSelection", () => {
 
     expect(
       resolveInteractiveMigrationPluginSelection(items, [
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON,
-        MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF,
+        MIGRATION_SELECTION_TOGGLE_ALL_ON,
+        MIGRATION_SELECTION_TOGGLE_ALL_OFF,
       ]),
     ).toEqual({ action: "select", selectedItemIds: new Set() });
     expect(
-      resolveInteractiveMigrationPluginSelection(items, [MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON]),
+      resolveInteractiveMigrationPluginSelection(items, [MIGRATION_SELECTION_TOGGLE_ALL_ON]),
     ).toEqual({
       action: "select",
       selectedItemIds: new Set(["plugin:google-calendar", "plugin:gmail"]),

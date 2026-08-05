@@ -4,6 +4,7 @@ import { stripAnsi, visibleWidth } from "../../packages/terminal-core/src/ansi.j
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
 import { formatTerminalLink } from "../../packages/terminal-core/src/terminal-link.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
+import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import {
   fetchClawHubPackageSecurity,
   fetchClawHubSkillVerification,
@@ -33,7 +34,7 @@ export type ClawHubRiskAcknowledgementRequest = {
   warning: string;
 };
 
-export type ClawHubTrustInstallRecordFields = {
+type ClawHubTrustInstallRecordFields = {
   clawhubTrustDisposition: "clean" | "review-recommended" | "review-required" | "blocked";
   clawhubTrustScanStatus?: string;
   clawhubTrustModerationState?: string;
@@ -44,13 +45,13 @@ export type ClawHubTrustInstallRecordFields = {
   clawhubTrustAcknowledgedAt?: string;
 };
 
-export type ClawHubTrustAcceptedResult = {
+type ClawHubTrustAcceptedResult = {
   ok: true;
   trustInstallRecordFields: ClawHubTrustInstallRecordFields;
   warning?: string;
 };
 
-export type ClawHubTrustFailure = {
+type ClawHubTrustFailure = {
   ok: false;
   error: string;
   code?: ClawHubTrustErrorCode;
@@ -63,11 +64,9 @@ type ClawHubInstallLogger = {
   terminalLinks?: boolean;
 };
 
-type ClawHubTrustSubject = {
-  kind: "plugin" | "skill";
-  packageName: string;
-  ownerHandle?: string;
-};
+type ClawHubTrustSubject =
+  | { kind: "plugin"; packageName: string }
+  | { kind: "skill"; packageName: string; workspaceDir: string; ownerHandle?: string };
 
 type ClawHubSkillSecurityLinks = {
   subject: string;
@@ -536,6 +535,15 @@ function formatClawHubTrustWarning(params: {
         params.assessment.disposition,
       ),
       formatClawHubRawLinks({ subject: params.subject, links }),
+      ...(params.subject.kind === "skill" && malicious && params.mode === "update"
+        ? [
+            `Remove installed skill: clawhub --workdir ${quoteCliArg(
+              sanitizeTerminalText(params.subject.workspaceDir),
+            )} uninstall ${quoteCliArg(
+              sanitizeTerminalText(formatClawHubSubjectPackageName(params.subject)),
+            )}`,
+          ]
+        : []),
     ].join("\n");
   }
   if (params.assessment.disposition === "review-required") {
@@ -1096,3 +1104,4 @@ export async function ensureClawHubPackageTrustAcknowledged(params: {
     version: params.version,
   };
 }
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

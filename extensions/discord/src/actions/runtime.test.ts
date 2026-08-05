@@ -6,14 +6,12 @@ import type { DiscordActionConfig } from "openclaw/plugin-sdk/config-contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearPresences, setPresence } from "../monitor/presence-cache.js";
 import { DiscordThreadInitialMessageError } from "../send.js";
-import { discordGuildActionRuntime, handleDiscordGuildAction } from "./runtime.guild.js";
+import { discordGuildActionRuntime, discordModerationActionRuntime } from "./runtime-deps.js";
+import { handleDiscordGuildAction } from "./runtime.guild.js";
 import { handleDiscordAction } from "./runtime.js";
 import { handleDiscordMessagingAction } from "./runtime.messaging.js";
 import { discordMessagingActionRuntime } from "./runtime.messaging.runtime.js";
-import {
-  discordModerationActionRuntime,
-  handleDiscordModerationAction,
-} from "./runtime.moderation.js";
+import { handleDiscordModerationAction } from "./runtime.moderation.js";
 
 const originalDiscordMessagingActionRuntime = { ...discordMessagingActionRuntime };
 const originalDiscordGuildActionRuntime = { ...discordGuildActionRuntime };
@@ -913,7 +911,8 @@ describe("handleDiscordMessagingAction", () => {
               qa: {
                 token: "token",
                 groupPolicy: "open",
-                dm: { enabled: false, policy: "disabled" },
+                dm: { enabled: false },
+                dmPolicy: "disabled",
                 guilds: {
                   "111": {
                     channels: {
@@ -938,7 +937,8 @@ describe("handleDiscordMessagingAction", () => {
           discord: {
             token: "token",
             groupPolicy: "open",
-            dm: { enabled: true, policy: "pairing", groupEnabled: false },
+            dm: { enabled: true, groupEnabled: false },
+            dmPolicy: "pairing",
           },
         },
       } as OpenClawConfig,
@@ -955,9 +955,9 @@ describe("handleDiscordMessagingAction", () => {
           discord: {
             token: "token",
             groupPolicy: "open",
+            dmPolicy: "pairing",
             dm: {
               enabled: true,
-              policy: "pairing",
               groupEnabled: true,
               groupChannels: ["allowed-group"],
             },
@@ -997,9 +997,9 @@ describe("handleDiscordMessagingAction", () => {
         discord: {
           token: "token",
           groupPolicy: "disabled",
+          dmPolicy: "disabled",
           dm: {
             enabled: false,
-            policy: "disabled",
             groupEnabled: true,
             groupChannels: ["allowed-group"],
           },
@@ -1029,7 +1029,8 @@ describe("handleDiscordMessagingAction", () => {
         discord: {
           token: "token",
           groupPolicy: "disabled",
-          dm: { enabled: true, policy: "pairing" },
+          dm: { enabled: true },
+          dmPolicy: "pairing",
         },
       },
     } as OpenClawConfig;
@@ -1053,9 +1054,9 @@ describe("handleDiscordMessagingAction", () => {
         discord: {
           token: "token",
           groupPolicy: "open",
+          dmPolicy: "pairing",
           dm: {
             enabled: true,
-            policy: "pairing",
             groupEnabled: false,
           },
         },
@@ -1081,7 +1082,8 @@ describe("handleDiscordMessagingAction", () => {
         discord: {
           token: "token",
           groupPolicy: "open",
-          dm: { enabled: true, policy: "pairing" },
+          dm: { enabled: true },
+          dmPolicy: "pairing",
           guilds: {
             "111": {
               channels: {
@@ -1250,9 +1252,11 @@ describe("handleDiscordMessagingAction", () => {
       enableAllActions,
     );
     const payload = result.details as {
+      channelId?: string;
       messages: Array<{ timestampMs?: number; timestampUtc?: string }>;
     };
 
+    expect(payload.channelId).toBe("C1");
     const expectedMs = Date.parse("2026-01-15T10:00:00.000Z");
     const message = expectDefined(payload.messages[0], "Discord message result");
     expect(message.timestampMs).toBe(expectedMs);
@@ -2067,27 +2071,103 @@ describe("handleDiscordMessagingAction", () => {
     expect(searchMessagesDiscord).not.toHaveBeenCalled();
   });
 
-  it("sends voice messages from a local file path", async () => {
+  it("sends workspace-relative voice files with trusted host authority instead of forged action data", async () => {
     sendVoiceMessageDiscord.mockClear();
     sendMessageDiscord.mockClear();
+    const mediaReadFile = vi.fn(async () => Buffer.from("trusted voice"));
+    const mediaAccess = {
+      localRoots: ["/tmp/agent-workspace"],
+      readFile: mediaReadFile,
+      workspaceDir: "/tmp/agent-workspace",
+    };
+    const forgedMediaAccess = {
+      localRoots: ["/tmp/forged-root"],
+      readFile: vi.fn(async () => Buffer.from("forged voice")),
+      workspaceDir: "/tmp/forged-root",
+    };
 
     await handleMessagingAction(
       "sendMessage",
       {
         to: "channel:123",
-        path: "/tmp/voice.mp3",
+        path: "./voice.mp3",
         asVoice: true,
         silent: true,
+        mediaAccess: forgedMediaAccess,
       },
       enableAllActions,
+      DISCORD_TEST_CFG,
+      { mediaAccess, mediaLocalRoots: mediaAccess.localRoots, mediaReadFile },
     );
 
-    expect(sendVoiceMessageDiscord).toHaveBeenCalledWith("channel:123", "/tmp/voice.mp3", {
+    expect(sendVoiceMessageDiscord).toHaveBeenCalledWith("channel:123", "./voice.mp3", {
       cfg: DISCORD_TEST_CFG,
       reply: undefined,
       silent: true,
+      mediaAccess,
+      mediaLocalRoots: mediaAccess.localRoots,
+      mediaReadFile,
     });
+    const voiceOptions = mockObjectArg(sendVoiceMessageDiscord, "sendVoiceMessageDiscord", 0, 2);
+    expect(voiceOptions.mediaAccess).toBe(mediaAccess);
+    expect(voiceOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
+    expect(voiceOptions.mediaReadFile).toBe(mediaReadFile);
+    expect(forgedMediaAccess.readFile).not.toHaveBeenCalled();
     expect(sendMessageDiscord).not.toHaveBeenCalled();
+  });
+
+  it("preserves supported split-only host readers on action voice sends", async () => {
+    const mediaLocalRoots = ["/tmp/agent-workspace"];
+    const mediaReadFile = vi.fn(async () => Buffer.from("trusted voice"));
+
+    await handleMessagingAction(
+      "sendMessage",
+      { to: "channel:123", path: "/tmp/agent-workspace/voice.mp3", asVoice: true },
+      enableAllActions,
+      DISCORD_TEST_CFG,
+      { mediaLocalRoots, mediaReadFile },
+    );
+
+    const voiceOptions = mockObjectArg(sendVoiceMessageDiscord, "sendVoiceMessageDiscord", 0, 2);
+    expect(voiceOptions.mediaAccess).toBeUndefined();
+    expect(voiceOptions.mediaLocalRoots).toBe(mediaLocalRoots);
+    expect(voiceOptions.mediaReadFile).toBe(mediaReadFile);
+  });
+
+  it("preserves reader-free workspace authority for thread replies and ignores forged action data", async () => {
+    const mediaAccess = {
+      localRoots: ["/tmp/agent-workspace"],
+      workspaceDir: "/tmp/agent-workspace",
+    };
+    const forgedMediaAccess = {
+      localRoots: ["/tmp/forged-root"],
+      readFile: vi.fn(async () => Buffer.from("forged report")),
+      workspaceDir: "/tmp/forged-root",
+    };
+
+    await handleMessagingAction(
+      "threadReply",
+      {
+        channelId: "thread-123",
+        content: "thread update",
+        mediaUrl: "./report.md",
+        mediaAccess: forgedMediaAccess,
+      },
+      enableAllActions,
+      DISCORD_TEST_CFG,
+      { mediaAccess, mediaLocalRoots: mediaAccess.localRoots },
+    );
+
+    const call = mockCall(sendMessageDiscord, "sendMessageDiscord");
+    const sendOptions = mockObjectArg(sendMessageDiscord, "sendMessageDiscord", 0, 2);
+    expect(call[0]).toBe("channel:thread-123");
+    expect(call[1]).toBe("thread update");
+    expect(sendOptions.mediaUrl).toBe("./report.md");
+    expect(sendOptions.mediaAccess).toBe(mediaAccess);
+    expect(sendOptions.mediaLocalRoots).toBe(mediaAccess.localRoots);
+    expect(sendOptions.mediaReadFile).toBeUndefined();
+    expect(sendOptions.mediaAccess).not.toHaveProperty("readFile");
+    expect(forgedMediaAccess.readFile).not.toHaveBeenCalled();
   });
 
   it("forwards trusted mediaLocalRoots into sendMessageDiscord", async () => {
@@ -2402,6 +2482,22 @@ describe("handleDiscordMessagingAction", () => {
       },
       { cfg: DISCORD_TEST_CFG },
     );
+  });
+
+  it("rejects invalid autoArchiveMinutes before Discord thread create", async () => {
+    createThreadDiscord.mockClear();
+    await expect(
+      handleMessagingAction(
+        "threadCreate",
+        {
+          channelId: "C1",
+          name: "thread",
+          autoArchiveMinutes: 999,
+        },
+        enableAllActions,
+      ),
+    ).rejects.toThrow("autoArchiveMinutes must be one of 60, 1440, 4320, or 10080 minutes");
+    expect(createThreadDiscord).not.toHaveBeenCalled();
   });
 
   it("returns partial success when Discord creates the thread but initial message send fails", async () => {
@@ -3470,3 +3566,4 @@ describe("handleDiscordAction per-account gating", () => {
     });
   });
 });
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

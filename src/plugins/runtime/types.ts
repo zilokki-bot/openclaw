@@ -2,6 +2,7 @@
 // Owner schema module import keeps the ProtocolSchemas registry out of the
 // public plugin-sdk dts graph (check-plugin-sdk-exports guards this).
 import type { NodePluginToolDescriptor } from "../../../packages/gateway-protocol/src/schema/nodes.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { OperatorScope } from "../../gateway/operator-scopes.js";
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
 
@@ -11,15 +12,19 @@ type PluginRuntimeChannel = import("./types-channel.js").PluginRuntimeChannel;
 
 // ── Subagent runtime types ──────────────────────────────────────────
 
-export type SubagentRunParams = {
+type SubagentRunParams = {
   sessionKey: string;
   message: string;
+  /** Add exact tools registered by the calling plugin to the worker's normal tool surface. */
+  toolsAlsoAllow?: string[];
   provider?: string;
   model?: string;
   extraSystemPrompt?: string;
   lane?: string;
   lightContext?: boolean;
   deliver?: boolean;
+  /** Deliver the completion to the authenticated requester of the current hook invocation. */
+  completionDelivery?: "current-requester";
   idempotencyKey?: string;
   cwd?: string;
 };
@@ -30,28 +35,13 @@ type PluginManagedWorktree = {
   branch: string;
 };
 
-export type SubagentRunResult = {
+type SubagentRunResult = {
   runId: string;
-};
-
-type SubagentSafeSpawnParams = {
-  task: string;
-  agentId?: string;
-  taskName?: string;
-  label?: string;
-  runTimeoutSeconds?: number;
-  lightContext?: boolean;
-  expectsCompletionMessage?: boolean;
-};
-
-type SubagentSafeSpawnResult = {
-  status: "accepted" | "forbidden" | "error";
-  childSessionKey?: string;
-  runId?: string;
-  mode?: "run" | "session";
-  taskName?: string;
-  note?: string;
-  error?: string;
+  runtime?: {
+    harness: string;
+    provider: string;
+    model: string;
+  };
 };
 
 type SubagentWaitParams = {
@@ -73,21 +63,6 @@ type SubagentGetSessionMessagesResult = {
   messages: unknown[];
 };
 
-type SubagentToolReceiptsParams = {
-  runId: string;
-  toolName?: string;
-};
-
-type SubagentToolReceiptsResult = {
-  receipts: unknown[];
-};
-
-/** @deprecated Use SubagentGetSessionMessagesParams. */
-type SubagentGetSessionParams = SubagentGetSessionMessagesParams;
-
-/** @deprecated Use SubagentGetSessionMessagesResult. */
-type SubagentGetSessionResult = SubagentGetSessionMessagesResult;
-
 type SubagentDeleteSessionParams = {
   sessionKey: string;
   deleteTranscript?: boolean;
@@ -105,6 +80,10 @@ type RuntimeNodeListResult = {
     connected?: boolean;
     caps?: string[];
     commands?: string[];
+    /** True only for the node host installed alongside this Gateway. */
+    gatewayLocal?: boolean;
+    /** Advertised commands currently permitted by Gateway node-command policy. */
+    invocableCommands?: string[];
     nodePluginTools?: NodePluginToolDescriptor[];
   }>;
 };
@@ -115,6 +94,8 @@ type RuntimeNodeInvokeParams = {
   params?: unknown;
   timeoutMs?: number;
   idempotencyKey?: string;
+  /** Cancel the invocation and any work already dispatched to a first-party node. */
+  signal?: AbortSignal;
   /** Requested Gateway scopes. Honored only for bundled or trusted official plugins. */
   scopes?: OperatorScope[];
 };
@@ -139,21 +120,48 @@ export type PluginRuntime = PluginRuntimeCore & {
   };
   subagent: {
     run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
-    spawnSafe: (params: SubagentSafeSpawnParams) => Promise<SubagentSafeSpawnResult>;
     waitForRun: (params: SubagentWaitParams) => Promise<SubagentWaitResult>;
     getSessionMessages: (
       params: SubagentGetSessionMessagesParams,
     ) => Promise<SubagentGetSessionMessagesResult>;
-    /** @deprecated Use getSessionMessages. */
-    getSession: (params: SubagentGetSessionParams) => Promise<SubagentGetSessionResult>;
     deleteSession: (params: SubagentDeleteSessionParams) => Promise<void>;
-    getToolReceipts: (params: SubagentToolReceiptsParams) => Promise<SubagentToolReceiptsResult>;
   };
   nodes: {
     list: (params?: RuntimeNodeListParams) => Promise<RuntimeNodeListResult>;
     invoke: (params: RuntimeNodeInvokeParams) => Promise<unknown>;
   };
+  sandbox: {
+    resolveWorkspaceAuthority: (params: {
+      config: OpenClawConfig;
+      agentId?: string;
+      confinedToolNames?: readonly string[];
+      requiredToolNames?: readonly string[];
+      modelProvider?: string;
+      modelId?: string;
+      sessionKey: string;
+    }) => {
+      sandboxed: boolean;
+      workspaceAccess: "none" | "ro" | "rw";
+      confinementError?: string;
+    };
+    prepareWorkspaceAuthority: (params: {
+      config: OpenClawConfig;
+      agentId?: string;
+      confinedToolNames?: readonly string[];
+      requiredToolNames?: readonly string[];
+      modelProvider?: string;
+      modelId?: string;
+      sessionKey: string;
+      workspaceDir: string;
+    }) => Promise<{
+      sandboxed: boolean;
+      workspaceAccess: "none" | "ro" | "rw";
+      confinementError?: string;
+    }>;
+  };
   worktrees: {
+    resolveCheckoutRoot: (params: { path: string }) => Promise<string | undefined>;
+    hasSelfContainedCheckoutMetadata?: (params: { path: string }) => Promise<boolean>;
     create: (params: {
       repoRoot: string;
       name: string;
@@ -162,7 +170,11 @@ export type PluginRuntime = PluginRuntimeCore & {
       ownerId: string;
     }) => Promise<PluginManagedWorktree>;
     release: (params: { path: string }) => Promise<void>;
-    removeIfLossless: (params: { path: string }) => Promise<boolean>;
+    removeIfLossless: (params: {
+      path: string;
+      ownerKind: "workboard";
+      ownerId: string;
+    }) => Promise<boolean>;
   };
   channel: PluginRuntimeChannel;
 };

@@ -16,6 +16,12 @@ declare module "*scripts/ui.js" {
       windowsVerbatimArguments?: boolean;
     };
   };
+  export function assertUiBuildOutputRoot(params?: {
+    rootDir?: string;
+    fs?: {
+      lstatSync(path: string): { isSymbolicLink(): boolean };
+    };
+  }): void;
   export function shouldUseCmdExeForCommand(cmd: string, platform?: NodeJS.Platform): boolean;
   export function resolveSpawnCall(
     cmd: string,
@@ -70,10 +76,36 @@ declare module "*openclaw-changelog-update/scripts/verify-release-notes.mjs" {
     shippedBaselines: unknown[],
   ): number[];
   export function standardRevertedHash(message: string): string | null;
+  export function contributionRecordTarget(section: { source: string }): string | undefined;
+  export function pullRequestTitleFromCommitSubject(
+    subject: string,
+    number: number,
+  ): string | undefined;
   export function contributionRecordFor(section: Record<string, unknown>): {
     legacyIssues: Map<number, unknown>;
     pullRequests: Map<number, ContributionRecord>;
   };
+  export function recoverUnavailablePullRequests(params: {
+    numbers: Iterable<number>;
+    nodes: Map<number, unknown>;
+    record: { pullRequests: Map<number, ContributionRecord> };
+    recordTarget?: string;
+    source: {
+      activeCommits: Array<{
+        authorHandle?: string;
+        closingReferences?: number[];
+        committedAt: string;
+        hash: string;
+        pullRequests: number[];
+        references: number[];
+        subject: string;
+      }>;
+      coauthorsByReference: Map<number, Set<string>>;
+      pullRequests: Set<number>;
+      target: string;
+    };
+    isAncestor?: (ancestor: string, descendant: string) => boolean;
+  }): Map<number, unknown>;
   export function cumulativeShippedPullRequests(changelog: unknown, label: string): Set<number>;
   export function subtractShippedPullRequests(
     source: unknown,
@@ -118,6 +150,12 @@ declare module "*openclaw-changelog-update/scripts/verify-release-notes.mjs" {
     hasCanonicalMainCommit: boolean,
     provenanceOverride?: number[],
   ): number[];
+  export function releasePullRequestReferencesToSuppress(
+    currentPullRequests: number[],
+    subject: string,
+    associatedPullRequests: number[],
+    hasProvenanceOverride: boolean,
+  ): number[];
   export function validateReleaseProvenanceOverrides(
     provenanceOverrides: Map<string, number[]>,
     nodes: Map<number, unknown>,
@@ -133,12 +171,14 @@ declare module "*openclaw-changelog-update/scripts/verify-release-notes.mjs" {
   };
   export function countTopLevelSectionBullets(sectionSource: string, heading: string): number;
   export function highlightCountError(sectionSource: string): string | undefined;
+  export function isEligibleHandle(handle: string): boolean;
   export function ledgerChecks(...args: unknown[]): string[];
 }
 
 declare module "*openclaw-live-updater/scripts/update-main.mjs" {
   type GatewayDeployment = Record<string, unknown> & {
     entrypoint: string;
+    exitTimeoutSeconds?: number;
     workingDirectory?: string | null;
   };
   type UpdateResult = Record<string, unknown> & {
@@ -149,17 +189,39 @@ declare module "*openclaw-live-updater/scripts/update-main.mjs" {
     release?: () => void;
   };
   export function originMatches(remoteUrl: string): boolean;
+  export function formatUpdateFailure(error: unknown): {
+    schemaVersion: 1;
+    ok: false;
+    error: {
+      code: string;
+      message: string;
+      diagnostics: Record<string, unknown>;
+    };
+  };
   export function isOwnedGatewayEntrypoint(
     checkout: string,
     home: string,
     entrypoint: string,
   ): boolean;
+  export function isGatewayProbeResponse(route: string, payload: unknown): boolean;
   export function parseLaunchctlArguments(output: string): string[];
   export function resolveManagedGatewayEntrypoint(
     programArguments: string[],
     home: string,
     stateDir?: string,
   ): string | null;
+  export function resolveLaunchAgentExitTimeoutSeconds(value: unknown): number;
+  export function assertNoSystemLaunchDaemonOwnership(
+    label: string,
+    dependencies?: {
+      readdirSync?: (path: string) => string[];
+      spawnSync?: (
+        command: string,
+        args: string[],
+        options?: Record<string, unknown>,
+      ) => { status: number | null; stdout?: string; stderr?: string };
+    },
+  ): void;
   export function replaceLaunchAgentProgramArgument(
     programArguments: unknown,
     index: number,
@@ -188,7 +250,23 @@ declare module "*openclaw-live-updater/scripts/update-main.mjs" {
     requestedPath?: string,
   ): {
     acquired: boolean;
-    owner: { pid: number; checkout?: string; startedAt?: string };
+    owner: {
+      pid: number;
+      checkout?: string;
+      manualRecoveryRequired?: boolean;
+      processGroupId?: number;
+      processTreeState?: string;
+      reason?: string;
+      serviceState?: string;
+      startedAt?: string;
+    };
+    retainForCleanupFailure?: (details?: {
+      manualRecoveryRequired?: boolean;
+      phase?: string;
+      processGroupId?: number;
+      processTreeState?: string;
+      serviceState?: string;
+    }) => Record<string, unknown>;
     release?: () => void;
   };
   export function parseGatewayLogAudit(
@@ -220,12 +298,33 @@ declare module "*openclaw-live-updater/scripts/update-main.mjs" {
         activeCount: number;
         blockers: Array<{ kind: string; count: number; message: string }>;
       };
+  export function runBuiltGatewayCli(
+    checkout: string,
+    args: string[],
+    deployment?: GatewayDeployment | null,
+    options?: { stderr?: "inherit" | "pipe"; timeoutMs?: number },
+  ): string;
   export function verifyGatewayReadiness(
-    runCommand: (command: string, args: string[], checkout: string) => unknown,
+    runCommand: (
+      command: string,
+      args: string[],
+      checkout: string,
+      options?: Record<string, unknown>,
+    ) => unknown | Promise<unknown>,
     checkout: string,
     expectedSha: string,
-    sleep?: (ms: number) => void,
-  ): void;
+    sleep?: (ms: number) => void | Promise<void>,
+    deployment?: GatewayDeployment | null,
+    options?: {
+      now?: () => number;
+      probeMilestones?: (deployment: GatewayDeployment) => {
+        listenerReady: boolean;
+        healthzReady: boolean;
+        readyzReady: boolean;
+      };
+      timing?: Record<string, unknown>;
+    },
+  ): Promise<Record<string, unknown>>;
   export function findExactMacTarget(
     processes: string,
     executable: string,
@@ -233,5 +332,9 @@ declare module "*openclaw-live-updater/scripts/update-main.mjs" {
   export function maintainMain(
     options: Record<string, unknown>,
     dependencies?: Record<string, unknown>,
-  ): UpdateResult;
+  ): Promise<UpdateResult>;
+  export function runLiveUpdaterMain(
+    argv?: string[],
+    dependencies?: Record<string, unknown>,
+  ): Promise<void>;
 }

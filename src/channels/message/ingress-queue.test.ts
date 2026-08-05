@@ -15,9 +15,24 @@ import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "../../state/openclaw-state-db.js";
-import { createChannelIngressQueue, createStateDirEnv } from "./ingress-queue.js";
+import { createChannelIngressQueue } from "./ingress-queue.js";
 
 type ChannelIngressTestDatabase = Pick<OpenClawStateKyselyDatabase, "channel_ingress_events">;
+
+function createTestIngressQueue<TPayload, TMetadata = unknown, TCompletedMetadata = unknown>(
+  stateDir: string,
+  options: Omit<
+    Parameters<typeof createChannelIngressQueue>[0],
+    "channelId" | "accountId" | "stateDir"
+  > = {},
+) {
+  return createChannelIngressQueue<TPayload, TMetadata, TCompletedMetadata>({
+    channelId: "test",
+    accountId: "account",
+    stateDir,
+    ...options,
+  });
+}
 
 async function withTempState<T>(fn: (stateDir: string) => Promise<T>): Promise<T> {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ingress-queue-"));
@@ -34,45 +49,13 @@ describe("channel ingress queue", () => {
     closeOpenClawStateDatabaseForTest();
   });
 
-  it("opens a custom state database without copying the full process env", async () => {
-    const baseEnv: NodeJS.ProcessEnv = {
-      HOME: "/home/openclaw",
-      PATH: "/usr/local/bin:/usr/bin",
-    };
-    for (let index = 0; index < 10_000; index += 1) {
-      baseEnv[`KUBERNETES_SERVICE_${index}`] = "tcp://10.0.0.1:443";
-    }
-    const inheritedEnv = new Proxy(baseEnv, {
-      ownKeys() {
-        throw new Error("inherited env should not be enumerated");
-      },
-    });
-
-    await withTempState(async (stateDir) => {
-      const env = createStateDirEnv(stateDir, inheritedEnv);
-
-      expect(env.OPENCLAW_STATE_DIR).toBe(stateDir);
-      expect(env.HOME).toBe("/home/openclaw");
-      expect(Object.getPrototypeOf(env)).toBe(inheritedEnv);
-      expect(Object.keys(env)).toEqual(["OPENCLAW_STATE_DIR"]);
-
-      const database = openOpenClawStateDatabase({ env });
-      expect(database.path).toBe(path.join(stateDir, "state", "openclaw.sqlite"));
-    });
-  });
-
   it("deduplicates pending and completed ingress events", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<
+      const queue = createTestIngressQueue<
         { text: string },
         { source: string },
         { handledBy: string }
-      >({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 100,
-      });
+      >(stateDir, { now: () => 100 });
 
       const accepted = await queue.enqueue(
         "event-1",
@@ -164,12 +147,7 @@ describe("channel ingress queue", () => {
   it("can bound pending scans and prune stale pending rows", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ index: number }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ index: number }>(stateDir, { now: () => clock++ });
 
       await queue.enqueue("0002", { index: 2 });
       await queue.enqueue("0001", { index: 1 });
@@ -187,12 +165,7 @@ describe("channel ingress queue", () => {
 
   it("does not prune protected rows while enforcing max-entry limits", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<{ index: number }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 10,
-      });
+      const queue = createTestIngressQueue<{ index: number }>(stateDir, { now: () => 10 });
 
       await queue.enqueue("z", { index: 1 });
       await queue.enqueue("a", { index: 2 });
@@ -207,12 +180,7 @@ describe("channel ingress queue", () => {
   it("prunes max-entry overflow across bounded batches", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ index: number }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ index: number }>(stateDir, { now: () => clock++ });
 
       for (let index = 0; index < 520; index += 1) {
         await queue.enqueue(String(index).padStart(4, "0"), { index });
@@ -229,12 +197,7 @@ describe("channel ingress queue", () => {
   it("claims, releases, and skips blocked lanes", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => clock++ });
 
       await queue.enqueue("a", { text: "blocked" }, { laneKey: "chat-1", receivedAt: 1 });
       await queue.enqueue("b", { text: "open" }, { laneKey: "chat-2", receivedAt: 2 });
@@ -272,12 +235,7 @@ describe("channel ingress queue", () => {
   it("claims next pending row by id when requested", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => clock++ });
 
       await queue.enqueue("0002", { text: "second" }, { receivedAt: 1 });
       await queue.enqueue("0001", { text: "first" }, { receivedAt: 2 });
@@ -294,12 +252,7 @@ describe("channel ingress queue", () => {
   it("claims next only from candidate ids when provided", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => clock++ });
 
       await queue.enqueue("a", { text: "outside snapshot" }, { receivedAt: 1 });
       await queue.enqueue("b", { text: "inside snapshot" }, { receivedAt: 2 });
@@ -317,12 +270,7 @@ describe("channel ingress queue", () => {
   it("derives missing lane keys before claiming next", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ lane: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ lane: string }>(stateDir, { now: () => clock++ });
 
       await queue.enqueue("a", { lane: "blocked" }, { receivedAt: 1 });
       await queue.enqueue("b", { lane: "open" }, { receivedAt: 2 });
@@ -341,15 +289,118 @@ describe("channel ingress queue", () => {
     });
   });
 
+  it("preserves durable lanes when a channel derives ephemeral claim lanes", async () => {
+    await withTempState(async (stateDir) => {
+      let clock = 1;
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => clock++ });
+
+      await queue.enqueue("message-1", { text: "debounced" }, { laneKey: "chat:123" });
+
+      const claimed = await queue.claimNext({
+        ownerId: "imessage-worker",
+        deriveLaneKey: (record) => `${record.laneKey ?? "event"}:${record.id}`,
+      });
+
+      expect(claimed?.laneKey).toBe("chat:123");
+      expect((await queue.listClaims())[0]?.laneKey).toBe("chat:123");
+    });
+  });
+
+  it("reconciles opted-in persisted lanes before blocking and claiming", async () => {
+    await withTempState(async (stateDir) => {
+      let clock = 1;
+      const queue = createTestIngressQueue<{ lane: string }>(stateDir, { now: () => clock++ });
+
+      await queue.enqueue(
+        "a",
+        { lane: "chat:123" },
+        { laneKey: "chat:123:topic:7", receivedAt: 1 },
+      );
+      await queue.enqueue(
+        "b",
+        { lane: "chat:456" },
+        { laneKey: "chat:456:topic:9", receivedAt: 2 },
+      );
+
+      const claimed = await queue.claimNext({
+        ownerId: "worker",
+        blockedLaneKeys: ["chat:123"],
+        deriveLaneKey: (record) => record.payload.lane,
+        reconcileStoredLaneKey: (_record, storedLaneKey, derivedLaneKey) =>
+          storedLaneKey === `${derivedLaneKey}:topic:7` ||
+          storedLaneKey === `${derivedLaneKey}:topic:9`,
+      });
+
+      expect(claimed?.id).toBe("b");
+      expect(claimed?.laneKey).toBe("chat:456");
+      expect((await queue.listClaims())[0]?.laneKey).toBe("chat:456");
+      expect((await queue.listPending())[0]?.laneKey).toBe("chat:123:topic:7");
+    });
+  });
+
+  it("blocks opted-in legacy candidate lanes using their canonical owner", async () => {
+    await withTempState(async (stateDir) => {
+      let clock = 1;
+      const queue = createTestIngressQueue<{ lane: string }>(stateDir, { now: () => clock++ });
+
+      await queue.enqueue(
+        "a",
+        { lane: "chat:123" },
+        { laneKey: "chat:123:topic:7", receivedAt: 1 },
+      );
+      await queue.enqueue(
+        "b",
+        { lane: "chat:123" },
+        { laneKey: "chat:123:topic:8", receivedAt: 2 },
+      );
+      await queue.enqueue(
+        "c",
+        { lane: "chat:456" },
+        { laneKey: "chat:456:topic:9", receivedAt: 3 },
+      );
+      await queue.claim("a", { ownerId: "sibling-worker" });
+
+      const claimed = await queue.claimNext({
+        ownerId: "worker",
+        candidateIds: ["a", "b", "c"],
+        orderBy: "id",
+        deriveLaneKey: (record) => record.payload.lane,
+        reconcileStoredLaneKey: (_record, storedLaneKey, derivedLaneKey) =>
+          storedLaneKey.startsWith(`${derivedLaneKey}:topic:`),
+      });
+
+      expect(claimed?.id).toBe("c");
+      expect(claimed?.laneKey).toBe("chat:456");
+      expect((await queue.listClaims()).find((record) => record.id === "a")?.laneKey).toBe(
+        "chat:123:topic:7",
+      );
+      expect((await queue.listPending())[0]?.laneKey).toBe("chat:123:topic:8");
+    });
+  });
+
+  it("preserves persisted lanes when an owner rejects their reconciliation", async () => {
+    await withTempState(async (stateDir) => {
+      let clock = 1;
+      const queue = createTestIngressQueue<{ lane: string }>(stateDir, { now: () => clock++ });
+
+      await queue.enqueue("a", { lane: "chat:123" }, { laneKey: "chat:999:topic:7" });
+
+      const claimed = await queue.claimNext({
+        ownerId: "worker",
+        deriveLaneKey: (record) => record.payload.lane,
+        reconcileStoredLaneKey: (_record, storedLaneKey, derivedLaneKey) =>
+          storedLaneKey === `${derivedLaneKey}:topic:7`,
+      });
+
+      expect(claimed?.laneKey).toBe("chat:999:topic:7");
+      expect((await queue.listClaims())[0]?.laneKey).toBe("chat:999:topic:7");
+    });
+  });
+
   it("blocks lanes claimed by candidate rows before claiming later candidates", async () => {
     await withTempState(async (stateDir) => {
       let clock = 1;
-      const queue = createChannelIngressQueue<{ lane: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => clock++,
-      });
+      const queue = createTestIngressQueue<{ lane: string }>(stateDir, { now: () => clock++ });
 
       await queue.enqueue("a", { lane: "chat-1" }, { receivedAt: 1 });
       await queue.enqueue("b", { lane: "chat-1" }, { receivedAt: 2 });
@@ -372,12 +423,7 @@ describe("channel ingress queue", () => {
 
   it("requires claim tokens before mutating claimed rows", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 10,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => 10 });
 
       await queue.enqueue("event-1", { text: "claimed" });
       const claimed = await queue.claim("event-1", { ownerId: "worker" });
@@ -398,12 +444,7 @@ describe("channel ingress queue", () => {
 
   it("refreshes claimed rows only with the active claim token", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 10,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => 10 });
 
       await queue.enqueue("event-1", { text: "claimed" });
       const claimed = await queue.claim("event-1", { ownerId: "worker" });
@@ -434,12 +475,7 @@ describe("channel ingress queue", () => {
 
   it("does not let old claim tokens refresh recovered and reclaimed rows", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 10,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => 10 });
 
       await queue.enqueue("event-1", { text: "claimed" });
       const oldClaim = await queue.claim("event-1", { ownerId: "worker-1" });
@@ -463,12 +499,7 @@ describe("channel ingress queue", () => {
 
   it("does not recover a claim refreshed after stale recovery snapshots it", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 10,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => 10 });
 
       await queue.enqueue("event-1", { text: "claimed" });
       const claimed = await queue.claim("event-1", { ownerId: "worker" });
@@ -497,12 +528,7 @@ describe("channel ingress queue", () => {
 
   it("recovers stale claims and prunes completed or failed rows", async () => {
     await withTempState(async (stateDir) => {
-      const queue = createChannelIngressQueue<{ text: string }>({
-        channelId: "test",
-        accountId: "account",
-        stateDir,
-        now: () => 10,
-      });
+      const queue = createTestIngressQueue<{ text: string }>(stateDir, { now: () => 10 });
 
       await queue.enqueue("old", { text: "old" });
       await queue.enqueue("keep", { text: "keep" });
@@ -529,7 +555,7 @@ describe("channel ingress queue", () => {
       await queue.complete("retry", { completedAt: 27 });
 
       const database = openOpenClawStateDatabase({
-        env: createStateDirEnv(stateDir),
+        env: { OPENCLAW_STATE_DIR: stateDir },
       });
       const kysely = getNodeSqliteKysely<ChannelIngressTestDatabase>(database.db);
       const rows = executeSqliteQuerySync(
@@ -546,7 +572,7 @@ describe("channel ingress queue", () => {
           last_attempt_at: null,
           last_error: "bad",
           metadata_json: null,
-          payload_json: "null",
+          payload_json: JSON.stringify({ text: "keep" }),
         },
         {
           event_id: "old",
@@ -587,7 +613,7 @@ describe("channel ingress queue", () => {
       }>,
     ) {
       const { db } = openOpenClawStateDatabase({
-        env: createStateDirEnv(stateDir),
+        env: { OPENCLAW_STATE_DIR: stateDir },
       });
       const kysely = getNodeSqliteKysely<ChannelIngressTestDatabase>(db);
       const claimValue = overrides.claim_token ?? null;
@@ -616,11 +642,7 @@ describe("channel ingress queue", () => {
 
     it("skips a pending row with corrupt payload_json in listPending", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
 
         await queue.enqueue("good-1", { text: "hello" });
         insertCorruptRow(stateDir, '["test","account"]', "bad-1", {
@@ -636,11 +658,7 @@ describe("channel ingress queue", () => {
 
     it("applies listPending limits after excluding corrupt payloads", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
         for (let index = 0; index < 100; index += 1) {
           insertCorruptRow(
             stateDir,
@@ -659,11 +677,7 @@ describe("channel ingress queue", () => {
 
     it("uses the queue JSON contract when listing deeply nested payloads", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<unknown>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<unknown>(stateDir);
         const nestedJson = `${"[".repeat(1001)}0${"]".repeat(1001)}`;
         const payload = JSON.parse(nestedJson);
 
@@ -675,11 +689,7 @@ describe("channel ingress queue", () => {
 
     it("skips corrupt metadata_json in listPending", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }, { source: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }, { source: string }>(stateDir);
 
         await queue.enqueue("ev-1", { text: "ok" }, { metadata: { source: "good" } });
         insertCorruptRow(stateDir, '["test","account"]', "ev-bad-meta", {
@@ -696,11 +706,7 @@ describe("channel ingress queue", () => {
 
     it("skips a claimed row with corrupt payload_json in listClaims", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
 
         await queue.enqueue("claim-ok", { text: "ok" });
         insertCorruptRow(stateDir, '["test","account"]', "claim-bad", {
@@ -726,18 +732,16 @@ describe("channel ingress queue", () => {
 
     it("skips corrupt completed_metadata_json during duplicate detection", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }, unknown, { handler: string }>({
-          channelId: "test",
-          accountId: "account",
+        const queue = createTestIngressQueue<{ text: string }, unknown, { handler: string }>(
           stateDir,
-        });
+        );
 
         await queue.enqueue("comp-1", { text: "first" });
         await queue.complete("comp-1", { metadata: { handler: "worker" }, completedAt: 150 });
 
         // Corrupt the completed_metadata_json
         const { db } = openOpenClawStateDatabase({
-          env: createStateDirEnv(stateDir),
+          env: { OPENCLAW_STATE_DIR: stateDir },
         });
         db.prepare(
           `UPDATE channel_ingress_events
@@ -756,11 +760,7 @@ describe("channel ingress queue", () => {
 
     it("claimNext skips a corrupt first pending row without lane derivation", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
 
         // Insert the bad row first so it sorts before the good row.
         const earlyTime = 10;
@@ -770,7 +770,7 @@ describe("channel ingress queue", () => {
         // Override the bad row's received_at to be earlier.
         {
           const { db } = openOpenClawStateDatabase({
-            env: createStateDirEnv(stateDir),
+            env: { OPENCLAW_STATE_DIR: stateDir },
           });
           db.prepare(
             `UPDATE channel_ingress_events SET received_at = ? WHERE queue_name = ? AND event_id = ?`,
@@ -782,7 +782,7 @@ describe("channel ingress queue", () => {
         expect(claimed).not.toBeNull();
         expect(claimed!.id).toBe("good-1");
 
-        const database = openOpenClawStateDatabase({ env: createStateDirEnv(stateDir) });
+        const database = openOpenClawStateDatabase({ env: { OPENCLAW_STATE_DIR: stateDir } });
         const failed = executeSqliteQueryTakeFirstSync(
           database.db,
           getNodeSqliteKysely<ChannelIngressTestDatabase>(database.db)
@@ -801,11 +801,7 @@ describe("channel ingress queue", () => {
 
     it("makes durable progress when a corrupt prefix fills the claim scan limit", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
         insertCorruptRow(stateDir, '["test","account"]', "bad-first", {
           payload_json: "{corrupt",
         });
@@ -821,11 +817,7 @@ describe("channel ingress queue", () => {
     it("bounds corrupt reconciliation work per claimNext call", async () => {
       await withTempState(async (stateDir) => {
         const queueName = '["test","account"]';
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
         for (let index = 0; index < 101; index += 1) {
           insertCorruptRow(stateDir, queueName, `bad-${index.toString().padStart(3, "0")}`, {
             payload_json: "{corrupt",
@@ -834,7 +826,7 @@ describe("channel ingress queue", () => {
 
         await expect(queue.claimNext({ scanLimit: 200 })).resolves.toBeNull();
 
-        const database = openOpenClawStateDatabase({ env: createStateDirEnv(stateDir) });
+        const database = openOpenClawStateDatabase({ env: { OPENCLAW_STATE_DIR: stateDir } });
         const counts = executeSqliteQuerySync(
           database.db,
           getNodeSqliteKysely<ChannelIngressTestDatabase>(database.db)
@@ -852,11 +844,7 @@ describe("channel ingress queue", () => {
 
     it("claim returns null for a corrupt pending row", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
 
         await queue.enqueue("good-1", { text: "hello" });
         insertCorruptRow(stateDir, '["test","account"]', "bad-direct", {
@@ -872,7 +860,7 @@ describe("channel ingress queue", () => {
         expect(goodClaim).not.toBeNull();
         expect(goodClaim!.payload.text).toBe("hello");
 
-        const database = openOpenClawStateDatabase({ env: createStateDirEnv(stateDir) });
+        const database = openOpenClawStateDatabase({ env: { OPENCLAW_STATE_DIR: stateDir } });
         const failed = executeSqliteQueryTakeFirstSync(
           database.db,
           getNodeSqliteKysely<ChannelIngressTestDatabase>(database.db)
@@ -887,11 +875,7 @@ describe("channel ingress queue", () => {
 
     it("handles valid JSON null payload correctly", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<null>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<null>(stateDir);
 
         // Valid JSON null should parse as null, not be treated as corrupt.
         await queue.enqueue("null-ok", null);
@@ -903,11 +887,7 @@ describe("channel ingress queue", () => {
 
     it("tombstones a corrupt pending row on duplicate enqueue", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
 
         insertCorruptRow(stateDir, '["test","account"]', "dup-bad", {
           payload_json: "{corrupt",
@@ -922,7 +902,7 @@ describe("channel ingress queue", () => {
 
         // Verify the corrupt row was actually tombstoned in the DB.
         const { db } = openOpenClawStateDatabase({
-          env: createStateDirEnv(stateDir),
+          env: { OPENCLAW_STATE_DIR: stateDir },
         });
         const row = executeSqliteQuerySync(
           db,
@@ -942,11 +922,7 @@ describe("channel ingress queue", () => {
 
     it("does not tombstone a corrupt actively claimed row on duplicate enqueue", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
         insertCorruptRow(stateDir, '["test","account"]', "dup-claimed-bad", {
           payload_json: "{corrupt",
           status: "claimed",
@@ -960,7 +936,7 @@ describe("channel ingress queue", () => {
         );
 
         const { db } = openOpenClawStateDatabase({
-          env: createStateDirEnv(stateDir),
+          env: { OPENCLAW_STATE_DIR: stateDir },
         });
         const row = executeSqliteQueryTakeFirstSync(
           db,
@@ -982,11 +958,7 @@ describe("channel ingress queue", () => {
 
     it("tombstones corrupt claimed rows during stale recovery", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
 
         const oldTime = 10;
         insertCorruptRow(stateDir, '["test","account"]', "stale-bad", {
@@ -1004,7 +976,7 @@ describe("channel ingress queue", () => {
 
         // The corrupt claimed row should now be tombstoned as failed.
         const { db } = openOpenClawStateDatabase({
-          env: createStateDirEnv(stateDir),
+          env: { OPENCLAW_STATE_DIR: stateDir },
         });
         const row = executeSqliteQuerySync(
           db,
@@ -1025,11 +997,7 @@ describe("channel ingress queue", () => {
 
     it("does not bypass recovery policy for a corrupt stale claim", async () => {
       await withTempState(async (stateDir) => {
-        const queue = createChannelIngressQueue<{ text: string }>({
-          channelId: "test",
-          accountId: "account",
-          stateDir,
-        });
+        const queue = createTestIngressQueue<{ text: string }>(stateDir);
         insertCorruptRow(stateDir, '["test","account"]', "stale-policy-bad", {
           payload_json: "{corrupt",
           status: "claimed",
@@ -1063,7 +1031,7 @@ describe("channel ingress queue", () => {
         });
 
         const { db } = openOpenClawStateDatabase({
-          env: createStateDirEnv(stateDir),
+          env: { OPENCLAW_STATE_DIR: stateDir },
         });
         const row = executeSqliteQueryTakeFirstSync(
           db,

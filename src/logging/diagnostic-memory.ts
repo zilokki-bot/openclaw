@@ -1,4 +1,5 @@
 // Diagnostic memory helpers capture process memory facts for support diagnostics.
+import { getHeapStatistics } from "node:v8";
 import {
   emitInternalDiagnosticEvent as emitDiagnosticEvent,
   type DiagnosticMemoryPressureEvent,
@@ -9,10 +10,15 @@ import { createSubsystemLogger } from "./subsystem.js";
 
 // Diagnostic memory sampler with threshold/growth pressure detection and repeat suppression.
 const MB = 1024 * 1024;
+const GB = 1024 * MB;
 const DEFAULT_RSS_WARNING_BYTES = 1536 * MB;
 const DEFAULT_RSS_CRITICAL_BYTES = 3072 * MB;
 const DEFAULT_HEAP_WARNING_BYTES = 1024 * MB;
 const DEFAULT_HEAP_CRITICAL_BYTES = 2048 * MB;
+const DEFAULT_HEAP_WARNING_RATIO = 0.5;
+const DEFAULT_HEAP_CRITICAL_RATIO = 0.75;
+const DEFAULT_HEAP_WARNING_MAX_BYTES = 4 * GB;
+const DEFAULT_HEAP_CRITICAL_MAX_BYTES = 6 * GB;
 const DEFAULT_RSS_GROWTH_WARNING_BYTES = 512 * MB;
 const DEFAULT_RSS_GROWTH_CRITICAL_BYTES = 1024 * MB;
 const DEFAULT_GROWTH_WINDOW_MS = 10 * 60 * 1000;
@@ -58,54 +64,37 @@ function normalizeMemoryUsage(memory: NodeJS.MemoryUsage): DiagnosticMemoryUsage
   };
 }
 
-// Environment override for memory-pressure thresholds. Precedence:
-// explicit thresholds argument > OPENCLAW_DIAGNOSTIC_* env var > built-in default.
-// Only positive finite values are accepted; invalid env values fall through to defaults.
-function envThreshold(name: string): number | undefined {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") {
-    return undefined;
-  }
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
 function resolveThresholds(
   thresholds?: DiagnosticMemoryThresholds,
+  heapSizeLimitBytes?: number,
 ): Required<DiagnosticMemoryThresholds> {
+  const hasHeapLimit =
+    typeof heapSizeLimitBytes === "number" &&
+    Number.isFinite(heapSizeLimitBytes) &&
+    heapSizeLimitBytes > 0;
+  // Scale both directions with V8's effective limit, but keep a warning/critical
+  // ceiling so very large heaps still surface actionable pressure diagnostics.
+  const heapWarningBytes = hasHeapLimit
+    ? Math.min(
+        Math.floor(heapSizeLimitBytes * DEFAULT_HEAP_WARNING_RATIO),
+        DEFAULT_HEAP_WARNING_MAX_BYTES,
+      )
+    : DEFAULT_HEAP_WARNING_BYTES;
+  const heapCriticalBytes = hasHeapLimit
+    ? Math.min(
+        Math.floor(heapSizeLimitBytes * DEFAULT_HEAP_CRITICAL_RATIO),
+        DEFAULT_HEAP_CRITICAL_MAX_BYTES,
+      )
+    : DEFAULT_HEAP_CRITICAL_BYTES;
   return {
-    rssWarningBytes:
-      thresholds?.rssWarningBytes ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES") ??
-      DEFAULT_RSS_WARNING_BYTES,
-    rssCriticalBytes:
-      thresholds?.rssCriticalBytes ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES") ??
-      DEFAULT_RSS_CRITICAL_BYTES,
-    heapUsedWarningBytes:
-      thresholds?.heapUsedWarningBytes ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_HEAP_WARNING_BYTES") ??
-      DEFAULT_HEAP_WARNING_BYTES,
-    heapUsedCriticalBytes:
-      thresholds?.heapUsedCriticalBytes ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_HEAP_CRITICAL_BYTES") ??
-      DEFAULT_HEAP_CRITICAL_BYTES,
-    rssGrowthWarningBytes:
-      thresholds?.rssGrowthWarningBytes ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_RSS_GROWTH_WARNING_BYTES") ??
-      DEFAULT_RSS_GROWTH_WARNING_BYTES,
-    rssGrowthCriticalBytes:
-      thresholds?.rssGrowthCriticalBytes ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_RSS_GROWTH_CRITICAL_BYTES") ??
-      DEFAULT_RSS_GROWTH_CRITICAL_BYTES,
-    growthWindowMs:
-      thresholds?.growthWindowMs ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_GROWTH_WINDOW_MS") ??
-      DEFAULT_GROWTH_WINDOW_MS,
-    pressureRepeatMs:
-      thresholds?.pressureRepeatMs ??
-      envThreshold("OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS") ??
-      DEFAULT_PRESSURE_REPEAT_MS,
+    rssWarningBytes: thresholds?.rssWarningBytes ?? DEFAULT_RSS_WARNING_BYTES,
+    rssCriticalBytes: thresholds?.rssCriticalBytes ?? DEFAULT_RSS_CRITICAL_BYTES,
+    heapUsedWarningBytes: thresholds?.heapUsedWarningBytes ?? heapWarningBytes,
+    heapUsedCriticalBytes: thresholds?.heapUsedCriticalBytes ?? heapCriticalBytes,
+    rssGrowthWarningBytes: thresholds?.rssGrowthWarningBytes ?? DEFAULT_RSS_GROWTH_WARNING_BYTES,
+    rssGrowthCriticalBytes: thresholds?.rssGrowthCriticalBytes ?? DEFAULT_RSS_GROWTH_CRITICAL_BYTES,
+    growthWindowMs: thresholds?.growthWindowMs ?? DEFAULT_GROWTH_WINDOW_MS,
+    pressureRepeatMs: thresholds?.pressureRepeatMs ?? DEFAULT_PRESSURE_REPEAT_MS,
   };
 }
 
@@ -299,6 +288,7 @@ function logMemoryPressure(params: {
 export function emitDiagnosticMemorySample(options?: {
   now?: number;
   memoryUsage?: NodeJS.MemoryUsage;
+  heapSizeLimitBytes?: number;
   uptimeMs?: number;
   thresholds?: DiagnosticMemoryThresholds;
   emitSample?: boolean;
@@ -310,7 +300,10 @@ export function emitDiagnosticMemorySample(options?: {
   const now = options?.now ?? Date.now();
   const memory = normalizeMemoryUsage(options?.memoryUsage ?? process.memoryUsage());
   const current = { ts: now, memory };
-  const thresholds = resolveThresholds(options?.thresholds);
+  const thresholds = resolveThresholds(
+    options?.thresholds,
+    options?.heapSizeLimitBytes ?? getHeapStatistics().heap_size_limit,
+  );
   const shouldEmitSample = options?.emitSample !== false;
 
   if (shouldEmitSample) {
@@ -349,9 +342,7 @@ export function emitDiagnosticMemorySample(options?: {
         log.warn(`critical memory pressure bundle failed: ${String(result.error)}`);
       }
     } else if (pressure.level === "critical") {
-      log.warn(
-        "critical memory pressure snapshot disabled: diagnostics.memoryPressureSnapshot=false",
-      );
+      log.warn("critical memory pressure snapshot disabled");
     }
   }
   return memory;

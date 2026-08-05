@@ -1,6 +1,7 @@
 import { resolveAgentIdentity } from "../../agents/identity.js";
 import { deriveContextPromptTokens, type NormalizedUsage } from "../../agents/usage.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 
@@ -23,8 +24,6 @@ export function buildReplyUsageState(params: {
   sessionId: string;
   chatType?: string;
   authMode?: string;
-  authProfileId?: string;
-  gitBranch?: string | null;
   overrideSource?: string;
   requestedProvider?: string;
   requestedModel?: string;
@@ -56,7 +55,6 @@ export function buildReplyUsageState(params: {
     sessionId: params.sessionId,
     chatType: params.chatType,
     authMode: params.authMode,
-    authProfileId: params.authProfileId,
     overrideSource: params.overrideSource,
     requested:
       params.requestedProvider && params.requestedModel
@@ -74,7 +72,6 @@ export function buildReplyUsageState(params: {
       : undefined,
     durationMs: params.durationMs,
     identity: resolveAgentIdentity(params.config, params.agentId),
-    gitBranch: params.gitBranch ?? undefined,
     compactionCount: params.compactionCount,
     contextTokenBudget:
       typeof params.contextTokenBudget === "number" && Number.isFinite(params.contextTokenBudget)
@@ -117,13 +114,7 @@ function prune(now: number): void {
   }
   // This handoff is best-effort metadata for an optional hook. Bound bursts so
   // completed runs cannot retain one full snapshot each for the whole TTL.
-  while (store.size > MAX_REPLY_USAGE_STATE_ENTRIES) {
-    const oldest = store.keys().next();
-    if (oldest.done) {
-      return;
-    }
-    store.delete(oldest.value);
-  }
+  pruneMapToMaxSize(store, MAX_REPLY_USAGE_STATE_ENTRIES);
 }
 
 export function recordReplyUsageState(
@@ -136,10 +127,6 @@ export function recordReplyUsageState(
   const now = Date.now();
   store.set(runId, { snapshot, expiresAt: now + TTL_MS });
   prune(now);
-}
-
-export function clearReplyUsageStateForTest(): void {
-  store.clear();
 }
 
 export function consumeReplyUsageState(runId?: string): PluginHookReplyUsageState | undefined {

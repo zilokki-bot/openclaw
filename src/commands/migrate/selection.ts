@@ -8,16 +8,11 @@ import { markMigrationItemSkipped, summarizeMigrationItems } from "../../plugin-
 import type { MigrationItem, MigrationPlan } from "../../plugins/types.js";
 import { MIGRATION_CONFLICT_REASON_PHRASES } from "./output.js";
 
-// Public selection tokens and skip reasons shared with prompt tests and apply filtering.
-export const MIGRATION_SKILL_NOT_SELECTED_REASON = "not selected for migration";
-export const MIGRATION_PLUGIN_NOT_SELECTED_REASON = "not selected for migration";
-const MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON = "outside explicit migration selection";
+// Selection tokens are shared with the command and prompt implementations.
+const MIGRATION_NOT_SELECTED_REASON = "not selected for migration";
 export const MIGRATION_SELECTION_ACCEPT = "__openclaw_migrate_accept_recommended__";
 export const MIGRATION_SELECTION_TOGGLE_ALL_ON = "__openclaw_migrate_toggle_all_on__";
 export const MIGRATION_SELECTION_TOGGLE_ALL_OFF = "__openclaw_migrate_toggle_all_off__";
-export const MIGRATION_SKILL_SELECTION_ACCEPT = MIGRATION_SELECTION_ACCEPT;
-export const MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON = MIGRATION_SELECTION_TOGGLE_ALL_ON;
-export const MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF = MIGRATION_SELECTION_TOGGLE_ALL_OFF;
 
 type InteractiveMigrationSelection = { action: "select"; selectedItemIds: Set<string> };
 /** Interactive skill selection result consumed by the apply flow. */
@@ -186,7 +181,7 @@ export function getSelectableMigrationSkillItems(plan: MigrationPlan): Migration
   return plan.items.filter(
     (item) =>
       item.kind === "skill" &&
-      (item.action === "copy" || item.action === "create") &&
+      item.action === "copy" &&
       (item.status === "planned" || item.status === "conflict"),
   );
 }
@@ -275,7 +270,7 @@ export function applyMigrationSelectedSkillItemIds(
     if (!selectableIds.has(item.id) || selectedItemIds.has(item.id)) {
       return item;
     }
-    return markMigrationItemSkipped(item, MIGRATION_SKILL_NOT_SELECTED_REASON);
+    return markMigrationItemSkipped(item, MIGRATION_NOT_SELECTED_REASON);
   });
   return {
     ...plan,
@@ -295,52 +290,6 @@ export function applyMigrationSkillSelection(
   const selectable = getSelectableMigrationSkillItems(plan);
   const selectedIds = resolveSelectedSkillItemIds(selectable, selectedSkillRefs);
   return applyMigrationSelectedSkillItemIds(plan, selectedIds);
-}
-
-function shouldKeepItemInExplicitMigrationSelection(
-  item: MigrationItem,
-  opts: {
-    skills?: readonly string[];
-    plugins?: readonly string[];
-  },
-): boolean {
-  if (opts.skills !== undefined && item.kind === "skill") {
-    return true;
-  }
-  if (opts.plugins !== undefined && item.kind === "plugin") {
-    return true;
-  }
-  if (opts.plugins !== undefined && isCodexPluginConfigItem(item)) {
-    return true;
-  }
-  return false;
-}
-
-/** Skips planned items outside explicit --skill/--plugin selections. */
-export function applyExplicitMigrationSelectionBoundary(
-  plan: MigrationPlan,
-  opts: {
-    skills?: readonly string[];
-    plugins?: readonly string[];
-  },
-): MigrationPlan {
-  if (opts.skills === undefined && opts.plugins === undefined) {
-    return plan;
-  }
-  const items = plan.items.map((item) => {
-    if (item.status !== "planned" && item.status !== "conflict") {
-      return item;
-    }
-    if (shouldKeepItemInExplicitMigrationSelection(item, opts)) {
-      return item;
-    }
-    return markMigrationItemSkipped(item, MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON);
-  });
-  return {
-    ...plan,
-    items,
-    summary: summarizeMigrationItems(items),
-  };
 }
 
 /** Applies plugin refs passed by CLI flags to a migration plan. */
@@ -376,7 +325,7 @@ export function applyMigrationSelectedPluginItemIds(
     if (!selectableIds.has(item.id) || selectedItemIds.has(item.id)) {
       return item;
     }
-    return markMigrationItemSkipped(item, MIGRATION_PLUGIN_NOT_SELECTED_REASON);
+    return markMigrationItemSkipped(item, MIGRATION_NOT_SELECTED_REASON);
   });
   return {
     ...plan,
@@ -424,7 +373,7 @@ function applyCodexPluginConfigSelection(
     Object.entries(codexPlugins.plugins).filter(([configKey]) => selectedConfigKeys.has(configKey)),
   );
   if (Object.keys(plugins).length === 0) {
-    return markMigrationItemSkipped(item, MIGRATION_PLUGIN_NOT_SELECTED_REASON);
+    return markMigrationItemSkipped(item, MIGRATION_NOT_SELECTED_REASON);
   }
   return {
     ...item,

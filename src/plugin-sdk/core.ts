@@ -1,4 +1,3 @@
-// Core SDK contracts expose stable identifiers, manifests, and shared plugin metadata types.
 import { expectDefined } from "@openclaw/normalization-core";
 import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
 import type { ResolvedConfiguredAcpBinding } from "../acp/persistent-bindings.types.js";
@@ -37,7 +36,6 @@ import {
   normalizeSessionKeyPreservingOpaquePeerIds,
   parseThreadSessionSuffix,
 } from "../sessions/session-key-utils.js";
-
 export type {
   AgentPromptGuidance,
   AgentPromptGuidanceEntry,
@@ -87,6 +85,9 @@ export type {
   ProviderAuthDoctorHintContext,
   ProviderAuthMethod,
   ProviderAuthMethodNonInteractiveContext,
+  ProviderAppGuidedSetup,
+  ProviderAppGuidedSetupCandidate,
+  ProviderAppGuidedSetupContext,
   ProviderAuthResult,
   ProviderAugmentModelCatalogContext,
   ProviderBuildMissingAuthMessageContext,
@@ -97,7 +98,6 @@ export type {
   ProviderCatalogContext,
   ProviderCatalogResult,
   ProviderDefaultThinkingPolicyContext,
-  ProviderDiscoveryContext,
   ProviderFetchUsageSnapshotContext,
   ProviderModernModelPolicyContext,
   ProviderNormalizeResolvedModelContext,
@@ -142,6 +142,11 @@ export type {
   OpenClawPluginToolContext,
   OpenClawPluginToolFactory,
 } from "../plugins/types.js";
+export type {
+  OpenClawPluginGatewayEventScope,
+  OpenClawPluginGatewayEvents,
+  OpenClawPluginSessionsChangedEvent,
+} from "../plugins/gateway-events.js";
 export type {
   MemoryPluginCapability,
   MemoryPluginPublicArtifact,
@@ -224,6 +229,7 @@ export { resolveTailscalePublishedHost } from "../shared/tailscale-status.js";
 export {
   buildMemorySystemPromptAddition,
   delegateCompactionToRuntime,
+  prepareMemorySystemPromptAddition,
 } from "../context-engine/delegate.js";
 export { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 export {
@@ -496,6 +502,7 @@ type DefineChannelPluginEntryOptions<TPlugin = ChannelPlugin> = {
   setRuntime?: (runtime: PluginRuntime) => void;
   registerCliMetadata?: (api: OpenClawPluginApi) => void;
   registerFull?: (api: OpenClawPluginApi) => void;
+  registerCapabilities?: (api: OpenClawPluginApi) => void;
 };
 
 type DefinedChannelPluginEntry<TPlugin> = {
@@ -523,18 +530,21 @@ type CreateChannelPluginBaseOptions<TResolvedAccount> = {
   configSchema?: ChannelPlugin<TResolvedAccount>["configSchema"];
   config?: ChannelPlugin<TResolvedAccount>["config"];
   security?: ChannelPlugin<TResolvedAccount>["security"];
-  setup: NonNullable<ChannelPlugin<TResolvedAccount>["setup"]>;
+  setup?: NonNullable<ChannelPlugin<TResolvedAccount>["setup"]>;
+  setupContract?: NonNullable<ChannelPlugin<TResolvedAccount>["setupContract"]>;
   groups?: ChannelPlugin<TResolvedAccount>["groups"];
 };
 
 type CreatedChannelPluginBase<TResolvedAccount> = Pick<
   ChannelPlugin<TResolvedAccount>,
-  "id" | "meta" | "setup"
+  "id" | "meta"
 > &
   Partial<
     Pick<
       ChannelPlugin<TResolvedAccount>,
       | "setupWizard"
+      | "setup"
+      | "setupContract"
       | "capabilities"
       | "commands"
       | "doctor"
@@ -566,6 +576,7 @@ export function defineChannelPluginEntry<TPlugin>({
   setRuntime,
   registerCliMetadata,
   registerFull,
+  registerCapabilities,
 }: DefineChannelPluginEntryOptions<TPlugin>): DefinedChannelPluginEntry<TPlugin> {
   const resolvedConfigSchema: ChannelEntryConfigSchema<TPlugin> =
     typeof configSchema === "function"
@@ -583,12 +594,14 @@ export function defineChannelPluginEntry<TPlugin>({
       }
       if (api.registrationMode === "tool-discovery") {
         registerFull?.(api);
+        registerCapabilities?.(api);
         return;
       }
       api.registerChannel({ plugin: plugin as ChannelPlugin });
       setRuntime?.(api.runtime);
       if (api.registrationMode === "discovery") {
         registerCliMetadata?.(api);
+        registerCapabilities?.(api);
         return;
       }
       if (api.registrationMode !== "full") {
@@ -596,6 +609,7 @@ export function defineChannelPluginEntry<TPlugin>({
       }
       registerCliMetadata?.(api);
       registerFull?.(api);
+      registerCapabilities?.(api);
     },
   };
   return {
@@ -865,6 +879,8 @@ export function createChannelPluginBase<TResolvedAccount>(
     ...(params.config ? { config: params.config } : {}),
     ...(params.security ? { security: params.security } : {}),
     ...(params.groups ? { groups: params.groups } : {}),
-    setup: params.setup,
+    ...(params.setup ? { setup: params.setup } : {}),
+    ...(params.setupContract ? { setupContract: params.setupContract } : {}),
   } as CreatedChannelPluginBase<TResolvedAccount>;
 }
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

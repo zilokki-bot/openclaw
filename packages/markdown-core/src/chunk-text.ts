@@ -1,4 +1,14 @@
 // Markdown Core module implements chunk text behavior.
+import { resolveIntegerOption } from "@openclaw/normalization-core/number-coercion";
+import { avoidTrailingHighSurrogateBreak } from "@openclaw/normalization-core/utf16-slice";
+
+export { avoidTrailingHighSurrogateBreak };
+
+function normalizeChunkLimit(limit: number): number {
+  // String slicing truncates fractional indexes, so positive limits need an integer progress step.
+  return Number.isFinite(limit) && limit > 0 ? resolveIntegerOption(limit, 1, { min: 1 }) : limit;
+}
+
 function resolveChunkEarlyReturn(text: string, limit: number): string[] | undefined {
   if (!text) {
     return [];
@@ -85,14 +95,15 @@ export function chunkTextRanges(text: string, options: ChunkTextRangesOptions): 
   if (!text) {
     return [];
   }
-  if (options.limit <= 0 || text.length <= options.limit) {
+  const normalizedLimit = normalizeChunkLimit(options.limit);
+  if (normalizedLimit <= 0 || text.length <= normalizedLimit) {
     return [{ start: 0, end: text.length }];
   }
 
   const ranges: TextChunkRange[] = [];
   let start = 0;
   while (start < text.length) {
-    const maxEnd = Math.min(text.length, start + options.limit);
+    const maxEnd = Math.min(text.length, start + normalizedLimit);
     const preferredEnd =
       options.mode === "preferred" && maxEnd < text.length
         ? findPreferredRangeEnd(text, start, maxEnd)
@@ -106,29 +117,13 @@ export function chunkTextRanges(text: string, options: ChunkTextRangesOptions): 
 }
 
 /**
- * Keeps UTF-16 chunk boundaries from separating a supplementary-plane character.
- * A one-unit positive limit still needs to emit an entire surrogate pair.
- */
-export function avoidTrailingHighSurrogateBreak(text: string, start: number, end: number): number {
-  if (
-    end >= text.length ||
-    text.charCodeAt(end - 1) < 0xd800 ||
-    text.charCodeAt(end - 1) > 0xdbff ||
-    text.charCodeAt(end) < 0xdc00 ||
-    text.charCodeAt(end) > 0xdfff
-  ) {
-    return end;
-  }
-  return end - 1 > start ? end - 1 : end + 1;
-}
-
-/**
  * Splits plain text into size-bounded chunks at readable boundaries.
  *
  * Returns the original text as one chunk when the limit is non-positive.
  */
 export function chunkText(text: string, limit: number): string[] {
-  const early = resolveChunkEarlyReturn(text, limit);
+  const normalizedLimit = normalizeChunkLimit(limit);
+  const early = resolveChunkEarlyReturn(text, normalizedLimit);
   if (early) {
     return early;
   }
@@ -136,11 +131,11 @@ export function chunkText(text: string, limit: number): string[] {
   const chunks: string[] = [];
   let cursor = 0;
   while (cursor < text.length) {
-    if (text.length - cursor <= limit) {
+    if (text.length - cursor <= normalizedLimit) {
       chunks.push(text.slice(cursor));
       break;
     }
-    const windowEnd = Math.min(text.length, cursor + limit);
+    const windowEnd = Math.min(text.length, cursor + normalizedLimit);
     const window = text.slice(cursor, windowEnd);
     const { lastNewline, lastWhitespace } = scanParenAwareBreakpoints(window);
     // Prefer block boundaries, then spaces, then a hard size cut when no

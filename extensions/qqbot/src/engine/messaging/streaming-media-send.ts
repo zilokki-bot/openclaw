@@ -5,6 +5,7 @@
  * 拆分、路径编码修复，以及统一的发送队列执行器。
  */
 
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import type { GatewayAccount } from "../types.js";
 import { normalizePath } from "../utils/platform.js";
@@ -19,10 +20,7 @@ import {
   resolveUserFacingMediaError,
   type MediaTargetContext,
 } from "./outbound.js";
-
-function formatStreamSendErr(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
+import { raceWithTimeout } from "./race-with-timeout.js";
 
 // ============ 类型定义 ============
 
@@ -118,7 +116,7 @@ function fixPathEncoding(
       }
     }
   } catch (decodeErr) {
-    log?.error?.(`Path decode error: ${formatStreamSendErr(decodeErr)}`);
+    log?.error?.(`Path decode error: ${formatErrorMessage(decodeErr)}`);
   }
 
   return result;
@@ -281,7 +279,7 @@ export async function executeSendQueue(
       await options.onSendText(errorMsg);
     } catch (fallbackErr) {
       log?.error(
-        `${prefix} executeSendQueue: fallback text send failed: ${formatStreamSendErr(fallbackErr)}`,
+        `${prefix} executeSendQueue: fallback text send failed: ${formatErrorMessage(fallbackErr)}`,
       );
     }
   };
@@ -314,27 +312,21 @@ export async function executeSendQueue(
           await sendFallbackText(resolveUserFacingMediaError(result));
         }
       } else if (item.type === "voice") {
-        const uploadFormats =
-          account.config?.audioFormatPolicy?.uploadDirectFormats ??
-          account.config?.voiceDirectUploadFormats;
+        const uploadFormats = account.config?.audioFormatPolicy?.uploadDirectFormats;
         const transcodeEnabled = account.config?.audioFormatPolicy?.transcodeEnabled !== false;
-        const voiceTimeout = 45000; // 45s
+        const voiceTimeout = 45_000;
         try {
-          const result = await Promise.race([
-            sendVoice(mediaTarget, item.content, uploadFormats, transcodeEnabled),
-            new Promise<{ channel: string; error: string }>((resolve) => {
-              setTimeout(
-                () => resolve({ channel: "qqbot", error: "语音发送超时，已跳过" }),
-                voiceTimeout,
-              );
-            }),
-          ]);
+          const result = await raceWithTimeout(
+            () => sendVoice(mediaTarget, item.content, uploadFormats, transcodeEnabled),
+            voiceTimeout,
+            () => ({ channel: "qqbot", error: "语音发送超时，已跳过" }),
+          );
           if (result.error) {
             log?.error(`${prefix} sendVoice error: ${result.error}`);
             await sendFallbackText(resolveUserFacingMediaError(result));
           }
         } catch (err) {
-          log?.error(`${prefix} sendVoice unexpected error: ${formatStreamSendErr(err)}`);
+          log?.error(`${prefix} sendVoice unexpected error: ${formatErrorMessage(err)}`);
           await sendFallbackText(DEFAULT_MEDIA_SEND_ERROR);
         }
       } else if (item.type === "video") {
@@ -368,7 +360,7 @@ export async function executeSendQueue(
       }
     } catch (err) {
       log?.error(
-        `${prefix} executeSendQueue: failed to send ${item.type}: ${formatStreamSendErr(err)}`,
+        `${prefix} executeSendQueue: failed to send ${item.type}: ${formatErrorMessage(err)}`,
       );
       await sendFallbackText(DEFAULT_MEDIA_SEND_ERROR);
     }
