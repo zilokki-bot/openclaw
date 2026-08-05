@@ -281,6 +281,36 @@ describe("runDoctorSessionSqlite", () => {
     }
   });
 
+  it("validates SQLite-only all-agent targets without requiring a legacy store", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-doctor-session-sqlite-"));
+    try {
+      const stateDir = path.join(tempDir, "state");
+      const storePath = path.join(stateDir, "agents", "main", "sessions", "sessions.json");
+      const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+      await upsertSqliteSessionEntry(
+        { agentId: "main", env, sessionKey: "agent:main:main", storePath },
+        { sessionId: "sqlite-session", updatedAt: Date.now() },
+      );
+
+      const report = await runDoctorSessionSqlite({
+        allAgents: true,
+        cfg: {},
+        env,
+        mode: "validate",
+      });
+
+      expect(fs.existsSync(storePath)).toBe(false);
+      expect(report.totals).toMatchObject({
+        issues: 0,
+        legacyEntries: 0,
+        sqliteEntries: 1,
+        targets: 1,
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("migrates a dormant historical agent database before all-agent import compaction", async () => {
     const tempDir = autoCleanupTempDirs.make("openclaw-doctor-session-sqlite-");
     const stateDir = path.join(tempDir, "state");

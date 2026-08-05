@@ -275,6 +275,11 @@ function filterLegacySessionStoreTargets(
   if (mode === "inspect" || mode === "compact" || mode === "restore" || mode === "recover") {
     return targets;
   }
+  if (mode === "validate") {
+    return targets.filter(
+      (target) => fs.existsSync(target.storePath) || fs.existsSync(resolveTargetSqlitePath(target)),
+    );
+  }
   return targets.filter((target) => fs.existsSync(target.storePath));
 }
 
@@ -287,8 +292,12 @@ async function inspectOrMigrateTarget(params: {
   target: SessionStoreTarget;
 }): Promise<DoctorSessionSqliteTargetReport> {
   const issues: DoctorSessionSqliteIssue[] = [];
+  const allowMissingLegacyStore =
+    params.mode === "inspect" ||
+    params.mode === "compact" ||
+    (params.mode === "validate" && fs.existsSync(resolveTargetSqlitePath(params.target)));
   const allRecords = readLegacySessionRecords(params.target, issues, {
-    allowMissingStore: params.mode === "inspect" || params.mode === "compact",
+    allowMissingStore: allowMissingLegacyStore,
   });
   const records = shouldFilterLegacySessionRecordsByTarget(params.target)
     ? allRecords.filter((record) =>
