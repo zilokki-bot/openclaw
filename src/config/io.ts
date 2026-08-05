@@ -180,6 +180,7 @@ type ShippedPluginInstallConfigReadMigration = {
 const loggedInvalidConfigs = new Set<string>();
 const loggedConfigWarningFingerprints = new Map<string, string>();
 const warnedFutureTouchedVersions = new Set<string>();
+const ALLOW_CONFIGURED_PLUGIN_PRUNE_ENV = "OPENCLAW_ALLOW_CONFIGURED_PLUGIN_PRUNE";
 
 export type ParseConfigJson5Result = { ok: true; parsed: unknown } | { ok: false; error: string };
 export type ConfigWriteResult = { persistedHash: string; persistedConfig: OpenClawConfig };
@@ -187,6 +188,102 @@ const configWritePostCommitRollback = Symbol("configWritePostCommitRollback");
 type InternalConfigWriteResult = ConfigWriteResult & {
   [configWritePostCommitRollback]?: () => void;
 };
+
+function collectPluginEntryIds(config: unknown): Set<string> {
+  if (!isRecord(config)) {
+    return new Set();
+  }
+  const plugins = config.plugins;
+  if (!isRecord(plugins) || !isRecord(plugins.entries)) {
+    return new Set();
+  }
+  return new Set(Object.keys(plugins.entries));
+}
+
+function collectPluginAllowIds(config: unknown): Set<string> {
+  if (!isRecord(config)) {
+    return new Set();
+  }
+  const plugins = config.plugins;
+  if (!isRecord(plugins) || !Array.isArray(plugins.allow)) {
+    return new Set();
+  }
+  return new Set(plugins.allow.filter((id): id is string => typeof id === "string"));
+}
+
+function diffMissingIds(before: Set<string>, after: Set<string>): string[] {
+  return [...before].filter((id) => !after.has(id)).toSorted();
+}
+
+function unsetPathRemovesPluginIntent(
+  unsetPaths: readonly (readonly string[])[] | undefined,
+  section: "entries" | "allow",
+  pluginId: string,
+): boolean {
+  return Boolean(
+    unsetPaths?.some((pathLocal) => {
+      if (pathLocal[0] !== "plugins") {
+        return false;
+      }
+      if (pathLocal.length === 1) {
+        return true;
+      }
+      if (pathLocal[1] !== section) {
+        return false;
+      }
+      if (pathLocal.length === 2) {
+        return true;
+      }
+      return section === "entries" && pathLocal[2] === pluginId;
+    }),
+  );
+}
+
+function assertUpdateWritePreservesConfiguredPluginIntent(args: {
+  beforeConfig: unknown;
+  afterConfig: unknown;
+  env: NodeJS.ProcessEnv;
+  unsetPaths?: readonly (readonly string[])[];
+}): void {
+  const isUpdateDoctorWrite =
+    args.env.OPENCLAW_UPDATE_IN_PROGRESS === "1" ||
+    args.env.OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE === "1" ||
+    args.env.OPENCLAW_UPDATE_POST_CORE_CONVERGENCE === "1";
+  if (!isUpdateDoctorWrite || isTruthyEnvValue(args.env[ALLOW_CONFIGURED_PLUGIN_PRUNE_ENV])) {
+    return;
+  }
+
+  const missingEntries = diffMissingIds(
+    collectPluginEntryIds(args.beforeConfig),
+    collectPluginEntryIds(args.afterConfig),
+  ).filter((id) => !unsetPathRemovesPluginIntent(args.unsetPaths, "entries", id));
+  const missingAllow = diffMissingIds(
+    collectPluginAllowIds(args.beforeConfig),
+    collectPluginAllowIds(args.afterConfig),
+  ).filter((id) => !unsetPathRemovesPluginIntent(args.unsetPaths, "allow", id));
+
+  if (missingEntries.length === 0 && missingAllow.length === 0) {
+    return;
+  }
+
+  const parts = [
+    missingEntries.length > 0 ? `plugins.entries lost: ${missingEntries.join(", ")}` : "",
+    missingAllow.length > 0 ? `plugins.allow lost: ${missingAllow.join(", ")}` : "",
+  ].filter(Boolean);
+  throw Object.assign(
+    new Error(
+      `Config write blocked: update/doctor would prune configured plugin intent (${parts.join(
+        "; ",
+      )}). Set ${ALLOW_CONFIGURED_PLUGIN_PRUNE_ENV}=1 only for an explicit operator-approved plugin removal.`,
+    ),
+    {
+      code: "CONFIGURED_PLUGIN_INTENT_PRUNE_BLOCKED",
+      missingPluginEntries: missingEntries,
+      missingPluginAllow: missingAllow,
+    },
+  );
+}
+
 export type ConfigWriteOptions = {
   /**
    * Read-time env snapshot used to validate `${VAR}` restoration decisions.
@@ -2551,6 +2648,12 @@ export function createConfigIO(
       deps.homedir(),
     ) as OpenClawConfig;
     const outputConfig = applyUnsetPathsForWrite(tildeRestoredOutputConfig, unsetPaths);
+    assertUpdateWritePreservesConfiguredPluginIntent({
+      beforeConfig: snapshot.sourceConfig,
+      afterConfig: outputConfig,
+      env: deps.env,
+      unsetPaths,
+    });
     // Do NOT apply runtime defaults when writing - user config should only contain
     // explicitly set values. Runtime defaults are applied when loading (issue #6070).
     const stampedOutputConfig = stampConfigVersion(

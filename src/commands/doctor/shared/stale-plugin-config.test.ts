@@ -106,6 +106,28 @@ describe("doctor stale plugin config helpers", () => {
     });
   });
 
+  it("does not prune explicit plugin intent during package-swap update doctor deferral", () => {
+    const cfg = {
+      plugins: {
+        allow: ["discord", "stale-plugin", "voice-call"],
+        deny: ["openai", "missing-deny"],
+        entries: {
+          "voice-call": { enabled: true },
+          "stale-plugin": { enabled: true },
+        },
+      },
+    } as OpenClawConfig;
+
+    const result = maybeRepairStalePluginConfig(cfg, {
+      OPENCLAW_UPDATE_IN_PROGRESS: "1",
+      OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR: "1",
+      OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
+    });
+
+    expect(result.changes).toEqual([]);
+    expect(result.config).toBe(cfg);
+  });
+
   it("resets stale plugin slots without changing valid slot sentinels", () => {
     const cfg = {
       plugins: {
