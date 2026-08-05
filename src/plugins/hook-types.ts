@@ -612,8 +612,12 @@ export type PluginHookReplyUsageState = {
   chatType?: string;
   /** Credential mode the turn ran under (e.g. "oauth" | "api_key"). */
   authMode?: string;
+  /** Credential profile/account that supplied the turn, redacted before rendering. */
+  authProfileId?: string;
   /** Session model-override source, when a non-default model was pinned. */
   overrideSource?: string;
+  /** Source-checkout branch for non-main dev installs. */
+  gitBranch?: string | null;
   /** Provider/model ref requested for the turn (vs resolvedRef actually used). */
   requested?: string;
   /** Estimated cost of this turn in USD, when a cost table is configured. */

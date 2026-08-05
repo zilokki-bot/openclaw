@@ -32,6 +32,7 @@ import { enqueueFollowupRun, resolveQueueSettings, type FollowupRun } from "./qu
 import type { ReplyDispatchKind } from "./reply-dispatcher.types.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
 import { resolveSourceReplyVisibilityPolicy } from "./source-reply-delivery-mode.js";
+import { markUsageOnlySourceReplyFooterForDelivery } from "./source-reply-usage-footer.js";
 import {
   buildStrandedReplyDeliveryFailurePayload,
   resolveStrandedReplyRecovery,
@@ -264,6 +265,14 @@ export function resolveFollowupDeliveryDecision(params: {
   });
   if (responseUsageLine) {
     payloads = appendUsageLine(payloads, responseUsageLine);
+    payloads = markUsageOnlySourceReplyFooterForDelivery({
+      finalPayloads: payloads,
+      responseUsageLine,
+      completedSourceReplyDelivery:
+        execution.outcome.kind === "settled" &&
+        hasCompletedSourceReplyDeliveryEvidence(execution.outcome.result),
+      sourceReplyDeliveryMode: sourcePolicy.sourceReplyDeliveryMode,
+    });
   }
   if (sourcePolicy.sourceReplyDeliveryMode === "message_tool_only") {
     const explicitlyDeliverable = payloads.filter(

@@ -76,9 +76,11 @@ export const resolveResponseUsageLine = (params: {
     params.config.messages?.responseUsage,
     params.channel,
   );
+  const hasUsage = hasNonzeroUsage(params.usage);
+  const hasFullUsageState = responseUsageMode === "full" && params.replyUsageState !== undefined;
   if (
     responseUsageMode === "off" ||
-    !hasNonzeroUsage(params.usage) ||
+    (!hasUsage && !hasFullUsageState) ||
     params.preserveUserFacingSessionState === true
   ) {
     return undefined;
@@ -124,6 +126,9 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
   }
   const existing = expectDefined(payloads[index], "payloads entry at index");
   const existingText = existing.text ?? "";
+  if (existingText === line || existingText.endsWith(`\n${line}`)) {
+    return payloads;
+  }
   const separator = existingText.endsWith("\n") ? "" : "\n";
   const next = {
     ...existing,

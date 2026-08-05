@@ -601,6 +601,45 @@ describe("resolveFollowupDeliveryDecision", () => {
     });
   });
 
+  it("delivers usage-only footer after a message-tool source reply", () => {
+    const turn = createTurn();
+    turn.queued.run.sourceReplyDeliveryMode = "message_tool_only";
+    turn.config = {
+      messages: {
+        responseUsage: "full",
+      },
+    } as OpenClawConfig;
+
+    const execution = createSettledExecution();
+    if (execution.outcome.kind === "settled") {
+      execution.outcome.result.didDeliverSourceReplyViaMessageTool = true;
+    }
+
+    const decision = resolveFollowupDeliveryDecision({
+      turn,
+      execution,
+      accounting: createAccounting([], {
+        usage: { input: 0, output: 0 },
+        replyUsageState: {
+          provider: "openai",
+          model: "gpt-5.5",
+          contextTokenBudget: 272_000,
+          contextUsedTokens: 131_000,
+        },
+      }),
+    });
+
+    expect(decision).toMatchObject({
+      kind: "deliver",
+      payloads: [{ text: expect.stringContaining("gpt5.5") }],
+    });
+    if (decision.kind === "deliver") {
+      expect(getReplyPayloadMetadata(decision.payloads[0] ?? {})).toMatchObject({
+        deliverDespiteSourceReplySuppression: true,
+      });
+    }
+  });
+
   it("normalizes explicitly allowed payloads before skipping stranded recovery", () => {
     const substantiveFinal =
       "This is a substantive private answer that missed the message tool. It must still trigger recovery when the marked payload is not deliverable.";
