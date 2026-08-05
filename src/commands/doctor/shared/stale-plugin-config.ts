@@ -17,6 +17,7 @@ import {
   filterRepairableStalePluginHits,
   type StalePluginSurface,
 } from "./stale-plugin-repair-preservation.js";
+import { shouldDeferConfiguredPluginInstallRepair } from "./update-phase.js";
 
 const CHANNEL_CONFIG_META_KEYS = new Set(["defaults", "modelByChannel"]);
 
@@ -362,6 +363,9 @@ export function maybeRepairStalePluginConfig(
     return { config: cfg, changes: [] };
   }
   const environment = env ?? process.env;
+  if (shouldDeferConfiguredPluginInstallRepair(environment)) {
+    return { config: cfg, changes: [] };
+  }
   const registryState = collectPluginRegistryState(cfg, environment);
   if (registryState.hasDiscoveryErrors) {
     return { config: cfg, changes: [] };
