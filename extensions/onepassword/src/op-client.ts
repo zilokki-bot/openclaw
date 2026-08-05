@@ -5,11 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { extractErrorCode } from "openclaw/plugin-sdk/error-runtime";
 import { tryReadSecretFileSync } from "openclaw/plugin-sdk/secret-file-runtime";
-import { killProcessTree } from "../../../packages/agent-core/src/harness/env/kill-tree.js";
 import { resolveTrustedOnePasswordCli } from "../onepassword-op-path.js";
 import { OnePasswordError } from "./errors.js";
 
 const MAX_STDOUT_BYTES = 1024 * 1024;
+const FORCE_KILL_SIGNAL = "SIGKILL";
 
 type OpProcessResult = {
   stdout: string;
@@ -78,10 +78,22 @@ async function defaultRunner(
       fn();
     };
     const killTree = () => {
-      if (typeof child.pid === "number") {
-        killProcessTree(child.pid, { force: true });
+      if (process.platform !== "win32" && typeof child.pid === "number") {
+        const processGroupId = child.pid;
+        try {
+          process.kill(-processGroupId, "SIGTERM");
+        } catch {
+          // Process group may already be gone; direct child kill remains below.
+        }
+        setTimeout(() => {
+          try {
+            process.kill(-processGroupId, FORCE_KILL_SIGNAL);
+          } catch {
+            // Process group may already be gone after the graceful signal.
+          }
+        }, 250).unref();
       }
-      child.kill("SIGKILL");
+      child.kill(FORCE_KILL_SIGNAL);
     };
     const outputText = (chunks: Buffer[]) => Buffer.concat(chunks).toString("utf8");
     const timeoutTimer = setTimeout(() => {
