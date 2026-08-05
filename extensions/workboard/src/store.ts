@@ -300,4 +300,32 @@ export class WorkboardStore extends WorkboardNotificationStore {
       dataVersion: stores.dataVersion,
     });
   }
+
+  /**
+   * Process-wide Workboard store.
+   *
+   * `openSqlite()` opens a fresh SQLite connection on every call and nothing
+   * ever closes it. Plugin registration runs more than once per process
+   * (reloads, re-registration), so each pass leaked another connection to the
+   * same file: a live Gateway was observed holding 43 handles to
+   * `workboard.sqlite` plus 43 to its WAL. In WAL mode every extra connection
+   * keeps re-reading shared index pages to notice other writers, which showed
+   * up as ~150k read syscalls per second on an otherwise idle Gateway and as
+   * `slow SQLite transaction lock wait` warnings.
+   *
+   * Registration paths must therefore share one connection. Callers that
+   * genuinely need an isolated store (tests, one-off tooling) keep using
+   * `openSqlite()` directly.
+   */
+  static shared(): WorkboardStore {
+    sharedSqliteStore ??= WorkboardStore.openSqlite();
+    return sharedSqliteStore;
+  }
+
+  /** Drops the memoized process-wide store. Tests only. */
+  static resetShared(): void {
+    sharedSqliteStore = undefined;
+  }
 }
+
+let sharedSqliteStore: WorkboardStore | undefined;

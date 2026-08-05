@@ -176,7 +176,7 @@ export function createWorkboardTools(params: {
   context?: OpenClawPluginToolContext;
   store?: WorkboardStore;
 }): AnyAgentTool[] {
-  const store = params.store ?? WorkboardStore.openSqlite();
+  const store = params.store ?? WorkboardStore.shared();
   const ownerId = contextOwner(params.context);
   const readScopedCardToolParams = async (rawParams: unknown): Promise<WorkboardToolCardParams> => {
     const input = readCardToolParams(rawParams, ownerId);
