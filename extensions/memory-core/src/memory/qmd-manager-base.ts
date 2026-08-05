@@ -239,11 +239,33 @@ export abstract class QmdManagerBase {
       }
     }
     if (this.qmd.update.intervalMs > 0) {
-      this.updateTimer = setInterval(() => {
-        void this.runUpdate("interval").catch((err: unknown) => {
-          qmdManagerLog.warn(`qmd update failed (${String(err)})`);
-        });
-      }, this.qmd.update.intervalMs);
+      const startPeriodicUpdateTimer = () => {
+        this.updateTimer = setInterval(() => {
+          void this.runUpdate("interval").catch((err: unknown) => {
+            qmdManagerLog.warn(`qmd update failed (${String(err)})`);
+          });
+        }, this.qmd.update.intervalMs);
+      };
+      const initialDelayMs = this.resolveUpdateStartupJitterMs();
+      if (initialDelayMs > 0) {
+        this.updateTimer = setTimeout(() => {
+          this.updateTimer = null;
+          if (this.closed) {
+            return;
+          }
+          void this.runUpdate("interval")
+            .catch((err: unknown) => {
+              qmdManagerLog.warn(`qmd update failed (${String(err)})`);
+            })
+            .finally(() => {
+              if (!this.closed) {
+                startPeriodicUpdateTimer();
+              }
+            });
+        }, initialDelayMs);
+      } else {
+        startPeriodicUpdateTimer();
+      }
     }
     if (this.shouldScheduleEmbedTimer()) {
       const startPeriodicEmbedTimer = () => {
@@ -462,6 +484,7 @@ export abstract class QmdManagerBase {
   protected abstract runUpdate(reason: string, force?: boolean): Promise<void>;
   protected abstract ensureWatcher(): void;
   protected abstract shouldScheduleEmbedTimer(): boolean;
+  protected abstract resolveUpdateStartupJitterMs(): number;
   protected abstract resolveEmbedStartupJitterMs(): number;
   protected abstract withQmdStoreWriteLease<T>(
     task: (lease: PluginStateLeaseContext) => Promise<T>,

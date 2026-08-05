@@ -8,6 +8,7 @@ import type { MemorySource } from "openclaw/plugin-sdk/memory-core-host-engine-s
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryManagerSyncOps } from "./manager-sync-ops.js";
+import { resolveQmdCollectionStartupJitterMs } from "./qmd-manager-helpers.js";
 
 type MemoryIndexEntry = {
   path: string;
@@ -116,5 +117,40 @@ describe("MemoryManagerSyncOps interval sync", () => {
     });
 
     expect(harness.batchConfig().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
+  });
+
+  it("stably jitters qmd interval starts by agent and collection set", () => {
+    const collections = [
+      { kind: "custom", path: "/root/.openclaw/workspace/memory", pattern: "**/*.md" },
+      { kind: "sessions", path: "/root/.openclaw/state/sessions", pattern: "**/*.md" },
+    ];
+
+    const first = resolveQmdCollectionStartupJitterMs({
+      agentId: "main",
+      collections,
+      windowMs: 300_000,
+    });
+    const second = resolveQmdCollectionStartupJitterMs({
+      agentId: "main",
+      collections: collections.toReversed(),
+      windowMs: 300_000,
+    });
+    const otherAgent = resolveQmdCollectionStartupJitterMs({
+      agentId: "engineer",
+      collections,
+      windowMs: 300_000,
+    });
+
+    expect(first).toBe(second);
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(first).toBeLessThanOrEqual(300_000);
+    expect(otherAgent).not.toBe(first);
+    expect(
+      resolveQmdCollectionStartupJitterMs({
+        agentId: "main",
+        collections: [],
+        windowMs: 300_000,
+      }),
+    ).toBe(0);
   });
 });

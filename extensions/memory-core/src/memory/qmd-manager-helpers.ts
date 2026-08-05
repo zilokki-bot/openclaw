@@ -13,6 +13,7 @@ export const QMD_EMBED_BACKOFF_MAX_MS = 60 * 60 * 1000;
 const QMD_EMBED_LEASE_MIN_WAIT_MS = 15 * 60 * 1000;
 const QMD_WRITE_LEASE_MIN_WAIT_MS = 5 * 60 * 1000;
 const QMD_EMBED_QUEUE_KEY = Symbol.for("openclaw.qmdEmbedQueueTail");
+const QMD_INTERVAL_UPDATE_QUEUE_KEY = Symbol.for("openclaw.qmdIntervalUpdateQueueTail");
 const QMD_UPDATE_QUEUE_KEY = Symbol.for("openclaw.qmdUpdateQueueState");
 const IGNORED_MEMORY_WATCH_DIR_NAMES = new Set([
   ".git",
@@ -29,6 +30,10 @@ const IGNORED_MEMORY_WATCH_DIR_NAMES = new Set([
 ]);
 
 type QmdEmbedQueueState = {
+  tail: Promise<void>;
+};
+
+type QmdIntervalUpdateQueueState = {
   tail: Promise<void>;
 };
 
@@ -57,6 +62,12 @@ export function normalizePositiveInteger(value: number | undefined, fallback: nu
 
 export function getQmdEmbedQueueState(): QmdEmbedQueueState {
   return resolveGlobalSingleton<QmdEmbedQueueState>(QMD_EMBED_QUEUE_KEY, () => ({
+    tail: Promise.resolve(),
+  }));
+}
+
+export function getQmdIntervalUpdateQueueState(): QmdIntervalUpdateQueueState {
+  return resolveGlobalSingleton<QmdIntervalUpdateQueueState>(QMD_INTERVAL_UPDATE_QUEUE_KEY, () => ({
     tail: Promise.resolve(),
   }));
 }
@@ -93,6 +104,30 @@ export function resolveStableJitterMs(params: { seed: string; windowMs: number }
   const hash = crypto.createHash("sha256").update(params.seed).digest();
   const bucket = hash.readUInt32BE(0);
   return bucket % (Math.floor(params.windowMs) + 1);
+}
+
+export function resolveQmdCollectionStartupJitterMs(params: {
+  agentId: string;
+  collections: readonly { kind?: string; path: string; pattern: string }[];
+  windowMs: number;
+}): number {
+  if (params.windowMs <= 0) {
+    return 0;
+  }
+  const collections = params.collections
+    .map(
+      (collection) =>
+        `${collection.kind ?? "memory"}:${collection.path}\u0000${collection.pattern}`,
+    )
+    .toSorted()
+    .join("\u0001");
+  if (!collections) {
+    return 0;
+  }
+  return resolveStableJitterMs({
+    seed: `${params.agentId}:${collections}`,
+    windowMs: params.windowMs,
+  });
 }
 
 function resolveQmdWriteLeaseOptions(expectedMs: number, minWaitMs: number) {

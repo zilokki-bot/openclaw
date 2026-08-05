@@ -12,12 +12,14 @@ import { asQmdAbortError, isSqliteBusyError } from "./qmd-command-errors.js";
 import { QmdManagerBase, qmdManagerLog } from "./qmd-manager-base.js";
 import {
   getQmdEmbedQueueState,
+  getQmdIntervalUpdateQueueState,
   getQmdUpdateQueueState,
   isEmbedBackoffActive,
   qmdUsesVectors,
   QMD_EMBED_BACKOFF_BASE_MS,
   QMD_EMBED_BACKOFF_MAX_MS,
   resolveQmdEmbedLeaseOptions,
+  resolveQmdCollectionStartupJitterMs,
   resolveQmdStoreWriteLeaseOptions,
   resolveStableJitterMs,
 } from "./qmd-manager-helpers.js";
@@ -145,10 +147,23 @@ export abstract class QmdManagerSync extends QmdManagerBase {
         `qmd sync completed for agent "${this.agentId}" reason=${reason} durationMs=${Date.now() - startTime}`,
       );
     };
-    this.pendingUpdate = run().finally(() => {
+    const runWithIntervalAdmission = () => {
+      if (this.shouldUseIntervalUpdateQueue(reason, force)) {
+        return this.withQmdIntervalUpdateQueue(run);
+      }
+      return run();
+    };
+    this.pendingUpdate = runWithIntervalAdmission().finally(() => {
       this.pendingUpdate = null;
     });
     await this.pendingUpdate;
+  }
+
+  protected shouldUseIntervalUpdateQueue(reason: string, force?: boolean): boolean {
+    if (force) {
+      return false;
+    }
+    return reason === "interval" || reason === "embed-interval";
   }
 
   protected async runQmdUpdateWithRetry(
@@ -284,6 +299,42 @@ export abstract class QmdManagerSync extends QmdManagerBase {
       seed: `${this.agentId}:${customCollections}`,
       windowMs,
     });
+  }
+
+  protected resolveUpdateStartupJitterMs(): number {
+    return resolveQmdCollectionStartupJitterMs({
+      agentId: this.agentId,
+      collections: this.qmd.collections,
+      windowMs: this.qmd.update.intervalMs,
+    });
+  }
+
+  protected async withQmdIntervalUpdateQueue(task: () => Promise<void>): Promise<void> {
+    const queue = getQmdIntervalUpdateQueueState();
+    const previous = queue.tail;
+    let releaseCurrent!: () => void;
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+    queue.tail = previous.then(
+      () => current,
+      () => current,
+    );
+    try {
+      const waitResult = await Promise.race([
+        previous.then(
+          () => "ready" as const,
+          () => "ready" as const,
+        ),
+        this.closeSignal.then(() => "closed" as const),
+      ]);
+      if (waitResult === "closed") {
+        return;
+      }
+      await task();
+    } finally {
+      releaseCurrent();
+    }
   }
 
   protected async withQmdEmbedQueue(task: () => Promise<void>): Promise<boolean> {
