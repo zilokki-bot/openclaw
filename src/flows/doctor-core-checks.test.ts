@@ -960,6 +960,7 @@ describe("CORE_HEALTH_CHECKS", () => {
       ),
       "core/doctor/runtime-tool-schemas",
     );
+    expect(check).toMatchObject({ defaultEnabled: false });
 
     await expect(
       check.detect({
@@ -997,6 +998,7 @@ describe("CORE_HEALTH_CHECKS", () => {
       ),
       "core/doctor/provider-catalog-projection",
     );
+    expect(check).toMatchObject({ defaultEnabled: false });
 
     await expect(
       check.detect({

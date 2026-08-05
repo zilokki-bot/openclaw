@@ -81,9 +81,10 @@ export async function runDoctorLintCli(
     allowExecSecretRefs: opts.allowExec === true,
     ...(snapshot.path !== undefined ? { configPath: snapshot.path } : {}),
   };
-  registerBundledHealthChecks({ cfg: snapshot.config, cwd: ctx.cwd });
   const coreChecks = await resolveDoctorContributionHealthChecks();
-  const extensionChecks = listExtensionHealthChecksForDoctor(coreChecks);
+  const extensionChecks = shouldLoadExtensionLintChecks(opts)
+    ? resolveExtensionHealthChecksForDoctor({ cfg: snapshot.config, cwd: ctx.cwd, coreChecks })
+    : [];
   const coreCtx = { ...ctx, deep: opts.deep === true };
 
   const runOpts: DoctorLintRunOptions = {
@@ -122,6 +123,22 @@ export async function runDoctorLintCli(
   }
 
   return exitCodeFromFindings(result.findings, sevMin);
+}
+
+function shouldLoadExtensionLintChecks(opts: DoctorLintCliOptions): boolean {
+  if (opts.includeAllChecks === true) {
+    return true;
+  }
+  return (opts.onlyIds ?? []).some((id) => !id.startsWith("core/doctor/"));
+}
+
+function resolveExtensionHealthChecksForDoctor(params: {
+  cfg: HealthCheckContext["cfg"];
+  cwd?: string;
+  coreChecks: readonly HealthCheck[];
+}): readonly HealthCheck[] {
+  registerBundledHealthChecks({ cfg: params.cfg, cwd: params.cwd });
+  return listExtensionHealthChecksForDoctor(params.coreChecks);
 }
 
 function withCoreLintContext(

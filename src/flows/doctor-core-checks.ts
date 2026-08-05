@@ -607,24 +607,30 @@ const bootstrapSizeCheck: HealthCheck = {
   },
 };
 
-function createRuntimeToolSchemaCheck(deps: CoreHealthCheckDeps): HealthCheck {
+function createRuntimeToolSchemaCheck(
+  deps: CoreHealthCheckDeps,
+): HealthCheck & { readonly defaultEnabled: false } {
   return {
     id: "core/doctor/runtime-tool-schemas",
     kind: "core",
     description: "Active agent tool schemas project into model/runtime-compatible tool inputs.",
     source: "doctor",
+    defaultEnabled: false,
     async detect(ctx) {
       return deps.collectRuntimeToolSchemaFindings(ctx);
     },
   };
 }
 
-function createProviderCatalogProjectionCheck(deps: CoreHealthCheckDeps): HealthCheck {
+function createProviderCatalogProjectionCheck(
+  deps: CoreHealthCheckDeps,
+): HealthCheck & { readonly defaultEnabled: false } {
   return {
     id: "core/doctor/provider-catalog-projection",
     kind: "core",
     description: "Provider catalog hooks project into unified text model catalog rows.",
     source: "doctor",
+    defaultEnabled: false,
     async detect(ctx) {
       return deps.collectProviderCatalogProjectionFindings(ctx);
     },
