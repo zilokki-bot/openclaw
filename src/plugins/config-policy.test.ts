@@ -1,5 +1,6 @@
 // Covers plugin config policy validation and ownership decisions.
 import { describe, expect, it } from "vitest";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasExplicitPluginConfig, normalizePluginsConfigWithResolver } from "./config-policy.js";
 
 describe("normalizePluginsConfigWithResolver", () => {
@@ -23,10 +24,14 @@ describe("normalizePluginsConfigWithResolver", () => {
   });
 
   it("treats null plugin entries as explicit disabled intent", () => {
-    const normalized = normalizePluginsConfigWithResolver({
+    const pluginsConfig = {
       entries: {
         "pulse-footer": null,
-      } as Record<string, unknown>,
+      },
+    } as unknown as OpenClawConfig["plugins"];
+
+    const normalized = normalizePluginsConfigWithResolver({
+      ...pluginsConfig,
     });
 
     expect(normalized.entries["pulse-footer"]?.enabled).toBe(false);
