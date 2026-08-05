@@ -594,6 +594,100 @@ describe("config io write", () => {
     });
   });
 
+  it("blocks update doctor writes that prune configured plugin entries and allowlist intent", async () => {
+    await withSuiteHome(async (home) => {
+      const configPath = path.join(home, ".openclaw", "openclaw.json");
+      const original = {
+        plugins: {
+          allow: ["codex", "engineering-skills", "finance-skills"],
+          entries: {
+            codex: { enabled: true },
+            "engineering-skills": { enabled: true },
+            "finance-skills": { enabled: true },
+          },
+        },
+      };
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      await fs.writeFile(configPath, `${JSON.stringify(original, null, 2)}\n`, "utf-8");
+      const io = createConfigIO({
+        env: {
+          OPENCLAW_TEST_FAST: "1",
+          OPENCLAW_UPDATE_IN_PROGRESS: "1",
+          OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
+        } as NodeJS.ProcessEnv,
+        homedir: () => home,
+        logger: silentLogger,
+      });
+
+      await expect(
+        io.writeConfigFile({
+          plugins: {
+            allow: ["codex"],
+            entries: {
+              codex: { enabled: true },
+            },
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: "CONFIGURED_PLUGIN_INTENT_PRUNE_BLOCKED",
+        missingPluginEntries: ["engineering-skills", "finance-skills"],
+        missingPluginAllow: ["engineering-skills", "finance-skills"],
+      });
+
+      await expect(fs.readFile(configPath, "utf-8")).resolves.toBe(
+        `${JSON.stringify(original, null, 2)}\n`,
+      );
+    });
+  });
+
+  it("allows explicitly approved update plugin prune writes", async () => {
+    await withSuiteHome(async (home) => {
+      const configPath = path.join(home, ".openclaw", "openclaw.json");
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      await fs.writeFile(
+        configPath,
+        `${JSON.stringify(
+          {
+            plugins: {
+              allow: ["codex", "engineering-skills"],
+              entries: {
+                codex: { enabled: true },
+                "engineering-skills": { enabled: true },
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf-8",
+      );
+      const io = createConfigIO({
+        env: {
+          OPENCLAW_TEST_FAST: "1",
+          OPENCLAW_UPDATE_IN_PROGRESS: "1",
+          OPENCLAW_ALLOW_CONFIGURED_PLUGIN_PRUNE: "1",
+        } as NodeJS.ProcessEnv,
+        homedir: () => home,
+        logger: silentLogger,
+      });
+
+      await io.writeConfigFile({
+        plugins: {
+          allow: ["codex"],
+          entries: {
+            codex: { enabled: true },
+          },
+        },
+      });
+
+      const persisted = JSON.parse(await fs.readFile(configPath, "utf-8")) as {
+        plugins?: { allow?: string[]; entries?: Record<string, unknown> };
+      };
+      expect(persisted.plugins?.allow).toEqual(["codex"]);
+      expect(Object.keys(persisted.plugins?.entries ?? {})).toEqual(["codex"]);
+    });
+  });
+
   it("dedupes validation warnings across writes and reloads until config becomes clean", async () => {
     await withSuiteHome(async (home) => {
       const warn = vi.fn();
