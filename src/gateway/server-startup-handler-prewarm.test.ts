@@ -61,7 +61,7 @@ afterEach(() => {
 });
 
 describe("scheduleGatewayHandlerPrewarm", () => {
-  it("warms bounded session and process-stable plugin data in dashboard order", async () => {
+  it("warms default-agent session and process-stable plugin data in dashboard order", async () => {
     vi.useFakeTimers();
     const cfg = {
       agents: { list: [{ id: "main", default: true }, { id: "research" }] },
@@ -79,18 +79,13 @@ describe("scheduleGatewayHandlerPrewarm", () => {
       "sessions.count",
       "sessions.load.main",
       "sessions.rows.main",
-      "sessions.load.research",
-      "sessions.rows.research",
       "plugins",
     ]);
     expect(mocks.loadCombinedSessionStoreForGateway).toHaveBeenNthCalledWith(1, cfg, {
       agentId: "main",
       projection: "list",
     });
-    expect(mocks.loadCombinedSessionStoreForGateway).toHaveBeenNthCalledWith(2, cfg, {
-      agentId: "research",
-      projection: "list",
-    });
+    expect(mocks.loadCombinedSessionStoreForGateway).toHaveBeenCalledTimes(1);
     expect(mocks.listSessionsFromStoreAsync).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({

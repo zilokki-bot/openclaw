@@ -51,6 +51,7 @@ function dashboardDataPrewarmItems(
   log: { info?: (msg: string) => void },
 ): GatewayHandlerPrewarmItem[] {
   const agentIds = listAgentIds(cfg);
+  const defaultAgentId = agentIds[0];
   let sessionDataPrewarmChecked = false;
   let sessionDataPrewarmAllowed = false;
   const shouldPrewarmSessionData = async () => {
@@ -72,17 +73,23 @@ function dashboardDataPrewarmItems(
     return sessionDataPrewarmAllowed;
   };
   return [
-    ...agentIds.map((agentId) => ({
-      name: `sessions.${agentId}`,
-      load: async () => {
-        // A count-only query keeps unusually large stores off the synchronous JSON projection
-        // path. The request-time session handler remains authoritative when skipped.
-        if (!(await shouldPrewarmSessionData())) {
-          return;
-        }
-        await prewarmGatewaySessionListData(cfg, agentId);
-      },
-    })),
+    ...(defaultAgentId
+      ? [
+          {
+            name: `sessions.${defaultAgentId}`,
+            load: async () => {
+              // Dashboard prewarm is an optimization, not correctness. Keep it scoped to
+              // the default agent so primary gateway startup does not lazily initialize
+              // memory/session managers for the whole fleet. Request-time handlers remain
+              // authoritative for all-agent and selected-agent views.
+              if (!(await shouldPrewarmSessionData())) {
+                return;
+              }
+              await prewarmGatewaySessionListData(cfg, defaultAgentId);
+            },
+          },
+        ]
+      : []),
     {
       name: "plugins",
       load: async () => {
