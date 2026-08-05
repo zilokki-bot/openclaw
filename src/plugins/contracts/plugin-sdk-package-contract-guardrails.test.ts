@@ -973,6 +973,13 @@ describe("plugin-sdk package contract guardrails", () => {
     expect(rootRuntimeDeps.has("@openclaw/plugin-package-contract")).toBe(false);
   });
 
+  it("keeps ACPX and Codex in the root package bundled runtime", () => {
+    const rootPackageJson = readRootPackageJson();
+
+    expect(rootPackageJson.files).not.toContain("!dist/extensions/acpx/**");
+    expect(rootPackageJson.files).not.toContain("!dist/extensions/codex/**");
+  });
+
   it("keeps extension sources on public sdk or local package seams", () => {
     expect(collectExtensionCoreImportLeaks()).toStrictEqual([]);
   });
