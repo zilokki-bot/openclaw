@@ -21,6 +21,16 @@ describe("normalizePluginsConfigWithResolver", () => {
     expect(normalized.deny).toEqual(["BETA"]);
     expect(normalized.entries).toHaveProperty("GAMMA");
   });
+
+  it("treats null plugin entries as explicit disabled intent", () => {
+    const normalized = normalizePluginsConfigWithResolver({
+      entries: {
+        "pulse-footer": null,
+      } as Record<string, unknown>,
+    });
+
+    expect(normalized.entries["pulse-footer"]?.enabled).toBe(false);
+  });
 });
 
 describe("hasExplicitPluginConfig", () => {

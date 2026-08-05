@@ -110,7 +110,14 @@ function normalizePluginEntries(
     if (!normalizedKey) {
       continue;
     }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    if (value === null) {
+      normalized[normalizedKey] = {
+        ...normalized[normalizedKey],
+        enabled: false,
+      };
+      continue;
+    }
+    if (value === undefined || typeof value !== "object" || Array.isArray(value)) {
       normalized[normalizedKey] = {};
       continue;
     }
