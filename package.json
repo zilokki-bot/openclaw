@@ -1706,6 +1706,7 @@
     "release:check": "pnpm release:generated:check && node --import tsx scripts/release-check.ts",
     "release:fast-pretag-check": "bash scripts/release-fast-pretag-check.sh",
     "release:generated:check": "node scripts/release-preflight.mjs --check",
+    "release:server-package:generated:check": "node scripts/release-preflight.mjs --check --scope server-package",
     "release:openclaw:npm:check": "node --import tsx scripts/openclaw-npm-release-check.ts",
     "release:openclaw:npm:verify-published": "node --import tsx scripts/openclaw-npm-postpublish-verify.ts",
     "release:prepare": "node --import tsx scripts/release-prepare.ts",

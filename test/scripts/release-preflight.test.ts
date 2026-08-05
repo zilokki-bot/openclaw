@@ -260,6 +260,21 @@ describe("scripts/release-preflight.mjs", () => {
     expect(result.stdout).not.toContain("macOS app version metadata");
   });
 
+  it("checks server package artifacts without UI locale provider gates", () => {
+    const fakePnpm = makeFakePnpm();
+    const root = makeTempDir(tempDirs, "openclaw-release-preflight-server-package-");
+    const result = runPreflight(["--scope", "server-package"], fakePnpm, {}, root);
+
+    expect(result.status).toBe(0);
+    expect(readPnpmLog(fakePnpm.logPath).toSorted()).toEqual(
+      CHECK_COMMANDS.filter(
+        (command) => command !== "pnpm ui:i18n:check" && command !== "pnpm native:i18n:check",
+      ).toSorted(),
+    );
+    expect(result.stdout).toContain("(server-package, jobs=4)");
+    expect(result.stdout).not.toContain("macOS app version metadata");
+  });
+
   it("rejects invalid concurrency before running commands", () => {
     const result = runPreflight(["--jobs", "0"]);
 

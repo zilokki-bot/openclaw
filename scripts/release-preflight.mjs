@@ -8,6 +8,9 @@ import { parseReleaseVersion } from "./lib/release-version.mjs";
 const parsedArgs = parseArgs(process.argv.slice(2));
 const fix = parsedArgs.fix;
 const macosInfoPlistPath = "apps/macos/Sources/OpenClaw/Resources/Info.plist";
+const scopeAliases = new Map([
+  ["server-package", ["config", "dependencies", "plugin-sdk", "plugins"]],
+]);
 const nodeCommand = (...args) => ({ args, bin: "node" });
 const pnpmCommand = (...args) => ({ args, bin: "pnpm" });
 const releaseTasks = [
@@ -368,7 +371,17 @@ function parseArgs(argv) {
     }
     if (arg === "--scope") {
       const scope = readOptionValue(argv, index, arg);
-      if (!["all", "config", "dependencies", "plugin-sdk", "plugins", "version"].includes(scope)) {
+      if (
+        ![
+          "all",
+          "config",
+          "dependencies",
+          "plugin-sdk",
+          "plugins",
+          "server-package",
+          "version",
+        ].includes(scope)
+      ) {
         console.error(`Unknown release preflight scope: ${scope}`);
         printUsage(console.error);
         process.exit(1);
@@ -408,7 +421,7 @@ function printUsage(writeLine) {
   writeLine("  --check       verify generated release artifacts without writing changes (default)");
   writeLine("  --fix         refresh generated release artifacts, then verify them");
   writeLine(
-    "  --scope name  all, version, dependencies, plugins, config, or plugin-sdk; repeatable",
+    "  --scope name  all, version, dependencies, plugins, config, plugin-sdk, or server-package; repeatable",
   );
   writeLine("  --jobs count  maximum concurrent commands (default: 4)");
   writeLine("  --macos-versions-only  verify macOS source version metadata only, no commands");
@@ -434,7 +447,16 @@ function parseJobs(raw) {
 }
 
 function taskMatchesScopes(task, scopes) {
-  return scopes.has("all") || task.scopes.some((scope) => scopes.has(scope));
+  if (scopes.has("all") || task.scopes.some((scope) => scopes.has(scope))) {
+    return true;
+  }
+  const expandedScopes = new Set();
+  for (const scope of scopes) {
+    for (const expandedScope of scopeAliases.get(scope) ?? []) {
+      expandedScopes.add(expandedScope);
+    }
+  }
+  return task.scopes.some((scope) => expandedScopes.has(scope));
 }
 
 function formatScopes(scopes) {
