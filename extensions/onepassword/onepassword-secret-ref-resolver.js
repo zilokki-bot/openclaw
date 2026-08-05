@@ -12,6 +12,7 @@ const OP_READ_CONCURRENCY = 4;
 const OP_READ_TIMEOUT_MS = 7_000;
 const MAX_SECRET_REFS_PER_REQUEST = 32;
 const MAX_SECRET_VALUE_BYTES = 64 * 1024;
+const FORCE_KILL_SIGNAL = "SIGKILL";
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -204,11 +205,19 @@ async function runOpRead(opCommand, token, secretReference) {
     }
     terminationReason = reason;
     if (process.platform !== "win32" && typeof subprocess.pid === "number") {
+      const processGroupId = subprocess.pid;
       try {
-        process.kill(-subprocess.pid, "SIGKILL");
+        process.kill(-processGroupId, "SIGTERM");
       } catch {
         // Process group may already be gone; direct child kill remains below.
       }
+      setTimeout(() => {
+        try {
+          process.kill(-processGroupId, FORCE_KILL_SIGNAL);
+        } catch {
+          // Process group may already be gone after the graceful signal.
+        }
+      }, 250);
     }
     subprocess.kill("SIGKILL");
   };
