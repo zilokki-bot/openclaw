@@ -406,6 +406,8 @@ class SessionsPage extends OpenClawLightDomElement {
     // Narrow the query only for a route deep link (?session=...); an open
     // drawer is pure UI state and must not filter subsequent reloads.
     const deepLinkKey = this.deepLinkSessionKey;
+    const allAgentScope =
+      !deepLinkKey && !normalizeOptionalString(this.context?.agentSelection.state.selectedId);
     return {
       activeMinutes: deepLinkKey || this.showArchived ? 0 : parseFilterInteger(this.activeMinutes),
       limit: deepLinkKey ? 50 : parseFilterInteger(this.limit),
@@ -413,6 +415,7 @@ class SessionsPage extends OpenClawLightDomElement {
       includeGlobal: deepLinkKey ? true : this.includeGlobal,
       includeUnknown: deepLinkKey ? true : this.includeUnknown,
       showArchived: this.showArchived,
+      configuredAgentsOnly: allAgentScope ? false : undefined,
       ...(deepLinkKey ? { agentId: this.sessionAgentId(deepLinkKey) } : {}),
     };
   }

@@ -137,6 +137,7 @@ function createSessions(overrides: Partial<SessionCapability> = {}): SessionCapa
 function createContext(
   gateway: ApplicationContext["gateway"],
   sessions: SessionCapability,
+  options: { selectedAgentId?: string | null } = {},
 ): ApplicationContext {
   const subscribe = () => () => undefined;
   return {
@@ -145,7 +146,12 @@ function createContext(
     sessions,
     agents: { state: { agentsList: null }, subscribe },
     agentIdentity: { get: () => undefined, ensure: vi.fn(), subscribe },
-    agentSelection: { state: { selectedId: "main" }, subscribe },
+    agentSelection: {
+      state: {
+        selectedId: options.selectedAgentId === undefined ? "main" : options.selectedAgentId,
+      },
+      subscribe,
+    },
     channels: { subscribe },
     runtimeConfig: { state: { configSnapshot: null }, subscribe },
     workboard: {
@@ -192,6 +198,36 @@ afterEach(() => {
 });
 
 describe("sessions page lifecycle", () => {
+  it("loads all-agent sessions without restricting the result to configured agents", async () => {
+    const list = vi.fn(async () => ({ count: 0, sessions: [] }) as SessionsListResult);
+    const sessions = createSessions({ list });
+    const { gateway } = createGateway({} as GatewayBrowserClient);
+    const page = await createPage(createContext(gateway, sessions, { selectedAgentId: null }));
+
+    await page.loadSessions();
+
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configuredAgentsOnly: false,
+      }),
+    );
+  });
+
+  it("keeps configured-agent filtering for a selected agent scope", async () => {
+    const list = vi.fn(async () => ({ count: 0, sessions: [] }) as SessionsListResult);
+    const sessions = createSessions({ list });
+    const { gateway } = createGateway({} as GatewayBrowserClient);
+    const page = await createPage(createContext(gateway, sessions, { selectedAgentId: "main" }));
+
+    await page.loadSessions();
+
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configuredAgentsOnly: undefined,
+      }),
+    );
+  });
+
   it("submits one trimmed bounded transcript search and adopts its status", async () => {
     const response = deferred<SessionsSearchResult>();
     const request = vi.fn(() => response.promise);
