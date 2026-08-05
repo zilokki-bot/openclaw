@@ -272,6 +272,53 @@ describe("codex plugin", () => {
     expect(providers.map((provider) => provider.id)).toEqual(["openai"]);
   });
 
+  it("collects CLI metadata without requiring the runtime state store", () => {
+    const registerAgentHarness = vi.fn();
+    const registerCli = vi.fn();
+    const registerCommand = vi.fn();
+    const registerMediaUnderstandingProvider = vi.fn();
+    const registerMigrationProvider = vi.fn();
+    const registerProvider = vi.fn();
+    const registerTool = vi.fn();
+
+    expect(() =>
+      plugin.register(
+        createTestPluginApi({
+          id: "codex",
+          name: "Codex",
+          source: "test",
+          config: {},
+          pluginConfig: {},
+          registrationMode: "cli-metadata",
+          runtime: {} as never,
+          registerAgentHarness,
+          registerCli,
+          registerCommand,
+          registerMediaUnderstandingProvider,
+          registerMigrationProvider,
+          registerProvider,
+          registerTool,
+        }),
+      ),
+    ).not.toThrow();
+
+    expect(registerCli).toHaveBeenCalledWith(expect.any(Function), {
+      descriptors: [
+        {
+          name: "codex",
+          description: "Inspect and branch from Codex sessions through the Gateway",
+          hasSubcommands: true,
+        },
+      ],
+    });
+    expect(registerAgentHarness).not.toHaveBeenCalled();
+    expect(registerCommand).not.toHaveBeenCalled();
+    expect(registerMediaUnderstandingProvider).not.toHaveBeenCalled();
+    expect(registerMigrationProvider).not.toHaveBeenCalled();
+    expect(registerProvider).not.toHaveBeenCalled();
+    expect(registerTool).not.toHaveBeenCalled();
+  });
+
   it("registers the five shipped supervision tools only when supervision is enabled", () => {
     const registerTool = vi.fn();
     plugin.register(

@@ -328,10 +328,17 @@ function shouldIgnoreScannedDirectory(dirName: string): boolean {
   if (normalized.includes(".backup-")) {
     return true;
   }
-  if (normalized.includes(".disabled")) {
+  if (/(^|[._-])(disabled|retired)(?:$|[._-])/.test(normalized)) {
     return true;
   }
   return false;
+}
+
+function ignoredPluginDirectoryNameForPath(resolvedPath: string, stat: fs.Stats): string | null {
+  const dirName = stat.isDirectory()
+    ? path.basename(resolvedPath)
+    : path.basename(path.dirname(resolvedPath));
+  return shouldIgnoreScannedDirectory(dirName) ? dirName : null;
 }
 
 function resolveScannedEntryType(entry: fs.Dirent, fullPath: string): "file" | "directory" | null {
@@ -1281,6 +1288,15 @@ function discoverFromPath(params: {
   }
 
   const stat = fs.statSync(resolved);
+  const ignoredDirName = ignoredPluginDirectoryNameForPath(resolved, stat);
+  if (ignoredDirName) {
+    params.diagnostics.push({
+      level: "warn",
+      message: `ignored retired/disabled plugin path: ${resolved}`,
+      source: resolved,
+    });
+    return;
+  }
   if (stat.isFile()) {
     if (!isExtensionFile(resolved)) {
       params.diagnostics.push({

@@ -104,7 +104,11 @@ export async function registerPluginCliCommandGroups(
       (parentPath[0] === params.primary || findCommandGroupEntry([entry], params.primary))
     ) {
       removeCommandGroupNames(targetProgram, entry);
-      await registerEntry();
+      try {
+        await registerEntry();
+      } catch (error) {
+        params.logger.warn(`plugin CLI register failed (${entry.pluginId}): ${String(error)}`);
+      }
       continue;
     }
 
