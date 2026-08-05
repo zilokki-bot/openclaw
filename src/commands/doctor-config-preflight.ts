@@ -225,6 +225,18 @@ function migrationCheckpointIdentitiesMatch(
   );
 }
 
+function migrationCheckpointConfigIdentitiesMatch(
+  left: MigrationCheckpointIdentity | null,
+  right: MigrationCheckpointIdentity | null,
+): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.effectiveConfigFingerprint === right.effectiveConfigFingerprint &&
+    left.pluginDoctorConfigFingerprint === right.pluginDoctorConfigFingerprint
+  );
+}
+
 /**
  * Runs early doctor config checks before the main config repair flow.
  *
@@ -725,7 +737,17 @@ export async function runDoctorConfigPreflight(
             pluginMigrationFingerprint: convergedSnapshotRead.pluginMigrationFingerprint,
           });
           if (!migrationCheckpointIdentitiesMatch(migrationCheckpointIdentity, convergedIdentity)) {
-            throwStartupMigrationIdentityChanged();
+            if (
+              migrationCheckpointConfigIdentitiesMatch(
+                migrationCheckpointIdentity,
+                convergedIdentity,
+              )
+            ) {
+              migrationCheckpointIdentity = convergedIdentity;
+              configSnapshotRead = convergedSnapshotRead;
+            } else {
+              throwStartupMigrationIdentityChanged();
+            }
           }
         }
       }
