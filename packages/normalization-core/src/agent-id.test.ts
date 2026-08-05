@@ -1,5 +1,5 @@
-import { isValidAgentId, normalizeAgentId } from "@openclaw/normalization-core/agent-id";
 import { describe, expect, it } from "vitest";
+import { isValidAgentId, normalizeAgentId } from "./agent-id.js";
 
 describe("normalization-core/agent-id", () => {
   it.each([

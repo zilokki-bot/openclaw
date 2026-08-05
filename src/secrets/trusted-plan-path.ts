@@ -65,7 +65,14 @@ async function assertTrustedPathChain(
     // caller validates a pinned system executable through the dedicated resolver below.
     const allowWindowsTrustedInstaller =
       !first || (first && options.allowWindowsTargetTrustedInstaller === true);
-    if (!isTrustedOwner(stat, permissions, process.platform, allowWindowsTrustedInstaller)) {
+    if (
+      !isTrustedOwner(
+        stat,
+        permissions as { ownerTrusted?: boolean; ownerSid?: string },
+        process.platform,
+        allowWindowsTrustedInstaller,
+      )
+    ) {
       throw new Error(`path is not owned by the current user or root: ${currentPath}`);
     }
     const stickyDirectory =

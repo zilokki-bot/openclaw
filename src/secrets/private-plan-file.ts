@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { resolveSystemBin } from "../infra/resolve-system-bin.js";
-import { runExec } from "../process/exec.js";
+import { runCommandWithTimeout } from "../process/exec.js";
 import {
   resolveTrustedPlanDirectoryPath,
   resolveTrustedWindowsSystemExecutablePath,
@@ -10,7 +10,7 @@ import {
 type WindowsPrivatePlanFileDependencies = {
   resolveCompilerTempDir?: (env: NodeJS.ProcessEnv) => Promise<string>;
   resolveTrustedExecutable?: (targetPath: string) => Promise<string>;
-  run?: typeof runExec;
+  run?: typeof runCommandWithTimeout;
 };
 
 const WINDOWS_PLAN_FILE_EXISTS_MARKER = "PRIVATE_PLAN_FILE_EXISTS";
@@ -251,7 +251,7 @@ export async function createPrivateWindowsPlanFile(
     dependencies.resolveTrustedExecutable ?? resolveTrustedPowerShell;
   const resolveCompilerTempDir =
     dependencies.resolveCompilerTempDir ?? resolvePrivateWindowsCompilerTempDir;
-  const run = dependencies.run ?? runExec;
+  const run = dependencies.run ?? runCommandWithTimeout;
   const systemRoot =
     readWindowsEnv(env, "SYSTEMROOT") ?? readWindowsEnv(env, "WINDIR") ?? "C:\\Windows";
   if (!path.win32.isAbsolute(systemRoot)) {
@@ -301,9 +301,9 @@ export async function createPrivateWindowsPlanFile(
     "utf8",
   ).toString("base64");
   try {
-    await run(
-      powershell,
+    const result = await run(
       [
+        powershell,
         "-NoLogo",
         "-NoProfile",
         "-NonInteractive",
@@ -319,11 +319,13 @@ export async function createPrivateWindowsPlanFile(
           WINDIR: systemRoot,
         },
         input,
-        logOutput: false,
-        maxBuffer: 64 * 1024,
+        maxOutputBytes: 64 * 1024,
         timeoutMs: 10_000,
       },
     );
+    if (result.code !== 0) {
+      throw new Error(result.stderr || result.stdout || `PowerShell exited with ${result.code}`);
+    }
   } catch (error) {
     if (String(error).includes(WINDOWS_PLAN_FILE_EXISTS_MARKER)) {
       const existsError = new Error(`Private plan file already exists: ${filePath}`);
