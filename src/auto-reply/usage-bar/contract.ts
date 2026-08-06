@@ -9,12 +9,25 @@ function formatFooterAuthProfileId(profileId?: string): string | null {
   return trimmed.replace(/([A-Za-z0-9._%+-]{1,64})@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "$1@…");
 }
 
+/**
+ * Surfaces the branch a run happened on, mainline included: a fleet of agents can sit on
+ * stale or detached branches for weeks, and hiding `main` hides that signal too. Templates
+ * that only want non-mainline branches can gate on the value themselves.
+ */
 function formatFooterGitBranch(branch?: string | null): string | null {
   const trimmed = branch?.trim();
-  if (!trimmed || trimmed === "main" || trimmed === "master" || trimmed === "HEAD") {
+  if (!trimmed) {
     return null;
   }
   return trimmed.length > 32 ? `${trimmed.slice(0, 29)}…` : trimmed;
+}
+
+/** Drops the compaction marker when nothing was compacted so `🧹0` never reaches a footer. */
+function formatFooterCompactions(count?: number): number | null {
+  if (typeof count !== "number" || !Number.isFinite(count) || count <= 0) {
+    return null;
+  }
+  return Math.floor(count);
 }
 
 export function buildUsageContract(
@@ -82,7 +95,7 @@ export function buildUsageContract(
     },
     state: {
       fast_mode: typeof state.fastMode === "boolean" ? state.fastMode : null,
-      compactions: typeof state.compactionCount === "number" ? state.compactionCount : null,
+      compactions: formatFooterCompactions(state.compactionCount),
     },
     runtime: {
       branch: formatFooterGitBranch(state.gitBranch),
