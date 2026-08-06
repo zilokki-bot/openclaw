@@ -234,7 +234,9 @@ describe("threshold, ratio and division verbs", () => {
 
   it("divides by a literal and by a path", () => {
     expect(
-      render([{ text: "{usage.total_tokens|div:1000|fixed:1}k" }], { usage: { total_tokens: 4200 } }),
+      render([{ text: "{usage.total_tokens|div:1000|fixed:1}k" }], {
+        usage: { total_tokens: 4200 },
+      }),
     ).toBe("4.2k");
     expect(
       render([{ text: "{usage.output_tokens|div:timing.duration_ms|fixed:2}/ms" }], {
@@ -318,7 +320,11 @@ describe("footer contract fields", () => {
   it("omits the compaction marker when nothing was compacted", () => {
     const pieces = [{ when: "state.compactions", text: "🧹{state.compactions}" }];
     for (const compactionCount of [0, undefined]) {
-      const contract = buildUsageContract({ provider: "openai", model: "gpt-5.5", compactionCount });
+      const contract = buildUsageContract({
+        provider: "openai",
+        model: "gpt-5.5",
+        compactionCount,
+      });
       expect(renderUsageBar(tpl(pieces), { ...contract, surface: "discord" })).toBe("");
     }
     const compacted = buildUsageContract({
