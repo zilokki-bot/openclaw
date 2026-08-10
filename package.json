@@ -142,6 +142,7 @@
     "!dist/extensions/synology-chat/**",
     "!dist/extensions/tavily/**",
     "!dist/extensions/tencent/**",
+    "!dist/extensions/telegram/**",
     "!dist/extensions/tokenjuice/**",
     "!dist/extensions/tlon/**",
     "!dist/extensions/twitch/**",

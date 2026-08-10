@@ -524,6 +524,24 @@ describe("collectPublishablePluginPackages", () => {
     ]);
   });
 
+  it("collects Telegram as a publishable npm plugin package", () => {
+    expect(
+      collectPublishablePluginPackages(process.cwd(), {
+        extensionIds: ["telegram"],
+      }),
+    ).toEqual([
+      {
+        extensionId: "telegram",
+        packageDir: "extensions/telegram",
+        packageName: "@openclaw/telegram",
+        version: "2026.7.2",
+        channel: "stable",
+        publishTag: "latest",
+        installNpmSpec: "@openclaw/telegram",
+      },
+    ]);
+  });
+
   it("uses extended-stable for every publishable plugin at the exact root version", () => {
     const repoDir = makeTempRepoRoot(tempDirs, "openclaw-plugin-npm-release-");
     writeJsonFile(join(repoDir, "package.json"), { version: "2026.7.33" });

@@ -53,6 +53,7 @@ function buildCatalogEntry(packageJson) {
   const description = trimString(packageJson.description);
   return {
     name: packageName,
+    source: "official",
     ...(version ? { version } : {}),
     ...(description ? { description } : {}),
     openclaw: {

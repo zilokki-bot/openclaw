@@ -241,6 +241,30 @@ describe("buildOfficialChannelCatalog", () => {
     expect(installSource.warnings).toEqual(["npm-spec-floating", "npm-spec-missing-integrity"]);
   });
 
+  it("exposes Telegram as an npm-installable official channel plugin", () => {
+    const telegram = findCatalogEntry(
+      buildOfficialChannelCatalog({ repoRoot: process.cwd() }).entries,
+      (entry) => entry.openclaw?.channel?.id === "telegram",
+    );
+
+    expect({
+      name: telegram.name,
+      source: telegram.source,
+      install: telegram.openclaw?.install,
+    }).toEqual({
+      name: "@openclaw/telegram",
+      source: "official",
+      install: {
+        npmSpec: "@openclaw/telegram",
+        defaultChoice: "npm",
+        minHostVersion: ">=2026.7.2",
+        allowInvalidConfigRecovery: true,
+      },
+    });
+    const installSource = describePluginInstallSource(requireInstall(telegram));
+    expect(requireNpmInstallSource(installSource).pinState).toBe("floating-without-integrity");
+  });
+
   it("preserves ClawHub specs when generating publishable channel catalog entries", () => {
     const repoRoot = makeRepoRoot("openclaw-official-channel-catalog-clawhub-");
     writeJson(path.join(repoRoot, "extensions", "storepack-chat", "package.json"), {
