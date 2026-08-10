@@ -134,6 +134,20 @@ function createSessions(overrides: Partial<SessionCapability> = {}): SessionCapa
   } as unknown as SessionCapability;
 }
 
+function emptySessionsResult(): SessionsListResult {
+  return {
+    ts: 0,
+    path: "",
+    count: 0,
+    defaults: {
+      modelProvider: null,
+      model: null,
+      contextTokens: null,
+    },
+    sessions: [],
+  };
+}
+
 function createContext(
   gateway: ApplicationContext["gateway"],
   sessions: SessionCapability,
@@ -199,7 +213,7 @@ afterEach(() => {
 
 describe("sessions page lifecycle", () => {
   it("loads all-agent sessions without restricting the result to configured agents", async () => {
-    const list = vi.fn(async () => ({ count: 0, sessions: [] }) as SessionsListResult);
+    const list = vi.fn(async () => emptySessionsResult());
     const sessions = createSessions({ list });
     const { gateway } = createGateway({} as GatewayBrowserClient);
     const page = await createPage(createContext(gateway, sessions, { selectedAgentId: null }));
@@ -214,7 +228,7 @@ describe("sessions page lifecycle", () => {
   });
 
   it("keeps configured-agent filtering for a selected agent scope", async () => {
-    const list = vi.fn(async () => ({ count: 0, sessions: [] }) as SessionsListResult);
+    const list = vi.fn(async () => emptySessionsResult());
     const sessions = createSessions({ list });
     const { gateway } = createGateway({} as GatewayBrowserClient);
     const page = await createPage(createContext(gateway, sessions, { selectedAgentId: "main" }));
