@@ -106,6 +106,7 @@ const mocks = vi.hoisted(() => ({
   beginTerminalSourceReplyDelivery: vi.fn(),
   cancelTerminalSourceReplyDelivery: vi.fn(),
   isDeliveredCurrentSourceReply: vi.fn(() => false),
+  isExactCurrentSourceReplyRoute: vi.fn(() => false),
   reconcileTerminalSourceReplyDelivery: vi.fn(),
 }));
 
@@ -132,6 +133,7 @@ vi.mock("./source-reply-mirror.js", () => ({
   beginTerminalSourceReplyDelivery: mocks.beginTerminalSourceReplyDelivery,
   cancelTerminalSourceReplyDelivery: mocks.cancelTerminalSourceReplyDelivery,
   isDeliveredCurrentSourceReply: mocks.isDeliveredCurrentSourceReply,
+  isExactCurrentSourceReplyRoute: mocks.isExactCurrentSourceReplyRoute,
   reconcileTerminalSourceReplyDelivery: mocks.reconcileTerminalSourceReplyDelivery,
 }));
 

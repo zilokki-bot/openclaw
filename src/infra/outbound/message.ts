@@ -38,6 +38,7 @@ import {
 } from "./payloads.js";
 import { buildOutboundSessionContext } from "./session-context.js";
 import { resolveOutboundTarget } from "./targets.js";
+import type { TrustedPresentationDeliveryCapability } from "./trusted-presentation-delivery-capability.js";
 
 const SEND_BUFFER_MEDIA_URL = "buffer://message-send/attachment";
 
@@ -94,6 +95,8 @@ type MessageSendParams = {
   idempotencyKey?: string;
   /** @internal Channel-valid id reserved before a correlated conversation turn is sent. */
   preparedMessageId?: string;
+  /** @internal Runtime-only authority exposed only to presentation rendering. */
+  presentationDeliveryCapability?: TrustedPresentationDeliveryCapability;
   /** @internal Use the active adapter directly when already executing inside the Gateway. */
   gatewayOwnedDelivery?: boolean;
   /** @internal Stable producer id for idempotent durable queue creation. */
@@ -443,6 +446,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       mediaAccess: params.mediaAccess,
       formatting: params.parseMode ? { parseMode: params.parseMode } : undefined,
       preparedMessageId: params.preparedMessageId,
+      presentationDeliveryCapability: params.presentationDeliveryCapability,
       deliveryIntentId: params.deliveryIntentId,
       deliveryCompletion: params.deliveryCompletion,
       ...(params.onDeliveryIntent ? { onDeliveryIntent: params.onDeliveryIntent } : {}),

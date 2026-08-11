@@ -126,10 +126,16 @@ import {
   beginTerminalSourceReplyDelivery,
   cancelTerminalSourceReplyDelivery,
   isDeliveredCurrentSourceReply,
+  isExactCurrentSourceReplyRoute,
   reconcileTerminalSourceReplyDelivery,
 } from "./source-reply-mirror.js";
 import { normalizeTargetForProvider } from "./target-normalization.js";
 import { resolveChannelTarget, type ResolvedMessagingTarget } from "./target-resolver.js";
+import {
+  issueTrustedPresentationDeliveryCapability,
+  resolveTrustedPresentationDeliveryScope,
+  revokeTrustedPresentationDeliveryCapability,
+} from "./trusted-presentation-delivery-capability.js";
 
 export type MessageActionRunnerGateway = {
   url?: string;
@@ -1573,6 +1579,46 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     applySendPayloadPartsToActionParams(params, sendPayload);
   }
 
+  const authorization = input.messageActionAuthorization;
+  const isExactTrustedSourceRoute = Boolean(
+    useCorePresentationDelivery &&
+    outboundRoute &&
+    authorization?.toolContext &&
+    isExactCurrentSourceReplyRoute({
+      action: "send",
+      channel,
+      actionParams: params,
+      cfg,
+      accountId,
+      currentAccountId: authorization.requesterAccountId,
+      sessionKey: input.sessionKey,
+      sessionId: input.sessionId,
+      agentId,
+      toolContext: authorization.toolContext,
+      replyToIsExplicit,
+    }),
+  );
+  const presentationDeliveryScope =
+    isExactTrustedSourceRoute && outboundRoute
+      ? resolveTrustedPresentationDeliveryScope({
+          agentId,
+          sessionKey: input.sessionKey,
+          sessionId: input.sessionId,
+          requesterAccountId: authorization?.requesterAccountId,
+          requesterSenderId: authorization?.requesterSenderId,
+          requesterToolContext: authorization?.toolContext,
+          channel,
+          accountId,
+          to,
+          threadId: resolvedThreadId,
+          outboundRoute,
+          presentationPlan: sendPayload.payload,
+        })
+      : undefined;
+  const presentationDeliveryCapability = presentationDeliveryScope
+    ? issueTrustedPresentationDeliveryCapability({ scope: presentationDeliveryScope })
+    : undefined;
+
   const send = await executeSendAction({
     ctx: {
       cfg,
@@ -1599,6 +1645,7 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
       deps: input.deps,
       dryRun,
       preparedMessageId: input.preparedMessageId,
+      presentationDeliveryCapability,
       gatewayOwnedDelivery: input.gatewayOwnedDelivery,
       forceCoreDelivery: requiresCoreDelivery,
       requireQueuePersistence: input.requireQueuePersistence,
@@ -1640,6 +1687,8 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     replyToId: resolvedReplyToId ?? undefined,
     replyToIdSource: resolvedReplyToId ? (replyToIsExplicit ? "explicit" : "implicit") : undefined,
     threadId: resolvedThreadId ?? undefined,
+  }).finally(() => {
+    revokeTrustedPresentationDeliveryCapability(presentationDeliveryCapability);
   });
 
   const result: MessageActionRunResult = {

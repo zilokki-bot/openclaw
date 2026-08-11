@@ -422,7 +422,9 @@ const adapter: ChannelOutboundAdapter = {
   deliveryCapabilities: {
     pin: true,
   },
-  renderPresentation({ payload, presentation, ctx }) {
+  renderPresentation({ payload, presentation, ctx, deliveryCapability }) {
+    // `deliveryCapability` is an optional opaque, current-turn core handle.
+    // Do not inspect, copy, serialize, or retain it.
     return renderNativePayload(payload, presentation, ctx);
   },
   async pinDeliveredMessage({ target, messageId, pin }) {
@@ -430,6 +432,36 @@ const adapter: ChannelOutboundAdapter = {
   },
 };
 ```
+
+### Trusted current-turn delivery capability
+
+`renderPresentation(...)` can receive an optional
+`deliveryCapability`. Core issues this opaque process-local value only after it
+has resolved the outbound session route and proven that the destination is the
+exact originating requester conversation. The proof binds the active agent,
+session key and session instance, requester identity, account, provider,
+conversation, topic/thread, source turn, and resolved outbound route.
+
+The capability is intentionally narrower than a route object:
+
+- it contains no enumerable or serializable route fields;
+- a copied, forged, or JSON-round-tripped value has no authority;
+- it cannot be reused for another agent, account, requester, channel,
+  conversation, topic/thread, source turn, or session instance;
+- the full normalized presentation delivery plan is bound by a stable SHA-256
+  plan hash; a changed plan cannot renew or reuse the grant;
+- the approval grant expires after 10 minutes and allows at most one
+  same-plan-hash renewal while still active;
+- core revokes it when the issuing message-action turn exits;
+- it is absent when any originating route or session proof is missing, when the
+  send crosses to another route, or when presentation uses a fallback/provider
+  action path.
+
+Plugins must treat this value as a borrowed handle for the synchronous trusted
+render/delivery turn. They must not persist it, place it in channel data, return
+it in a tool result, or use ambient route fields as a fallback when it is
+absent. A later trusted core delivery API may accept the handle directly; raw
+route parameters are not a substitute.
 
 Capability booleans describe what the renderer can make interactive. Optional
 `limits` describe the generic envelope core can adapt before calling the

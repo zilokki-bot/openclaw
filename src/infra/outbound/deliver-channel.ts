@@ -303,7 +303,12 @@ function createPluginHandler(
             mediaUrl: payload.mediaUrl,
             payload,
           };
-          return await outbound.renderPresentation!({ payload, presentation, ctx });
+          return await outbound.renderPresentation!({
+            payload,
+            presentation,
+            ctx,
+            deliveryCapability: params.presentationDeliveryCapability,
+          });
         }
       : undefined,
     pinDeliveredMessage: outbound?.pinDeliveredMessage

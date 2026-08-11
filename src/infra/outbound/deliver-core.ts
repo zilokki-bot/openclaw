@@ -98,6 +98,7 @@ export async function deliverOutboundPayloadsCore(
       conversationReadOrigin: params.conversationReadOrigin,
       deliveryQueueId: params.deliveryQueueId,
       preparedMessageId: params.preparedMessageId,
+      presentationDeliveryCapability: params.presentationDeliveryCapability,
       requiredUnknownSendReconciliation: params.requiredUnknownSendReconciliation,
       onPlatformSendStart: params.onPlatformSendStart,
       onPlatformSendDispatch: params.onPlatformSendDispatch,

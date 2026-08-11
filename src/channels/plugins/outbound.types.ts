@@ -10,6 +10,7 @@ import type { OutboundDeliveryResult } from "../../infra/outbound/deliver-types.
 import type { OutboundDeliveryFormattingOptions } from "../../infra/outbound/formatting.js";
 import type { OutboundIdentity } from "../../infra/outbound/identity-types.js";
 import type { OutboundSendDeps } from "../../infra/outbound/send-deps.js";
+import type { TrustedPresentationDeliveryCapability } from "../../infra/outbound/trusted-presentation-delivery-capability.js";
 import type { MessagePresentation, ReplyPayloadDeliveryPin } from "../../interactive/payload.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import type {
@@ -234,6 +235,8 @@ export type ChannelOutboundAdapter = {
     payload: ReplyPayload;
     presentation: MessagePresentation;
     ctx: ChannelOutboundPayloadContext;
+    /** @internal Process-local authority for this exact trusted requester route. */
+    deliveryCapability?: TrustedPresentationDeliveryCapability;
   }) => Promise<ReplyPayload | null> | ReplyPayload | null;
   pinDeliveredMessage?: (params: {
     cfg: OpenClawConfig;

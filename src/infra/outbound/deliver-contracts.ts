@@ -24,6 +24,7 @@ import type { NormalizedOutboundPayload } from "./payloads.js";
 import type { OutboundSendDeps } from "./send-deps.js";
 import type { OutboundSessionContext } from "./session-context.js";
 import type { OutboundChannel } from "./targets.js";
+import type { TrustedPresentationDeliveryCapability } from "./trusted-presentation-delivery-capability.js";
 
 export type OutboundDeliveryQueuePolicy = "required" | "best_effort";
 
@@ -133,6 +134,8 @@ export type ChannelHandlerParams = {
   conversationReadOrigin?: "delegated" | "direct-operator";
   deliveryQueueId?: string;
   preparedMessageId?: string;
+  /** @internal Runtime-only authority for the current exact presentation route. */
+  presentationDeliveryCapability?: TrustedPresentationDeliveryCapability;
   requiredUnknownSendReconciliation?: boolean;
   onPlatformSendStart?: (route: PlatformSendRoute) => Promise<void>;
   onPlatformSendDispatch?: () => Promise<void>;
@@ -178,6 +181,8 @@ export type DeliverOutboundPayloadsCoreParams = {
   deliveryCompletion?: DurableDeliveryCompletion;
   /** @internal Channel-valid id reserved before a correlated conversation turn is sent. */
   preparedMessageId?: string;
+  /** @internal Never serialized; valid only for the issuing message-action turn. */
+  presentationDeliveryCapability?: TrustedPresentationDeliveryCapability;
   /** @internal Recheck the concrete post-hook send shape before platform I/O. */
   requiredUnknownSendReconciliation?: boolean;
   /** @internal Caller preflight explicitly required provider unknown-send reconciliation. */

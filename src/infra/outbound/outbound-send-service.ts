@@ -34,6 +34,7 @@ import { collectActionMediaSourceHints } from "./message-action-params.js";
 import type { MessagePollResult, MessageSendResult } from "./message.js";
 import { sendMessage, sendPoll } from "./message.js";
 import type { OutboundMirror } from "./mirror.js";
+import type { TrustedPresentationDeliveryCapability } from "./trusted-presentation-delivery-capability.js";
 
 const log = createSubsystemLogger("outbound/send-service");
 
@@ -78,6 +79,8 @@ type OutboundSendContext = {
   silent?: boolean;
   /** Channel-valid id reserved before a correlated conversation turn is sent. */
   preparedMessageId?: string;
+  /** Runtime-only authority exposed only to presentation rendering. */
+  presentationDeliveryCapability?: TrustedPresentationDeliveryCapability;
   /** The Gateway owns this call and may use its active gateway-mode adapter directly. */
   gatewayOwnedDelivery?: boolean;
   /** Bypass provider-native actions so core durable delivery owns the send. */
@@ -177,6 +180,7 @@ async function sendCoreMessage(params: {
     silent: params.ctx.silent,
     mediaAccess: params.ctx.mediaAccess,
     preparedMessageId: params.ctx.preparedMessageId,
+    presentationDeliveryCapability: params.ctx.presentationDeliveryCapability,
     gatewayOwnedDelivery: params.ctx.gatewayOwnedDelivery,
     deliveryIntentId: params.ctx.deliveryIntentId,
     deliveryCompletion: params.ctx.deliveryCompletion,

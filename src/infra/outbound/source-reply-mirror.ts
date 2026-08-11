@@ -365,6 +365,13 @@ function isExactCurrentSourceConversation(
   return threadPlacement === "match" && isCurrentSourceConversation(params, threadPlacement);
 }
 
+/** Confirms that a requested send is scoped to the exact trusted source route. */
+export function isExactCurrentSourceReplyRoute(
+  params: Omit<SourceReplyTranscriptMirrorParams, "deliveredPayload">,
+): boolean {
+  return isExactCurrentSourceConversation(params);
+}
+
 /** Confirms that a successful send reached the exact trusted source conversation. */
 export function isDeliveredCurrentSourceReply(params: SourceReplyTranscriptMirrorParams): boolean {
   return (
