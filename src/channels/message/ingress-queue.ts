@@ -560,6 +560,12 @@ export function countFailedChannelIngressQueueEntries(
 
 export type FailedChannelIngressMaintenanceReceipt = {
   mode: "dry-run" | "apply";
+  /** Counts are independent observations, not one cross-process snapshot. */
+  observation: {
+    semantics: "concurrent-observation";
+    beforeObservedAtMs: number;
+    afterObservedAtMs: number;
+  };
   filters: {
     channelId: string;
     accountId: string;
@@ -622,6 +628,7 @@ export function maintainFailedChannelIngressEvents(params: {
       .where("queue_name", "=", queueName)
       .where("status", "=", "failed")
       .where("failed_at", "<=", cutoff);
+  const beforeObservedAtMs = Date.now();
   const before = Number(
     executeSqliteQueryTakeFirstSync(
       database.db,
@@ -671,6 +678,7 @@ export function maintainFailedChannelIngressEvents(params: {
       { path: database.path },
     );
   }
+  const afterObservedAtMs = Date.now();
   const after = Number(
     executeSqliteQueryTakeFirstSync(
       database.db,
@@ -679,6 +687,7 @@ export function maintainFailedChannelIngressEvents(params: {
   );
   return {
     mode: params.apply ? "apply" : "dry-run",
+    observation: { semantics: "concurrent-observation", beforeObservedAtMs, afterObservedAtMs },
     filters: { channelId, accountId, olderThanMs, limit, batch },
     before: { count: before },
     selected: { count: selectedIds.length, idsSha256: maintenanceHash(selectedIds) },

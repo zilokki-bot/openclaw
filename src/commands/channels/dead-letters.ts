@@ -7,6 +7,7 @@ import { maintainFailedDeliveryQueueEntries } from "../../infra/delivery-queue-s
 import { formatDurationHuman } from "../../infra/format-time/format-duration.js";
 import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
 import { defaultRuntime, type RuntimeEnv, writeRuntimeJson } from "../../runtime.js";
+import { rejectUnapprovedMaintenanceApply } from "../maintenance-apply-gate.js";
 
 type ChannelsDeadLettersOptions = {
   channel?: string;
@@ -113,7 +114,7 @@ function writePruneReceipt(runtime: RuntimeEnv, opts: PruneOptions, receipt: obj
     after: { count: number };
   };
   runtime.log(
-    `${value.mode}: selected ${value.selected.count} (sha256 ${value.selected.idsSha256}) · applied ${value.applied.count} · race-skipped ${value.applied.skippedRace} · remaining ${value.after.count}`,
+    `${value.mode}: selected ${value.selected.count} (sha256 ${value.selected.idsSha256}) · applied ${value.applied.count} · race-skipped ${value.applied.skippedRace} · observed remaining ${value.after.count}`,
   );
 }
 /** Preview or prune failed inbound events; never resubmits. */
@@ -121,6 +122,7 @@ export async function channelsPruneInboundDeadLettersCommand(
   opts: PruneOptions & { channel: string; account: string },
   runtime: RuntimeEnv = defaultRuntime,
 ) {
+  rejectUnapprovedMaintenanceApply(opts.apply);
   writePruneReceipt(
     runtime,
     opts,
@@ -139,6 +141,7 @@ export async function channelsPruneOutboundDeadLettersCommand(
   opts: PruneOptions & { channel?: string; account?: string },
   runtime: RuntimeEnv = defaultRuntime,
 ) {
+  rejectUnapprovedMaintenanceApply(opts.apply);
   writePruneReceipt(
     runtime,
     opts,

@@ -33,6 +33,12 @@ type TaskFlowRegistryMaintenanceSummary = {
 /** Payload-free receipt for cancelling terminally-unlinked queued TaskFlows. */
 export type OrphanedQueuedTaskFlowMaintenanceReceipt = {
   mode: "dry-run" | "apply";
+  /** Counts are independent observations, not one cross-process snapshot. */
+  observation: {
+    semantics: "concurrent-observation";
+    beforeObservedAtMs: number;
+    afterObservedAtMs: number;
+  };
   filters: {
     status: "queued";
     linkedTasks: "none";
@@ -136,6 +142,7 @@ export function maintainOrphanedQueuedTaskFlows(params: {
   }
   const now = params.now ?? Date.now();
   const cutoff = now - olderThanMs;
+  const beforeObservedAtMs = Date.now();
   const before = orphanedQueuedCount(cutoff);
   const { db } = openOpenClawStateDatabase();
   const selected = db
@@ -166,9 +173,11 @@ export function maintainOrphanedQueuedTaskFlows(params: {
     // a successful write so later in-process maintenance cannot overwrite the tombstones.
     reloadTaskFlowRegistryFromStore();
   }
+  const afterObservedAtMs = Date.now();
   const after = orphanedQueuedCount(cutoff);
   return {
     mode: params.apply ? "apply" : "dry-run",
+    observation: { semantics: "concurrent-observation", beforeObservedAtMs, afterObservedAtMs },
     filters: {
       status: "queued",
       linkedTasks: "none",

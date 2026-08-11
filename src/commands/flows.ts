@@ -18,6 +18,7 @@ import {
   listTaskFlowRecords,
   resolveTaskFlowForLookupToken,
 } from "../tasks/task-flow-runtime-internal.js";
+import { rejectUnapprovedMaintenanceApply } from "./maintenance-apply-gate.js";
 
 const ID_PAD = 10;
 const STATUS_PAD = 10;
@@ -279,6 +280,7 @@ export async function flowsMaintainOrphanedQueuedCommand(
   opts: { olderThanMs?: number; limit?: number; batch?: number; apply?: boolean; json?: boolean },
   runtime: RuntimeEnv,
 ) {
+  rejectUnapprovedMaintenanceApply(opts.apply);
   const receipt = maintainOrphanedQueuedTaskFlows({
     olderThanMs: opts.olderThanMs,
     limit: opts.limit,
@@ -290,6 +292,6 @@ export async function flowsMaintainOrphanedQueuedCommand(
     return;
   }
   runtime.log(
-    `${receipt.mode}: selected ${receipt.selected.count} (sha256 ${receipt.selected.idsSha256}) · applied ${receipt.applied.count} · race-skipped ${receipt.applied.skippedRace} · remaining ${receipt.after.count}`,
+    `${receipt.mode}: selected ${receipt.selected.count} (sha256 ${receipt.selected.idsSha256}) · applied ${receipt.applied.count} · race-skipped ${receipt.applied.skippedRace} · observed remaining ${receipt.after.count} (${receipt.observation.semantics})`,
   );
 }

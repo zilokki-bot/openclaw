@@ -75,11 +75,18 @@ row appears until the next inbound or outbound conversation event.
 
 ## Failed queue maintenance
 
-`channels dead-letters prune` (inbound) and `prune-outbound` are local-operator,
-payload-free maintenance commands. Both default to a 24-hour failure age and
-dry-run; `--apply` is required to prune. They are bounded (`--limit` and
-`--batch`, max 1000), never replay/resubmit/retry, and emit a before/after
-receipt with deterministic ID hashes and a durable metadata-only audit event.
+`channels dead-letters prune` (inbound) and `prune-outbound` are payload-free
+dry-run maintenance commands. Both default to a 24-hour failure age and are
+bounded (`--limit` and `--batch`, max 1000); they never replay, resubmit, or
+retry. `--apply` currently refuses: beta.7 has no public API that lets an
+arbitrary local CLI mutation create and redeem a system-agent one-use operator
+approval. Their receipts label `before` and `after` as concurrent observations;
+the deterministic selected-ID hash, not those counts, is the selection proof.
+
+The minimal future owned surface is a Gateway `maintenance.apply` action guarded
+by `operator.admin` and `operator.approvals`, whose system-agent `allow-once`
+approval binds the filters and selected-ID hash and is revalidated during the
+audited write.
 
 ## Add / remove accounts
 

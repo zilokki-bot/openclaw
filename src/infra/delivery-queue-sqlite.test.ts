@@ -911,7 +911,6 @@ describe("countFailedDeliveryQueueEntries", () => {
       moveDeliveryQueueEntryToFailed("outbound", "dead-1", stateDir);
       moveDeliveryQueueEntryToFailed("outbound", "dead-2", stateDir);
       const preview = maintainFailedDeliveryQueueEntries({
-        queueName: "outbound",
         olderThanMs: 0,
         limit: 1,
         batch: 1,
@@ -920,6 +919,7 @@ describe("countFailedDeliveryQueueEntries", () => {
       });
       expect(preview).toMatchObject({
         mode: "dry-run",
+        observation: { semantics: "concurrent-observation" },
         before: { count: 2 },
         selected: { count: 1 },
         applied: { count: 0, skippedRace: 0 },
@@ -928,7 +928,6 @@ describe("countFailedDeliveryQueueEntries", () => {
       expect(preview.selected.idsSha256).toMatch(/^[a-f0-9]{64}$/);
 
       const applied = maintainFailedDeliveryQueueEntries({
-        queueName: "outbound",
         olderThanMs: 0,
         limit: 1,
         batch: 1,

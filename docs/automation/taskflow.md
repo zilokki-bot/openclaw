@@ -84,6 +84,19 @@ openclaw tasks flow cancel <lookup>
 
 Flows are also covered by `openclaw tasks audit` (stale or broken flow findings) and `openclaw tasks maintenance` (finalizes stuck cancels, prunes terminal flows after 7 days).
 
+`openclaw tasks flow maintain-orphaned-queued` is currently **dry-run only**. Its
+`--apply` flag refuses rather than performing a local mutation: beta.7 exposes
+durable operator approval resolution only for registered Gateway actions, not a
+public way for an arbitrary local CLI command to create and redeem its own
+one-use approval. Its receipt's `before` and `after` counts are explicitly
+concurrent observations; the selected-ID hash is the deterministic scope proof,
+not a claim of one global snapshot.
+
+To enable apply safely, add one Gateway-owned `maintenance.apply` action that
+requires `operator.admin` plus `operator.approvals`, creates a system-agent
+`allow-once` approval bound to the canonical filters and selected-ID hash, and
+revalidates those predicates while writing the audit row and receipt.
+
 ## Reliable scheduled workflow pattern
 
 For recurring workflows such as market intelligence briefings, treat the schedule, orchestration, and reliability checks as separate layers:

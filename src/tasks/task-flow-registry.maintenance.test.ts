@@ -156,6 +156,7 @@ describe("task-flow-registry maintenance", () => {
       });
       expect(preview).toMatchObject({
         mode: "dry-run",
+        observation: { semantics: "concurrent-observation" },
         before: { count: 1 },
         selected: { count: 1 },
         applied: { count: 0, skippedRace: 0 },

@@ -719,6 +719,12 @@ export function countFailedDeliveryQueueEntries(stateDir?: string): FailedDelive
 
 export type FailedDeliveryQueueMaintenanceReceipt = {
   mode: "dry-run" | "apply";
+  /** Counts are independent observations, not one cross-process snapshot. */
+  observation: {
+    semantics: "concurrent-observation";
+    beforeObservedAtMs: number;
+    afterObservedAtMs: number;
+  };
   filters: {
     queueName: "outbound";
     channel?: string;
@@ -782,6 +788,7 @@ export function maintainFailedDeliveryQueueEntries(params: {
     }
     return query;
   };
+  const beforeObservedAtMs = Date.now();
   const before = Number(
     executeSqliteQueryTakeFirstSync(
       database.db,
@@ -826,6 +833,7 @@ export function maintainFailedDeliveryQueueEntries(params: {
       });
     });
   }
+  const afterObservedAtMs = Date.now();
   const after = Number(
     executeSqliteQueryTakeFirstSync(
       database.db,
@@ -834,6 +842,7 @@ export function maintainFailedDeliveryQueueEntries(params: {
   );
   return {
     mode: params.apply ? "apply" : "dry-run",
+    observation: { semantics: "concurrent-observation", beforeObservedAtMs, afterObservedAtMs },
     filters: {
       queueName: "outbound",
       ...(params.channel === undefined ? {} : { channel: params.channel }),
