@@ -383,7 +383,7 @@ describe("sessions_spawn tool", () => {
     const schema = tool.parameters as {
       properties?: Record<
         string,
-        { anyOf?: unknown; description?: string; enum?: string[] } | undefined
+        { anyOf?: unknown; description?: string; enum?: string[]; pattern?: string } | undefined
       >;
     };
 
@@ -402,6 +402,8 @@ describe("sessions_spawn tool", () => {
     expect(schema.properties?.mode?.enum).toEqual(["run"]);
     expect(schema.properties?.mode?.anyOf).toBeUndefined();
     expect(schema.properties?.worktree).toBeDefined();
+    expect(schema.properties?.worktreeName?.pattern).toBe("^[a-z0-9][a-z0-9-]{0,63}$");
+    expect(schema.properties?.worktreeBaseRef?.pattern).toBe("^[0-9a-fA-F]{40}$");
   });
 
   it("creates visible worktree sessions and registers completion announce", async () => {
@@ -443,7 +445,7 @@ describe("sessions_spawn tool", () => {
         visible: true,
         worktree: true,
         worktreeName: "issue-review",
-        worktreeBaseRef: "main",
+        worktreeBaseRef: "dabe1915362e20c25704af91612a32a8f4c96e83",
         cleanup: "delete",
       });
 
@@ -464,7 +466,7 @@ describe("sessions_spawn tool", () => {
         cwd: dir,
         worktree: true,
         worktreeName: "issue-review",
-        worktreeBaseRef: "main",
+        worktreeBaseRef: "dabe1915362e20c25704af91612a32a8f4c96e83",
       });
       expect(registerRun).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -492,6 +494,28 @@ describe("sessions_spawn tool", () => {
     await expect(
       tool.execute("hidden-worktree", { task: "inspect", worktree: true }),
     ).rejects.toThrow("Parameters require visible=true: worktree");
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
+  it("requires a managed-worktree flag and an exact base SHA for visible worktrees", async () => {
+    const tool = createSessionsSpawnTool({ agentSessionKey: "agent:main:main" });
+
+    await expect(
+      tool.execute("missing-worktree", {
+        task: "inspect",
+        visible: true,
+        worktreeName: "issue-review",
+      }),
+    ).rejects.toThrow("worktreeName and worktreeBaseRef require worktree=true");
+    await expect(
+      tool.execute("symbolic-base", {
+        task: "inspect",
+        visible: true,
+        worktree: true,
+        worktreeName: "issue-review",
+        worktreeBaseRef: "main",
+      }),
+    ).rejects.toThrow("worktreeBaseRef must be an exact 40-character Git commit SHA");
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 

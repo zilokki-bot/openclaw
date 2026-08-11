@@ -242,10 +242,10 @@ Per-agent override: `agents.entries.*.subagents.delegationMode`.
   Provision a managed git worktree for the new dashboard session. Requires `visible: true`.
 </ParamField>
 <ParamField path="worktreeName" type="string">
-  Optional managed-worktree name. Requires `visible: true` and `worktree: true`.
+  Optional managed-worktree name. Requires `visible: true` and `worktree: true`; use 1–64 lowercase letters, digits, and hyphens.
 </ParamField>
 <ParamField path="worktreeBaseRef" type="string">
-  Optional git base ref for the managed worktree. Requires `visible: true` and `worktree: true`.
+  Optional exact 40-character Git commit SHA for a reproducible managed-worktree base. Requires `visible: true` and `worktree: true`; symbolic refs such as `main` are rejected on this `sessions_spawn` path.
 </ParamField>
 
 <Warning>

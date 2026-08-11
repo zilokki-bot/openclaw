@@ -31,6 +31,9 @@ import {
 } from "./in-process-gateway.js";
 import { reserveVisibleChildSlot } from "./sessions-spawn-visible-admission.js";
 
+const MANAGED_WORKTREE_NAME_PATTERN = "^[a-z0-9][a-z0-9-]{0,63}$";
+const EXACT_GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/iu;
+
 export const VISIBLE_SESSIONS_SPAWN_SCHEMA = {
   visible: Type.Optional(
     Type.Boolean({
@@ -39,8 +42,18 @@ export const VISIBLE_SESSIONS_SPAWN_SCHEMA = {
     }),
   ),
   worktree: Type.Optional(Type.Boolean({ description: "Visible session worktree" })),
-  worktreeName: Type.Optional(Type.String({ description: "Worktree name" })),
-  worktreeBaseRef: Type.Optional(Type.String({ description: "Worktree base ref" })),
+  worktreeName: Type.Optional(
+    Type.String({
+      pattern: MANAGED_WORKTREE_NAME_PATTERN,
+      description: "Managed worktree name (lowercase letters, digits, and hyphens)",
+    }),
+  ),
+  worktreeBaseRef: Type.Optional(
+    Type.String({
+      pattern: "^[0-9a-fA-F]{40}$",
+      description: "Exact 40-character Git commit SHA for the managed worktree base",
+    }),
+  ),
 };
 
 export type VisibleSessionsSpawnDeps = {
@@ -114,6 +127,17 @@ export async function maybeSpawnVisibleSession(params: {
       );
     }
     return undefined;
+  }
+  if ((worktreeName || worktreeBaseRef) && !worktree) {
+    throw new ToolInputError("worktreeName and worktreeBaseRef require worktree=true");
+  }
+  if (worktreeName && !new RegExp(MANAGED_WORKTREE_NAME_PATTERN, "u").test(worktreeName)) {
+    throw new ToolInputError(
+      "worktreeName must use lowercase letters, digits, and hyphens (1-64 characters)",
+    );
+  }
+  if (worktreeBaseRef && !EXACT_GIT_COMMIT_SHA_PATTERN.test(worktreeBaseRef)) {
+    throw new ToolInputError("worktreeBaseRef must be an exact 40-character Git commit SHA");
   }
   const modelOverride = normalizeToolModelOverride(readStringParam(params.raw, "model"));
   const requestedCwd = readStringParam(params.raw, "cwd");
