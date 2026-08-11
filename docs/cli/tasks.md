@@ -28,6 +28,8 @@ openclaw tasks maintenance --apply
 openclaw tasks flow list
 openclaw tasks flow show <lookup>
 openclaw tasks flow cancel <lookup>
+openclaw tasks flow maintain-orphaned-queued
+openclaw tasks flow maintain-orphaned-queued --apply --json
 ```
 
 ## Root Options
@@ -116,11 +118,22 @@ jobs and leaving non-cron session rows untouched.
 openclaw tasks flow list [--status <name>] [--json]
 openclaw tasks flow show <lookup> [--json]
 openclaw tasks flow cancel <lookup>
+openclaw tasks flow maintain-orphaned-queued [--older-than <duration>] [--limit <n>] [--batch <n>] [--apply] [--json]
 ```
 
 Inspects or cancels durable Task Flow state under the task ledger.
 `flow list --status` accepts `queued`, `running`, `waiting`, `blocked`,
 `succeeded`, `failed`, `cancelled`, or `lost`.
+
+`flow maintain-orphaned-queued` is a local-operator maintenance command for
+queued flows with no linked task rows. With no `--older-than`, it selects all
+such queued flows. It is a dry run unless `--apply` is
+present. An applied operation atomically rechecks the flow revision, queued
+status, age, and absence of linked tasks, then writes a `cancelled` tombstone;
+the ordinary seven-day terminal retention sweep removes it later. It never
+accepts arbitrary SQL or logs a goal, requester, task payload, or individual
+flow ID. The JSON receipt includes the bounded selected/applied counts and
+deterministic ID hashes, plus race skips and before/after counts.
 
 ## Related
 

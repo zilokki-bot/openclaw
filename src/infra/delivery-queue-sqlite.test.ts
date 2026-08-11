@@ -16,6 +16,7 @@ import {
   getDeliveryQueueEntryStatus,
   loadDeliveryQueueEntries,
   loadDeliveryQueueEntry,
+  maintainFailedDeliveryQueueEntries,
   moveDeliveryQueueEntryToFailed,
   updateDeliveryQueueEntry,
   upsertDeliveryQueueEntry,
@@ -898,5 +899,53 @@ describe("countFailedDeliveryQueueEntries", () => {
     expect(loadDeliveryQueueEntries("outbound", stateDir).map((entry) => entry.id)).toEqual([
       "still-pending",
     ]);
+  });
+
+  it("previews and prunes a bounded failed outbound selection without reading payloads", () => {
+    enqueue("outbound", "dead-1", 1_000);
+    enqueue("outbound", "dead-2", 2_000);
+    enqueue("outbound", "pending", 3_000);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      moveDeliveryQueueEntryToFailed("outbound", "dead-1", stateDir);
+      moveDeliveryQueueEntryToFailed("outbound", "dead-2", stateDir);
+      const preview = maintainFailedDeliveryQueueEntries({
+        queueName: "outbound",
+        olderThanMs: 0,
+        limit: 1,
+        batch: 1,
+        now: 10_000,
+        stateDir,
+      });
+      expect(preview).toMatchObject({
+        mode: "dry-run",
+        before: { count: 2 },
+        selected: { count: 1 },
+        applied: { count: 0, skippedRace: 0 },
+        after: { count: 2 },
+      });
+      expect(preview.selected.idsSha256).toMatch(/^[a-f0-9]{64}$/);
+
+      const applied = maintainFailedDeliveryQueueEntries({
+        queueName: "outbound",
+        olderThanMs: 0,
+        limit: 1,
+        batch: 1,
+        apply: true,
+        now: 10_000,
+        stateDir,
+      });
+      expect(applied).toMatchObject({
+        mode: "apply",
+        applied: { count: 1, skippedRace: 0 },
+        after: { count: 1 },
+      });
+      expect(loadDeliveryQueueEntries("outbound", stateDir).map((entry) => entry.id)).toEqual([
+        "pending",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

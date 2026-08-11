@@ -12,6 +12,7 @@ import {
 } from "./task-flow-registry.js";
 import {
   getInspectableTaskFlowAuditSummary,
+  maintainOrphanedQueuedTaskFlows,
   previewTaskFlowRegistryMaintenance,
   runTaskFlowRegistryMaintenance,
 } from "./task-flow-registry.maintenance.js";
@@ -114,6 +115,73 @@ describe("task-flow-registry maintenance", () => {
       expect(storedFlow.flowId).toBe(flow.flowId);
       expect(storedFlow.status).toBe("cancelled");
       expect(storedFlow.cancelRequestedAt).toBe(100);
+    });
+  });
+
+  it("tombstones only bounded old queued flows without linked tasks", async () => {
+    await withTaskFlowMaintenanceStateDir(async () => {
+      const orphan = createManagedTaskFlow({
+        ownerKey: "agent:main:main",
+        controllerId: "tests/task-flow-maintenance",
+        goal: "orphaned queued flow",
+        status: "queued",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const linked = createManagedTaskFlow({
+        ownerKey: "agent:main:main",
+        controllerId: "tests/task-flow-maintenance",
+        goal: "linked queued flow",
+        status: "queued",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      createRunningTaskRun({
+        runtime: "acp",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        parentFlowId: linked.flowId,
+        childSessionKey: "agent:main:child",
+        runId: "linked-child",
+        task: "linked work",
+        startedAt: 1,
+        lastEventAt: 1,
+      });
+
+      const preview = maintainOrphanedQueuedTaskFlows({
+        olderThanMs: 0,
+        limit: 1,
+        batch: 1,
+        now: 100,
+      });
+      expect(preview).toMatchObject({
+        mode: "dry-run",
+        before: { count: 1 },
+        selected: { count: 1 },
+        applied: { count: 0, skippedRace: 0 },
+        after: { count: 1 },
+        retention: { terminalTombstone: "cancelled" },
+      });
+      expect(preview.selected.idsSha256).toMatch(/^[a-f0-9]{64}$/);
+
+      const applied = maintainOrphanedQueuedTaskFlows({
+        olderThanMs: 0,
+        limit: 1,
+        batch: 1,
+        apply: true,
+        now: 100,
+      });
+      expect(applied).toMatchObject({
+        mode: "apply",
+        applied: { count: 1, skippedRace: 0 },
+        after: { count: 0 },
+      });
+      expect(getTaskFlowById(orphan.flowId)).toMatchObject({
+        status: "cancelled",
+        cancelRequestedAt: 100,
+        endedAt: 100,
+      });
+      expect(getTaskFlowById(linked.flowId)).toMatchObject({ status: "queued" });
     });
   });
 

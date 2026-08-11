@@ -27,6 +27,8 @@ openclaw channels capabilities --channel discord --target channel:123
 openclaw channels resolve --channel slack "#general" "@jane"
 openclaw channels logs --channel all
 openclaw channels dead-letters list --channel telegram --account default
+openclaw channels dead-letters prune --channel telegram --account default
+openclaw channels dead-letters prune-outbound --apply
 ```
 
 `channels list` shows chat channels only: configured accounts by default, with `installed`, `configured`, and `enabled` status tags per account (`--json` for machine output). Pass `--all` to also surface bundled channels that have no configured account yet and installable catalog channels that are not yet on disk. Provider auth and model usage live elsewhere: `openclaw models auth list` for provider auth profiles, `openclaw status` or `openclaw models list` for usage/quota.
@@ -70,6 +72,14 @@ Do not use `openclaw sessions`, Gateway `sessions.list`, or the agent
 stored conversation rows, not provider runtime state. After a Discord provider
 restart, a connected but quiet account may be healthy while no Discord session
 row appears until the next inbound or outbound conversation event.
+
+## Failed queue maintenance
+
+`channels dead-letters prune` (inbound) and `prune-outbound` are local-operator,
+payload-free maintenance commands. Both default to a 24-hour failure age and
+dry-run; `--apply` is required to prune. They are bounded (`--limit` and
+`--batch`, max 1000), never replay/resubmit/retry, and emit a before/after
+receipt with deterministic ID hashes and a durable metadata-only audit event.
 
 ## Add / remove accounts
 

@@ -6,7 +6,12 @@ import { setVerbose } from "../../globals.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
-import { parsePositiveIntOrUndefined, parseStrictPositiveIntOrUndefined } from "./helpers.js";
+import { parseDurationMs } from "../parse-duration.js";
+import {
+  parsePositiveIntOrUndefined,
+  parseStrictPositiveIntOption,
+  parseStrictPositiveIntOrUndefined,
+} from "./helpers.js";
 
 function resolveVerbose(opts: { verbose?: boolean; debug?: boolean }): boolean {
   return Boolean(opts.verbose || opts.debug);
@@ -757,6 +762,37 @@ export function registerStatusHealthSessionsCommands(program: Command) {
         await flowsCancelCommand(
           {
             lookup,
+          },
+          defaultRuntime,
+        );
+      });
+    });
+
+  tasksFlowCmd
+    .command("maintain-orphaned-queued")
+    .description("Preview or cancel old queued TaskFlows with no linked task")
+    .requiredOption(
+      "--older-than <duration>",
+      "Only rows older than this duration (for example 1h)",
+    )
+    .option("--limit <n>", "Maximum rows selected (1-1000)", "100")
+    .option("--batch <n>", "Maximum rows per write batch (1-1000)", "50")
+    .option("--apply", "Apply cancellation; without this flag the command is dry-run", false)
+    .option("--json", "Output the payload-free maintenance receipt as JSON", false)
+    .action(async (opts, command) => {
+      const olderThanMs = parseDurationMs(String(opts.olderThan));
+      const limit = parseStrictPositiveIntOption(String(opts.limit), "--limit");
+      const batch = parseStrictPositiveIntOption(String(opts.batch), "--batch");
+      const tasksParentOpts = command.parent?.parent?.opts() as { json?: boolean } | undefined;
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        const { flowsMaintainOrphanedQueuedCommand } = await loadFlowsCommands();
+        await flowsMaintainOrphanedQueuedCommand(
+          {
+            olderThanMs,
+            limit,
+            batch,
+            apply: Boolean(opts.apply),
+            json: Boolean(opts.json || tasksParentOpts?.json),
           },
           defaultRuntime,
         );

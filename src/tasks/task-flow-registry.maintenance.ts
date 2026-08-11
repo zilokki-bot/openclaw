@@ -1,4 +1,10 @@
 // Reconciles stale task-flow records with their child task state.
+import { createHash } from "node:crypto";
+import { appendLocalMaintenanceAudit } from "../infra/maintenance-audit.js";
+import {
+  openOpenClawStateDatabase,
+  runOpenClawStateWriteTransaction,
+} from "../state/openclaw-state-db.js";
 import { listTasksForFlowId } from "./runtime-internal.js";
 import { isTaskFlowCancellationPending } from "./task-cancellation-state.js";
 import {
@@ -11,6 +17,7 @@ import {
   getTaskFlowById,
   getTaskFlowRegistryRestoreFailure,
   listTaskFlowRecords,
+  reloadTaskFlowRegistryFromStore,
   updateFlowRecordByIdExpectedRevision,
 } from "./task-flow-registry.js";
 import type { TaskFlowRecord } from "./task-flow-registry.types.js";
@@ -22,6 +29,164 @@ type TaskFlowRegistryMaintenanceSummary = {
   reconciled: number;
   pruned: number;
 };
+
+/** Payload-free receipt for cancelling terminally-unlinked queued TaskFlows. */
+export type OrphanedQueuedTaskFlowMaintenanceReceipt = {
+  mode: "dry-run" | "apply";
+  filters: {
+    status: "queued";
+    linkedTasks: "none";
+    olderThanMs: number;
+    limit: number;
+    batch: number;
+  };
+  before: { count: number };
+  selected: { count: number; idsSha256: string };
+  applied: { count: number; idsSha256: string; skippedRace: number };
+  after: { count: number };
+  retention: { terminalTombstone: "cancelled"; retainedForMs: number };
+  auditEventId?: string;
+};
+
+function maintenanceIdsSha256(ids: readonly string[]): string {
+  return createHash("sha256")
+    .update([...ids].toSorted().join("\n"))
+    .digest("hex");
+}
+
+function maintenanceBoundedInt(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 1_000) {
+    throw new Error(`${label} must be an integer between 1 and 1000.`);
+  }
+  return value;
+}
+
+type OrphanedQueuedFlowRow = { flow_id: string; revision: number | bigint };
+
+const orphanedQueuedCountSql = `
+  SELECT COUNT(*) AS count
+  FROM flow_runs AS flow
+  WHERE flow.status = 'queued'
+    AND flow.updated_at <= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM task_runs AS task WHERE task.parent_flow_id = flow.flow_id
+    )
+`;
+
+const orphanedQueuedSelectSql = `
+  SELECT flow.flow_id, flow.revision
+  FROM flow_runs AS flow
+  WHERE flow.status = 'queued'
+    AND flow.updated_at <= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM task_runs AS task WHERE task.parent_flow_id = flow.flow_id
+    )
+  ORDER BY flow.updated_at ASC, flow.flow_id ASC
+  LIMIT ?
+`;
+
+const orphanedQueuedCancelSql = `
+  UPDATE flow_runs
+  SET status = 'cancelled',
+      blocked_task_id = NULL,
+      blocked_summary = NULL,
+      wait_json = NULL,
+      cancel_requested_at = ?,
+      ended_at = ?,
+      updated_at = ?,
+      revision = revision + 1
+  WHERE flow_id = ?
+    AND revision = ?
+    AND status = 'queued'
+    AND updated_at <= ?
+    AND NOT EXISTS (
+      SELECT 1 FROM task_runs AS task WHERE task.parent_flow_id = flow_runs.flow_id
+    )
+`;
+
+function orphanedQueuedCount(cutoff: number): number {
+  const { db } = openOpenClawStateDatabase();
+  const row = db.prepare(orphanedQueuedCountSql).get(cutoff) as
+    | { count: number | bigint }
+    | undefined;
+  return Number(row?.count ?? 0);
+}
+
+/**
+ * Preview or cancel queued TaskFlows that have never acquired a linked task.
+ * Apply uses revision + state predicates atomically, leaves a cancelled tombstone,
+ * and lets the existing seven-day terminal retention maintenance prune later.
+ */
+export function maintainOrphanedQueuedTaskFlows(params: {
+  olderThanMs: number;
+  limit?: number;
+  batch?: number;
+  apply?: boolean;
+  now?: number;
+}): OrphanedQueuedTaskFlowMaintenanceReceipt {
+  assertTaskFlowRegistryMaintenanceReady();
+  const limit = maintenanceBoundedInt(params.limit ?? 100, "limit");
+  const batch = maintenanceBoundedInt(params.batch ?? Math.min(50, limit), "batch");
+  if (batch > limit) {
+    throw new Error("batch must not exceed limit.");
+  }
+  if (!Number.isSafeInteger(params.olderThanMs) || params.olderThanMs < 0) {
+    throw new Error("olderThanMs must be a non-negative integer.");
+  }
+  const now = params.now ?? Date.now();
+  const cutoff = now - params.olderThanMs;
+  const before = orphanedQueuedCount(cutoff);
+  const { db } = openOpenClawStateDatabase();
+  const selected = db
+    .prepare(orphanedQueuedSelectSql)
+    .all(cutoff, limit) as OrphanedQueuedFlowRow[];
+  const selectedIds = selected.map((row) => row.flow_id);
+  const appliedIds: string[] = [];
+  let auditEventId: string | undefined;
+  if (params.apply && selected.length > 0) {
+    auditEventId = runOpenClawStateWriteTransaction(({ db: txDb }) => {
+      const cancel = txDb.prepare(orphanedQueuedCancelSql);
+      for (let index = 0; index < selected.length; index += batch) {
+        for (const flow of selected.slice(index, index + batch)) {
+          const result = cancel.run(now, now, now, flow.flow_id, Number(flow.revision), cutoff);
+          if (result.changes === 1) {
+            appliedIds.push(flow.flow_id);
+          }
+        }
+      }
+      return appendLocalMaintenanceAudit({
+        db: txDb,
+        action: "taskflow_orphaned_queued",
+        occurredAt: now,
+        resultCount: appliedIds.length,
+      });
+    });
+    // A CLI process can share this registry with the gateway process. Refresh only after
+    // a successful write so later in-process maintenance cannot overwrite the tombstones.
+    reloadTaskFlowRegistryFromStore();
+  }
+  const after = orphanedQueuedCount(cutoff);
+  return {
+    mode: params.apply ? "apply" : "dry-run",
+    filters: {
+      status: "queued",
+      linkedTasks: "none",
+      olderThanMs: params.olderThanMs,
+      limit,
+      batch,
+    },
+    before: { count: before },
+    selected: { count: selectedIds.length, idsSha256: maintenanceIdsSha256(selectedIds) },
+    applied: {
+      count: appliedIds.length,
+      idsSha256: maintenanceIdsSha256(appliedIds),
+      skippedRace: params.apply ? selectedIds.length - appliedIds.length : 0,
+    },
+    after: { count: after },
+    retention: { terminalTombstone: "cancelled", retainedForMs: TASK_FLOW_RETENTION_MS },
+    ...(auditEventId ? { auditEventId } : {}),
+  };
+}
 
 export function assertTaskFlowRegistryMaintenanceReady(): void {
   const restoreFailure = getTaskFlowRegistryRestoreFailure();

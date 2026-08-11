@@ -2,6 +2,8 @@
 import { sanitizeTerminalText } from "../../../packages/terminal-core/src/safe-text.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import { createChannelIngressQueue } from "../../channels/message/ingress-queue.js";
+import { maintainFailedChannelIngressEvents } from "../../channels/message/ingress-queue.js";
+import { maintainFailedDeliveryQueueEntries } from "../../infra/delivery-queue-sqlite.js";
 import { formatDurationHuman } from "../../infra/format-time/format-duration.js";
 import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
 import { defaultRuntime, type RuntimeEnv, writeRuntimeJson } from "../../runtime.js";
@@ -91,3 +93,10 @@ export async function channelsDeadLettersResubmitCommand(
   }
   throw new Error(`Ingress event ${eventId} was not found for ${channelId}/${accountId}.`);
 }
+
+type PruneOptions = { olderThanMs?: number; limit?: number; batch?: number; apply?: boolean; json?: boolean };
+function writePruneReceipt(runtime: RuntimeEnv, opts: PruneOptions, receipt: object) { if (opts.json) { writeRuntimeJson(runtime, receipt); return; } const value = receipt as { mode:string; selected:{count:number;idsSha256:string}; applied:{count:number;skippedRace:number}; after:{count:number} }; runtime.log(`${value.mode}: selected ${value.selected.count} (sha256 ${value.selected.idsSha256}) · applied ${value.applied.count} · race-skipped ${value.applied.skippedRace} · remaining ${value.after.count}`); }
+/** Preview or prune failed inbound events; never resubmits. */
+export async function channelsPruneInboundDeadLettersCommand(opts: PruneOptions & { channel: string; account: string }, runtime: RuntimeEnv = defaultRuntime) { writePruneReceipt(runtime, opts, maintainFailedChannelIngressEvents({ channelId: opts.channel, accountId: opts.account, olderThanMs: opts.olderThanMs, limit: opts.limit, batch: opts.batch, apply: opts.apply })); }
+/** Preview or prune failed outbound delivery rows; never retries. */
+export async function channelsPruneOutboundDeadLettersCommand(opts: PruneOptions & { channel?: string; account?: string }, runtime: RuntimeEnv = defaultRuntime) { writePruneReceipt(runtime, opts, maintainFailedDeliveryQueueEntries({ channel: opts.channel, accountId: opts.account, olderThanMs: opts.olderThanMs, limit: opts.limit, batch: opts.batch, apply: opts.apply })); }

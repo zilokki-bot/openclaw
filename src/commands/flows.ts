@@ -11,6 +11,7 @@ import type { RuntimeEnv } from "../runtime.js";
 import { writeRuntimeJson } from "../runtime.js";
 import { listTasksForFlowId } from "../tasks/runtime-internal.js";
 import { cancelFlowById, getFlowTaskSummary } from "../tasks/task-executor.js";
+import { maintainOrphanedQueuedTaskFlows } from "../tasks/task-flow-registry.maintenance.js";
 import type { TaskFlowRecord, TaskFlowStatus } from "../tasks/task-flow-registry.types.js";
 import {
   getTaskFlowById,
@@ -271,4 +272,24 @@ export async function flowsCancelCommand(opts: { lookup: string }, runtime: Runt
   }
   const updated = getTaskFlowById(flow.flowId) ?? result.flow ?? flow;
   runtime.log(`Cancelled ${updated.flowId} (${updated.syncMode}) with status ${updated.status}.`);
+}
+
+/** Preview or apply bounded cancellation of queued TaskFlows that have no linked task. */
+export async function flowsMaintainOrphanedQueuedCommand(
+  opts: { olderThanMs: number; limit?: number; batch?: number; apply?: boolean; json?: boolean },
+  runtime: RuntimeEnv,
+) {
+  const receipt = maintainOrphanedQueuedTaskFlows({
+    olderThanMs: opts.olderThanMs,
+    limit: opts.limit,
+    batch: opts.batch,
+    apply: opts.apply,
+  });
+  if (opts.json) {
+    writeRuntimeJson(runtime, receipt);
+    return;
+  }
+  runtime.log(
+    `${receipt.mode}: selected ${receipt.selected.count} (sha256 ${receipt.selected.idsSha256}) · applied ${receipt.applied.count} · race-skipped ${receipt.applied.skippedRace} · remaining ${receipt.after.count}`,
+  );
 }

@@ -16,6 +16,8 @@ import {
   type ChannelSetupCliOption,
 } from "./channels-cli-add-args.js";
 import { runCommandWithRuntime } from "./cli-utils.js";
+import { parseDurationMs } from "./parse-duration.js";
+import { parseStrictPositiveIntOption } from "./program/helpers.js";
 import { hasExplicitOptions } from "./command-options.js";
 import { formatHelpExamples } from "./help-format.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
@@ -270,6 +272,16 @@ export async function registerChannelsCli(
         await channelsDeadLettersListCommand(opts, defaultRuntime);
       });
     });
+
+  const addPruneOptions = (command: Command) => command.option("--older-than <duration>", "Failed rows older than this duration (default: 24h)", "24h").option("--limit <n>", "Maximum rows selected (1-1000)", "100").option("--batch <n>", "Maximum rows per write batch (1-1000)", "50").option("--apply", "Apply pruning; default is dry-run", false).option("--json", "Output payload-free receipt as JSON", false);
+  addPruneOptions(deadLetters.command("prune").description("Preview or prune failed inbound events; never resubmits"))
+    .requiredOption("--channel <name>", "Channel id")
+    .requiredOption("--account <id>", "Account id")
+    .action(async (opts) => { await runChannelsCommand(async () => { const { channelsPruneInboundDeadLettersCommand } = await loadChannelsCommands(); await channelsPruneInboundDeadLettersCommand({ channel: String(opts.channel), account: String(opts.account), olderThanMs: parseDurationMs(String(opts.olderThan)), limit: parseStrictPositiveIntOption(String(opts.limit), "--limit"), batch: parseStrictPositiveIntOption(String(opts.batch), "--batch"), apply: Boolean(opts.apply), json: Boolean(opts.json) }, defaultRuntime); }); });
+  addPruneOptions(deadLetters.command("prune-outbound").description("Preview or prune failed outbound deliveries; never retries"))
+    .option("--channel <name>", "Restrict to one channel")
+    .option("--account <id>", "Restrict to one account")
+    .action(async (opts) => { await runChannelsCommand(async () => { const { channelsPruneOutboundDeadLettersCommand } = await loadChannelsCommands(); await channelsPruneOutboundDeadLettersCommand({ ...(opts.channel === undefined ? {} : { channel: String(opts.channel) }), ...(opts.account === undefined ? {} : { account: String(opts.account) }), olderThanMs: parseDurationMs(String(opts.olderThan)), limit: parseStrictPositiveIntOption(String(opts.limit), "--limit"), batch: parseStrictPositiveIntOption(String(opts.batch), "--batch"), apply: Boolean(opts.apply), json: Boolean(opts.json) }, defaultRuntime); }); });
 
   deadLetters
     .command("resubmit")

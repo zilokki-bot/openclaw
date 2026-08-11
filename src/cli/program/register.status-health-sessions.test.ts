@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   flowsListCommand: vi.fn(),
   flowsShowCommand: vi.fn(),
   flowsCancelCommand: vi.fn(),
+  flowsMaintainOrphanedQueuedCommand: vi.fn(),
   setVerbose: vi.fn(),
   runtime: {
     log: vi.fn(),
@@ -48,6 +49,7 @@ const tasksCancelCommand = mocks.tasksCancelCommand;
 const flowsListCommand = mocks.flowsListCommand;
 const flowsShowCommand = mocks.flowsShowCommand;
 const flowsCancelCommand = mocks.flowsCancelCommand;
+const flowsMaintainOrphanedQueuedCommand = mocks.flowsMaintainOrphanedQueuedCommand;
 const setVerbose = mocks.setVerbose;
 const runtime = mocks.runtime;
 
@@ -123,6 +125,7 @@ vi.mock("../../commands/flows.js", () => ({
   flowsListCommand: mocks.flowsListCommand,
   flowsShowCommand: mocks.flowsShowCommand,
   flowsCancelCommand: mocks.flowsCancelCommand,
+  flowsMaintainOrphanedQueuedCommand: mocks.flowsMaintainOrphanedQueuedCommand,
 }));
 
 vi.mock("../../globals.js", () => ({
@@ -161,6 +164,7 @@ describe("registerStatusHealthSessionsCommands", () => {
     flowsListCommand.mockResolvedValue(undefined);
     flowsShowCommand.mockResolvedValue(undefined);
     flowsCancelCommand.mockResolvedValue(undefined);
+    flowsMaintainOrphanedQueuedCommand.mockResolvedValue(undefined);
   });
 
   it("runs status command with timeout and debug-derived verbose", async () => {
@@ -547,6 +551,27 @@ describe("registerStatusHealthSessionsCommands", () => {
     await runCli(["tasks", "flow", "cancel", "flow-123"]);
     expectCommandOptions(flowsCancelCommand, {
       lookup: "flow-123",
+    });
+
+    await runCli([
+      "tasks",
+      "flow",
+      "maintain-orphaned-queued",
+      "--older-than",
+      "1h",
+      "--limit",
+      "2",
+      "--batch",
+      "1",
+      "--apply",
+      "--json",
+    ]);
+    expectCommandOptions(flowsMaintainOrphanedQueuedCommand, {
+      olderThanMs: 3_600_000,
+      limit: 2,
+      batch: 1,
+      apply: true,
+      json: true,
     });
   });
 

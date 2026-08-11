@@ -3,7 +3,8 @@
  *
  * Stores, claims, completes, and tombstones inbound channel events in OpenClaw state.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { appendLocalMaintenanceAudit } from "../../infra/maintenance-audit.js";
 import type { DatabaseSync } from "node:sqlite";
 import type { Selectable } from "kysely";
 import {
@@ -555,6 +556,65 @@ export function countFailedChannelIngressQueueEntries(
     count: Number(row.failed_count),
     oldestFailedAt: row.oldest_failed_at == null ? null : Number(row.oldest_failed_at),
   }));
+}
+
+export type FailedChannelIngressMaintenanceReceipt = {
+  mode: "dry-run" | "apply";
+  filters: { channelId: string; accountId: string; olderThanMs: number; limit: number; batch: number };
+  before: { count: number };
+  selected: { count: number; idsSha256: string };
+  applied: { count: number; idsSha256: string; skippedRace: number };
+  after: { count: number };
+  auditEventId?: string;
+};
+
+function maintenanceHash(ids: readonly string[]) {
+  return createHash("sha256").update([...ids].toSorted().join("\n")).digest("hex");
+}
+
+/** Payload-free, bounded removal of failed ingress tombstones. Never resubmits. */
+export function maintainFailedChannelIngressEvents(params: {
+  channelId: string;
+  accountId: string;
+  olderThanMs?: number;
+  limit?: number;
+  batch?: number;
+  apply?: boolean;
+  now?: number;
+  stateDir?: string;
+}): FailedChannelIngressMaintenanceReceipt {
+  const limit = params.limit ?? 100;
+  const batch = params.batch ?? Math.min(limit, 50);
+  if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(batch) || limit < 1 || limit > 1000 || batch < 1 || batch > limit) throw new Error("limit and batch must be integers between 1 and 1000, with batch <= limit.");
+  const olderThanMs = params.olderThanMs ?? 24 * 60 * 60_000;
+  if (!Number.isSafeInteger(olderThanMs) || olderThanMs < 0) throw new Error("olderThanMs must be a non-negative integer.");
+  const channelId = normalizePart(params.channelId, "");
+  const accountId = normalizePart(params.accountId, "");
+  if (!channelId || !accountId) throw new Error("channelId and accountId are required.");
+  const cutoff = (params.now ?? Date.now()) - olderThanMs;
+  const database = openStateDatabase(params.stateDir);
+  const queueName = queueNameForParts(channelId, accountId);
+  const db = getChannelIngressKysely(database.db);
+  const select = () => db.selectFrom("channel_ingress_events").where("queue_name", "=", queueName).where("status", "=", "failed").where("failed_at", "<=", cutoff);
+  const before = Number(executeSqliteQueryTakeFirstSync(database.db, select().select((eb) => eb.fn.countAll().as("count")))?.count ?? 0);
+  const selectedIds = (executeSqliteQuerySync(database.db, select().select("event_id").orderBy("failed_at", "asc").orderBy("event_id", "asc").limit(limit)).rows as Array<{event_id:string}>).map((row) => row.event_id);
+  const appliedIds: string[] = [];
+  let auditEventId: string | undefined;
+  if (params.apply && selectedIds.length) {
+    auditEventId = runOpenClawStateWriteTransaction((tx) => {
+      const txDb = getChannelIngressKysely(tx.db);
+      for (let index = 0; index < selectedIds.length; index += batch) {
+        const ids = selectedIds.slice(index, index + batch);
+        for (const id of ids) {
+          const result = executeSqliteQuerySync(tx.db, txDb.deleteFrom("channel_ingress_events").where("queue_name", "=", queueName).where("status", "=", "failed").where("failed_at", "<=", cutoff).where("event_id", "=", id));
+          if (result.numAffectedRows === 1n) appliedIds.push(id);
+        }
+      }
+      return appendLocalMaintenanceAudit({ db: tx.db, action: "channel_ingress_failed_prune", occurredAt: params.now ?? Date.now(), resultCount: appliedIds.length });
+    }, { path: database.path });
+  }
+  const after = Number(executeSqliteQueryTakeFirstSync(database.db, select().select((eb) => eb.fn.countAll().as("count")))?.count ?? 0);
+  return { mode: params.apply ? "apply" : "dry-run", filters: { channelId, accountId, olderThanMs, limit, batch }, before: { count: before }, selected: { count: selectedIds.length, idsSha256: maintenanceHash(selectedIds) }, applied: { count: appliedIds.length, idsSha256: maintenanceHash(appliedIds), skippedRace: params.apply ? selectedIds.length - appliedIds.length : 0 }, after: { count: after }, ...(auditEventId ? { auditEventId } : {}) };
 }
 
 /** Creates a durable channel/account-scoped ingress queue backed by the OpenClaw state database. */
