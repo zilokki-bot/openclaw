@@ -278,6 +278,14 @@ export type ModelCatalogRefreshConfig = {
   url?: string;
 };
 
+/** Backoff policy for profile failures classified by model auth routing. */
+export type ModelsAuthCooldownConfig = {
+  /** Initial disabled window for billing/credit failures, in seconds. Default: 5 hours. */
+  billingBackoffSeconds?: number;
+  /** Maximum disabled window for repeated billing/credit failures, in seconds. Default: 24 hours. */
+  billingMaxSeconds?: number;
+};
+
 export type ModelsConfig = {
   /** Merge provider config with bundled catalogs or replace bundled catalogs entirely. */
   mode?: "merge" | "replace";
@@ -285,6 +293,8 @@ export type ModelsConfig = {
   providers?: Record<string, ModelProviderConfig>;
   /** Hosted model catalog refresh settings. */
   catalogRefresh?: ModelCatalogRefreshConfig;
+  /** Optional profile-failure cooldown policy. */
+  authCooldown?: ModelsAuthCooldownConfig;
 };
 
 /** Top-level models config input before provider entries are normalized. */

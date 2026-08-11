@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import { ModelsConfigSchema } from "./zod-schema.core.js";
 
 describe("ModelsConfigSchema", () => {
+  it("accepts a bounded billing cooldown policy", () => {
+    expect(
+      ModelsConfigSchema.safeParse({
+        authCooldown: { billingBackoffSeconds: 60, billingMaxSeconds: 60 },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a billing cooldown below one minute or above its maximum", () => {
+    expect(
+      ModelsConfigSchema.safeParse({ authCooldown: { billingBackoffSeconds: 59 } }).success,
+    ).toBe(false);
+    expect(
+      ModelsConfigSchema.safeParse({
+        authCooldown: { billingBackoffSeconds: 120, billingMaxSeconds: 60 },
+      }).success,
+    ).toBe(false);
+  });
+
   it.each([
     "claude-cli",
     "azure-openai-responses",

@@ -227,6 +227,24 @@ State is stored in the per-agent SQLite auth state under `usageStats`:
 
 Billing/credit failures (for example "insufficient credits" / "credit balance too low") are treated as failover-worthy, but they're usually not transient. Instead of a short cooldown, OpenClaw marks the profile as **disabled** (with a longer backoff) and rotates to the next profile/provider.
 
+The default billing disabled window is 5 hours (up to 24 hours after repeated failures).
+For a deliberately short recovery policy, configure both values so repeated failures do not
+increase the window:
+
+```json5
+{
+  models: {
+    authCooldown: {
+      billingBackoffSeconds: 60,
+      billingMaxSeconds: 60,
+    },
+  },
+}
+```
+
+This setting affects future billing classifications only. It does not rewrite an already
+persisted `disabledUntil`; active windows are intentionally not extended by retries.
+
 <Note>
 Not every billing-shaped response is `402`, and not every HTTP `402` lands here. OpenClaw keeps explicit billing text in the billing lane even when a provider returns `401` or `403` instead, but provider-specific matchers stay scoped to the provider that owns them (for example OpenRouter `403 Key limit exceeded`).
 

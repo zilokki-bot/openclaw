@@ -710,10 +710,19 @@ const DEFAULT_AUTH_PERMANENT_BACKOFF_MINUTES = 10;
 const DEFAULT_AUTH_PERMANENT_MAX_MINUTES = 60;
 const DEFAULT_FAILURE_WINDOW_HOURS = 24;
 
-function resolveAuthCooldownConfig(): ResolvedAuthCooldownConfig {
+function resolveAuthCooldownConfig(cfg?: OpenClawConfig): ResolvedAuthCooldownConfig {
+  const configured = cfg?.models?.authCooldown;
+  const billingBackoffSeconds = configured?.billingBackoffSeconds;
+  const billingMaxSeconds = configured?.billingMaxSeconds;
   return {
-    billingBackoffMs: DEFAULT_BILLING_BACKOFF_HOURS * 60 * 60 * 1000,
-    billingMaxMs: DEFAULT_BILLING_MAX_HOURS * 60 * 60 * 1000,
+    billingBackoffMs:
+      typeof billingBackoffSeconds === "number"
+        ? billingBackoffSeconds * 1000
+        : DEFAULT_BILLING_BACKOFF_HOURS * 60 * 60 * 1000,
+    billingMaxMs:
+      typeof billingMaxSeconds === "number"
+        ? billingMaxSeconds * 1000
+        : DEFAULT_BILLING_MAX_HOURS * 60 * 60 * 1000,
     authPermanentBackoffMs: DEFAULT_AUTH_PERMANENT_BACKOFF_MINUTES * 60 * 1000,
     authPermanentMaxMs: DEFAULT_AUTH_PERMANENT_MAX_MINUTES * 60 * 1000,
     failureWindowMs: DEFAULT_FAILURE_WINDOW_HOURS * 60 * 60 * 1000,
@@ -961,7 +970,7 @@ export async function markAuthProfileFailure(params: {
         return false;
       }
       const now = Date.now();
-      const cfgResolved = resolveAuthCooldownConfig();
+      const cfgResolved = resolveAuthCooldownConfig(params.cfg);
 
       previousStats = freshStore.usageStats?.[profileId];
       updateTime = now;

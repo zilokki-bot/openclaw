@@ -581,6 +581,20 @@ export const ModelsConfigSchema = z
     mode: z.union([z.literal("merge"), z.literal("replace")]).optional(),
     providers: ModelProvidersSchema.optional(),
     catalogRefresh: ModelCatalogRefreshConfigSchema,
+    authCooldown: z
+      .object({
+        billingBackoffSeconds: z.number().int().min(60).optional(),
+        billingMaxSeconds: z.number().int().min(60).optional(),
+      })
+      .strict()
+      .refine(
+        (value) =>
+          value.billingBackoffSeconds === undefined ||
+          value.billingMaxSeconds === undefined ||
+          value.billingMaxSeconds >= value.billingBackoffSeconds,
+        { message: "models.authCooldown.billingMaxSeconds must be >= billingBackoffSeconds" },
+      )
+      .optional(),
   })
   .strict()
   .optional();

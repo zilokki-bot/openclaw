@@ -168,6 +168,34 @@ describe("markAuthProfileFailure", () => {
       expectCooldownInRange(remainingMs, 4.5 * 60 * 60 * 1000, 5.5 * 60 * 60 * 1000);
     });
   });
+
+  it("uses the configured one-minute billing disabled window without extending it", async () => {
+    await withAuthProfileStore(async ({ agentDir, store }) => {
+      const cfg = {
+        models: { authCooldown: { billingBackoffSeconds: 60, billingMaxSeconds: 60 } },
+      };
+      const startedAt = Date.now();
+      await markAuthProfileFailure({
+        store,
+        profileId: "anthropic:default",
+        reason: "billing",
+        agentDir,
+        cfg,
+      });
+      const firstUntil = store.usageStats?.["anthropic:default"]?.disabledUntil;
+      expect(typeof firstUntil).toBe("number");
+      expectCooldownInRange((firstUntil as number) - startedAt, 55_000, 65_000);
+
+      await markAuthProfileFailure({
+        store,
+        profileId: "anthropic:default",
+        reason: "billing",
+        agentDir,
+        cfg,
+      });
+      expect(store.usageStats?.["anthropic:default"]?.disabledUntil).toBe(firstUntil);
+    });
+  });
   it("keeps persisted cooldownUntil unchanged across mid-window retries", async () => {
     await withAuthProfileStore(async ({ agentDir, store }) => {
       await markAuthProfileFailure({
