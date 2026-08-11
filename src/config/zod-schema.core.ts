@@ -589,9 +589,7 @@ export const ModelsConfigSchema = z
       .strict()
       .refine(
         (value) =>
-          value.billingBackoffSeconds === undefined ||
-          value.billingMaxSeconds === undefined ||
-          value.billingMaxSeconds >= value.billingBackoffSeconds,
+          (value.billingMaxSeconds ?? 24 * 60 * 60) >= (value.billingBackoffSeconds ?? 5 * 60 * 60),
         { message: "models.authCooldown.billingMaxSeconds must be >= billingBackoffSeconds" },
       )
       .optional(),

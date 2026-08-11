@@ -228,6 +228,8 @@ State is stored in the per-agent SQLite auth state under `usageStats`:
 Billing/credit failures (for example "insufficient credits" / "credit balance too low") are treated as failover-worthy, but they're usually not transient. Instead of a short cooldown, OpenClaw marks the profile as **disabled** (with a longer backoff) and rotates to the next profile/provider.
 
 The default billing disabled window is 5 hours (up to 24 hours after repeated failures).
+Both fields are integer seconds with a minimum of 60; `billingMaxSeconds` must be
+at least `billingBackoffSeconds`, including when either value is omitted and its default applies.
 For a deliberately short recovery policy, configure both values so repeated failures do not
 increase the window:
 

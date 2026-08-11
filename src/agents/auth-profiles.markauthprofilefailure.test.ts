@@ -196,6 +196,41 @@ describe("markAuthProfileFailure", () => {
       expect(store.usageStats?.["anthropic:default"]?.disabledUntil).toBe(firstUntil);
     });
   });
+
+  it("uses the configured one-minute window again after the prior billing window expires", async () => {
+    await withAuthProfileStore(async ({ agentDir, store }) => {
+      const cfg = {
+        models: { authCooldown: { billingBackoffSeconds: 60, billingMaxSeconds: 60 } },
+      };
+      const now = 1_700_000_000_000;
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+      try {
+        await markAuthProfileFailure({
+          store,
+          profileId: "anthropic:default",
+          reason: "billing",
+          agentDir,
+          cfg,
+        });
+        const firstUntil = store.usageStats?.["anthropic:default"]?.disabledUntil;
+        expect(firstUntil).toBe(now + 60_000);
+
+        nowSpy.mockReturnValue((firstUntil as number) + 1);
+        await markAuthProfileFailure({
+          store,
+          profileId: "anthropic:default",
+          reason: "billing",
+          agentDir,
+          cfg,
+        });
+        expect(store.usageStats?.["anthropic:default"]?.disabledUntil).toBe(
+          (firstUntil as number) + 1 + 60_000,
+        );
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+  });
   it("keeps persisted cooldownUntil unchanged across mid-window retries", async () => {
     await withAuthProfileStore(async ({ agentDir, store }) => {
       await markAuthProfileFailure({

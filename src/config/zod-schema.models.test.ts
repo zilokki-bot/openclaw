@@ -22,6 +22,16 @@ describe("ModelsConfigSchema", () => {
     ).toBe(false);
   });
 
+  it("validates partial cooldown overrides against the effective defaults", () => {
+    expect(
+      ModelsConfigSchema.safeParse({ authCooldown: { billingBackoffSeconds: 24 * 60 * 60 + 1 } })
+        .success,
+    ).toBe(false);
+    expect(ModelsConfigSchema.safeParse({ authCooldown: { billingMaxSeconds: 60 } }).success).toBe(
+      false,
+    );
+  });
+
   it.each([
     "claude-cli",
     "azure-openai-responses",
