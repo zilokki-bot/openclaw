@@ -27,7 +27,7 @@ type LobsterApprovalWaitState = {
   approvalId?: string;
 };
 
-type RunManagedLobsterFlowParams = {
+export type RunManagedLobsterFlowParams = {
   taskFlow: BoundTaskFlow;
   runner: LobsterRunner;
   runnerParams: LobsterRunnerParams;
@@ -38,7 +38,7 @@ type RunManagedLobsterFlowParams = {
   waitingStep?: string;
 };
 
-type ResumeManagedLobsterFlowParams = {
+export type ResumeManagedLobsterFlowParams = {
   taskFlow: BoundTaskFlow;
   runner: LobsterRunner;
   runnerParams: LobsterRunnerParams & {
