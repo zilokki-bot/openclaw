@@ -276,7 +276,7 @@ export async function flowsCancelCommand(opts: { lookup: string }, runtime: Runt
 
 /** Preview or apply bounded cancellation of queued TaskFlows that have no linked task. */
 export async function flowsMaintainOrphanedQueuedCommand(
-  opts: { olderThanMs: number; limit?: number; batch?: number; apply?: boolean; json?: boolean },
+  opts: { olderThanMs?: number; limit?: number; batch?: number; apply?: boolean; json?: boolean },
   runtime: RuntimeEnv,
 ) {
   const receipt = maintainOrphanedQueuedTaskFlows({

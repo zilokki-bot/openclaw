@@ -771,16 +771,14 @@ export function registerStatusHealthSessionsCommands(program: Command) {
   tasksFlowCmd
     .command("maintain-orphaned-queued")
     .description("Preview or cancel old queued TaskFlows with no linked task")
-    .requiredOption(
-      "--older-than <duration>",
-      "Only rows older than this duration (for example 1h)",
-    )
+    .option("--older-than <duration>", "Optional age threshold (default: all queued orphans)")
     .option("--limit <n>", "Maximum rows selected (1-1000)", "100")
     .option("--batch <n>", "Maximum rows per write batch (1-1000)", "50")
     .option("--apply", "Apply cancellation; without this flag the command is dry-run", false)
     .option("--json", "Output the payload-free maintenance receipt as JSON", false)
     .action(async (opts, command) => {
-      const olderThanMs = parseDurationMs(String(opts.olderThan));
+      const olderThanMs =
+        opts.olderThan === undefined ? 0 : parseDurationMs(String(opts.olderThan));
       const limit = parseStrictPositiveIntOption(String(opts.limit), "--limit");
       const batch = parseStrictPositiveIntOption(String(opts.batch), "--batch");
       const tasksParentOpts = command.parent?.parent?.opts() as { json?: boolean } | undefined;

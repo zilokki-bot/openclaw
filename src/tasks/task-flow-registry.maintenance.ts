@@ -118,7 +118,7 @@ function orphanedQueuedCount(cutoff: number): number {
  * and lets the existing seven-day terminal retention maintenance prune later.
  */
 export function maintainOrphanedQueuedTaskFlows(params: {
-  olderThanMs: number;
+  olderThanMs?: number;
   limit?: number;
   batch?: number;
   apply?: boolean;
@@ -130,11 +130,12 @@ export function maintainOrphanedQueuedTaskFlows(params: {
   if (batch > limit) {
     throw new Error("batch must not exceed limit.");
   }
-  if (!Number.isSafeInteger(params.olderThanMs) || params.olderThanMs < 0) {
+  const olderThanMs = params.olderThanMs ?? 0;
+  if (!Number.isSafeInteger(olderThanMs) || olderThanMs < 0) {
     throw new Error("olderThanMs must be a non-negative integer.");
   }
   const now = params.now ?? Date.now();
-  const cutoff = now - params.olderThanMs;
+  const cutoff = now - olderThanMs;
   const before = orphanedQueuedCount(cutoff);
   const { db } = openOpenClawStateDatabase();
   const selected = db
@@ -171,7 +172,7 @@ export function maintainOrphanedQueuedTaskFlows(params: {
     filters: {
       status: "queued",
       linkedTasks: "none",
-      olderThanMs: params.olderThanMs,
+      olderThanMs,
       limit,
       batch,
     },
