@@ -34,6 +34,12 @@ openclaw daemon uninstall
 
 - `status`: shows service install state (launchd/systemd/schtasks) and probes Gateway health.
 - `install`: installs the service; `--force` reinstalls/overwrites an existing install.
+- A named profile may persist explicit `OPENCLAW_CONFIG_PATH` and `OPENCLAW_STATE_DIR` into
+  its managed service only when both are existing, absolute normalized paths owned by the
+  installing user. The config must validate and its `gateway.port` must equal the install
+  port. Symlinks, partial overrides, and explicit paths on the default profile are refused.
+  The installer delegates to the platform service manager; do not create service definitions
+  manually.
 - `restart --safe`: asks the running Gateway to preflight active work and schedule one coalesced restart after work drains, bounded to 5 minutes. When that budget expires, the restart is forced anyway. Plain `restart` uses the service manager directly; `--force` is the immediate override.
 - `restart --safe --skip-deferral`: bypasses the active-work deferral gate so the Gateway restarts immediately even when blockers are reported. Requires `--safe`.
 

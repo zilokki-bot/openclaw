@@ -34,6 +34,7 @@ import {
 import { defaultRuntime } from "../../runtime.js";
 import { formatCliCommand } from "../command-format.js";
 import { formatInvalidConfigPort, formatInvalidPortOption } from "../error-format.js";
+import { validateNamedProfileInstallPaths } from "./named-profile-install-guard.js";
 import { buildDaemonServiceSnapshot, installDaemonServiceAndEmit } from "./response.js";
 import {
   createDaemonInstallActionContext,
@@ -172,6 +173,17 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
   const port = portOverride ?? resolveGatewayPort(cfg);
   if (!Number.isFinite(port) || port <= 0 || port > 65_535) {
     fail(formatInvalidConfigPort("gateway.port"));
+    return;
+  }
+  const namedProfilePaths = validateNamedProfileInstallPaths({
+    env: process.env,
+    configPath: configSnapshot.path,
+    configValid: configSnapshot.valid,
+    configPort: resolveGatewayPort(cfg),
+    installPort: port,
+  });
+  if (!namedProfilePaths.ok) {
+    fail(`Gateway install blocked: ${namedProfilePaths.reason}`);
     return;
   }
   const runtimeRaw = opts.runtime ? opts.runtime : DEFAULT_GATEWAY_DAEMON_RUNTIME;
