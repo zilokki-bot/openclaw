@@ -69,6 +69,11 @@ The `models` root also owns global model-catalog behavior.
       enabled: true,
       // url: "https://catalog.example.com/openclaw/catalog.json",
     },
+    // Optional. Billing/credit failure disabled-window policy.
+    authCooldown: {
+      billingBackoffSeconds: 60,
+      billingMaxSeconds: 60,
+    },
   },
 }
 ```
@@ -88,6 +93,13 @@ The `models` root also owns global model-catalog behavior.
   checks in the background at startup and every six hours. A downloaded catalog
   applies on the next Gateway restart; a release whose bundled catalog is newer
   always wins.
+- `models.authCooldown.billingBackoffSeconds`: initial billing/credit failure
+  disabled window in integer seconds. Default: `18000` (5 hours); minimum: `60`.
+- `models.authCooldown.billingMaxSeconds`: maximum disabled window for repeated
+  billing/credit failures. Default: `86400` (24 hours); minimum: `60`; it must be
+  at least `billingBackoffSeconds`, including when either field uses its default.
+  These values affect future billing classifications and do not rewrite an active
+  persisted `disabledUntil` window.
 
 Pricing updates ship in the same hosted catalog file as model metadata. The
 retired `models.pricing` toggle is removed automatically by `openclaw doctor
