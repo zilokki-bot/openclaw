@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- delivery queue owns its narrow local maintenance primitive. */
 // Stores durable delivery queue entries in SQLite.
 import { createHash } from "node:crypto";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
@@ -7,8 +8,8 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
-import { runSqliteImmediateTransactionSync } from "./sqlite-transaction.js";
 import { appendLocalMaintenanceAudit } from "./maintenance-audit.js";
+import { runSqliteImmediateTransactionSync } from "./sqlite-transaction.js";
 
 // Generic durable delivery queue storage shared by session and outbound queues.
 // Queue-specific wrappers own payload shape; this layer owns SQLite state.
@@ -716,24 +717,141 @@ export function countFailedDeliveryQueueEntries(stateDir?: string): FailedDelive
   }));
 }
 
-export type FailedDeliveryQueueMaintenanceReceipt = { mode: "dry-run" | "apply"; filters: { queueName: "outbound"; channel?: string; accountId?: string; olderThanMs: number; limit: number; batch: number }; before: { count: number }; selected: { count: number; idsSha256: string }; applied: { count: number; idsSha256: string; skippedRace: number }; after: { count: number }; auditEventId?: string };
-const maintenanceHash = (ids: readonly string[]) => createHash("sha256").update([...ids].toSorted().join("\n")).digest("hex");
+export type FailedDeliveryQueueMaintenanceReceipt = {
+  mode: "dry-run" | "apply";
+  filters: {
+    queueName: "outbound";
+    channel?: string;
+    accountId?: string;
+    olderThanMs: number;
+    limit: number;
+    batch: number;
+  };
+  before: { count: number };
+  selected: { count: number; idsSha256: string };
+  applied: { count: number; idsSha256: string; skippedRace: number };
+  after: { count: number };
+  auditEventId?: string;
+};
+const maintenanceHash = (ids: readonly string[]) =>
+  createHash("sha256")
+    .update([...ids].toSorted().join("\n"))
+    .digest("hex");
 
 /** Payload-free, bounded removal of failed outbound delivery rows. Never retries. */
-export function maintainFailedDeliveryQueueEntries(params: { channel?: string; accountId?: string; olderThanMs?: number; limit?: number; batch?: number; apply?: boolean; now?: number; stateDir?: string }): FailedDeliveryQueueMaintenanceReceipt {
-  const limit = params.limit ?? 100, batch = params.batch ?? Math.min(limit, 50), olderThanMs = params.olderThanMs ?? 24 * 60 * 60_000;
-  if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(batch) || limit < 1 || limit > 1000 || batch < 1 || batch > limit) throw new Error("limit and batch must be integers between 1 and 1000, with batch <= limit.");
-  if (!Number.isSafeInteger(olderThanMs) || olderThanMs < 0) throw new Error("olderThanMs must be a non-negative integer.");
+export function maintainFailedDeliveryQueueEntries(params: {
+  channel?: string;
+  accountId?: string;
+  olderThanMs?: number;
+  limit?: number;
+  batch?: number;
+  apply?: boolean;
+  now?: number;
+  stateDir?: string;
+}): FailedDeliveryQueueMaintenanceReceipt {
+  const limit = params.limit ?? 100,
+    batch = params.batch ?? Math.min(limit, 50),
+    olderThanMs = params.olderThanMs ?? 24 * 60 * 60_000;
+  if (
+    !Number.isSafeInteger(limit) ||
+    !Number.isSafeInteger(batch) ||
+    limit < 1 ||
+    limit > 1000 ||
+    batch < 1 ||
+    batch > limit
+  ) {
+    throw new Error("limit and batch must be integers between 1 and 1000, with batch <= limit.");
+  }
+  if (!Number.isSafeInteger(olderThanMs) || olderThanMs < 0) {
+    throw new Error("olderThanMs must be a non-negative integer.");
+  }
   const cutoff = (params.now ?? Date.now()) - olderThanMs;
-  const database = openStateDatabase(params.stateDir), db = getNodeSqliteKysely<DeliveryQueueDatabase>(database.db);
-  const select = () => { let query = db.selectFrom("delivery_queue_entries").where("queue_name", "=", "outbound").where("status", "=", "failed").where("failed_at", "<=", cutoff); if (params.channel !== undefined) query = query.where("channel", "=", params.channel); if (params.accountId !== undefined) query = query.where("account_id", "=", params.accountId); return query; };
-  const before = Number(executeSqliteQueryTakeFirstSync(database.db, select().select((eb) => eb.fn.countAll().as("count")))?.count ?? 0);
-  const selectedIds = (executeSqliteQuerySync(database.db, select().select("id").orderBy("failed_at", "asc").orderBy("id", "asc").limit(limit)).rows as Array<{id:string}>).map((row) => row.id);
+  const database = openStateDatabase(params.stateDir),
+    db = getNodeSqliteKysely<DeliveryQueueDatabase>(database.db);
+  const select = () => {
+    let query = db
+      .selectFrom("delivery_queue_entries")
+      .where("queue_name", "=", "outbound")
+      .where("status", "=", "failed")
+      .where("failed_at", "<=", cutoff);
+    if (params.channel !== undefined) {
+      query = query.where("channel", "=", params.channel);
+    }
+    if (params.accountId !== undefined) {
+      query = query.where("account_id", "=", params.accountId);
+    }
+    return query;
+  };
+  const before = Number(
+    executeSqliteQueryTakeFirstSync(
+      database.db,
+      select().select((eb) => eb.fn.countAll().as("count")),
+    )?.count ?? 0,
+  );
+  const selectedIds = (
+    executeSqliteQuerySync(
+      database.db,
+      select().select("id").orderBy("failed_at", "asc").orderBy("id", "asc").limit(limit),
+    ).rows as Array<{ id: string }>
+  ).map((row) => row.id);
   const appliedIds: string[] = [];
   let auditEventId: string | undefined;
-  if (params.apply && selectedIds.length) auditEventId = runSqliteImmediateTransactionSync(database.db, () => { const txDb = getNodeSqliteKysely<DeliveryQueueDatabase>(database.db); for (let index = 0; index < selectedIds.length; index += batch) for (const id of selectedIds.slice(index, index + batch)) { let query = txDb.deleteFrom("delivery_queue_entries").where("queue_name", "=", "outbound").where("status", "=", "failed").where("failed_at", "<=", cutoff).where("id", "=", id); if (params.channel !== undefined) query = query.where("channel", "=", params.channel); if (params.accountId !== undefined) query = query.where("account_id", "=", params.accountId); if (executeSqliteQuerySync(database.db, query).numAffectedRows === 1n) appliedIds.push(id); } return appendLocalMaintenanceAudit({ db: database.db, action: "outbound_failed_prune", occurredAt: params.now ?? Date.now(), resultCount: appliedIds.length }); });
-  const after = Number(executeSqliteQueryTakeFirstSync(database.db, select().select((eb) => eb.fn.countAll().as("count")))?.count ?? 0);
-  return { mode: params.apply ? "apply" : "dry-run", filters: { queueName: "outbound", ...(params.channel === undefined ? {} : { channel: params.channel }), ...(params.accountId === undefined ? {} : { accountId: params.accountId }), olderThanMs, limit, batch }, before: { count: before }, selected: { count: selectedIds.length, idsSha256: maintenanceHash(selectedIds) }, applied: { count: appliedIds.length, idsSha256: maintenanceHash(appliedIds), skippedRace: params.apply ? selectedIds.length - appliedIds.length : 0 }, after: { count: after }, ...(auditEventId ? { auditEventId } : {}) };
+  if (params.apply && selectedIds.length) {
+    auditEventId = runSqliteImmediateTransactionSync(database.db, () => {
+      const txDb = getNodeSqliteKysely<DeliveryQueueDatabase>(database.db);
+      for (let index = 0; index < selectedIds.length; index += batch) {
+        for (const id of selectedIds.slice(index, index + batch)) {
+          let query = txDb
+            .deleteFrom("delivery_queue_entries")
+            .where("queue_name", "=", "outbound")
+            .where("status", "=", "failed")
+            .where("failed_at", "<=", cutoff)
+            .where("id", "=", id);
+          if (params.channel !== undefined) {
+            query = query.where("channel", "=", params.channel);
+          }
+          if (params.accountId !== undefined) {
+            query = query.where("account_id", "=", params.accountId);
+          }
+          if (executeSqliteQuerySync(database.db, query).numAffectedRows === 1n) {
+            appliedIds.push(id);
+          }
+        }
+      }
+      return appendLocalMaintenanceAudit({
+        db: database.db,
+        action: "outbound_failed_prune",
+        occurredAt: params.now ?? Date.now(),
+        resultCount: appliedIds.length,
+      });
+    });
+  }
+  const after = Number(
+    executeSqliteQueryTakeFirstSync(
+      database.db,
+      select().select((eb) => eb.fn.countAll().as("count")),
+    )?.count ?? 0,
+  );
+  return {
+    mode: params.apply ? "apply" : "dry-run",
+    filters: {
+      queueName: "outbound",
+      ...(params.channel === undefined ? {} : { channel: params.channel }),
+      ...(params.accountId === undefined ? {} : { accountId: params.accountId }),
+      olderThanMs,
+      limit,
+      batch,
+    },
+    before: { count: before },
+    selected: { count: selectedIds.length, idsSha256: maintenanceHash(selectedIds) },
+    applied: {
+      count: appliedIds.length,
+      idsSha256: maintenanceHash(appliedIds),
+      skippedRace: params.apply ? selectedIds.length - appliedIds.length : 0,
+    },
+    after: { count: after },
+    ...(auditEventId ? { auditEventId } : {}),
+  };
 }
 
 /** Mark a pending delivery queue entry as failed for later diagnostics. */
