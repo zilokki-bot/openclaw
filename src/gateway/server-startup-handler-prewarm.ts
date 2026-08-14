@@ -1,9 +1,8 @@
-import { listAgentIds } from "../agents/agent-scope-config.js";
+import { resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { runWithGatewayIndependentRootWorkAdmission } from "../process/gateway-work-admission.js";
 
 const SIDEBAR_SESSION_LIST_LIMIT = 60;
-const SIDEBAR_CATALOG_LIMIT_PER_HOST = 40;
 
 type StartupTrace = {
   measure: <T>(name: string, run: () => T | Promise<T>) => Promise<T>;
@@ -45,12 +44,17 @@ async function prewarmGatewaySessionListData(cfg: OpenClawConfig, agentId: strin
 }
 
 function dashboardDataPrewarmItems(cfg: OpenClawConfig): GatewayHandlerPrewarmItem[] {
-  const agentIds = listAgentIds(cfg);
+  const defaultAgentId = resolveDefaultAgentId(cfg);
   return [
-    ...agentIds.map((agentId) => ({
-      name: `sessions.${agentId}`,
-      load: () => prewarmGatewaySessionListData(cfg, agentId),
-    })),
+    ...(defaultAgentId
+      ? [
+          {
+            name: `sessions.${defaultAgentId}`,
+            // Request-time selected/all-agent views remain authoritative for the rest of the fleet.
+            load: () => prewarmGatewaySessionListData(cfg, defaultAgentId),
+          },
+        ]
+      : []),
     {
       name: "plugins",
       load: async () => {
@@ -58,17 +62,6 @@ function dashboardDataPrewarmItems(cfg: OpenClawConfig): GatewayHandlerPrewarmIt
         await listManagedPlugins({ config: cfg });
       },
     },
-    ...agentIds.map((agentId) => ({
-      name: `session-catalog.${agentId}`,
-      load: async () => {
-        const { prewarmSessionCatalogList } = await import("./server-methods/session-catalog.js");
-        await prewarmSessionCatalogList({
-          config: cfg,
-          agentId,
-          limitPerHost: SIDEBAR_CATALOG_LIMIT_PER_HOST,
-        });
-      },
-    })),
   ];
 }
 
@@ -79,7 +72,8 @@ export function scheduleGatewayHandlerPrewarm(params: {
   items?: readonly GatewayHandlerPrewarmItem[];
 }): GatewayHandlerPrewarmHandle {
   // Frequent updater restarts make cold dashboard data the remaining slow tier.
-  // Keep cheap session reads first, process-stable plugin data second, and provider catalogs last.
+  // Keep the default session read first and process-stable plugin data second.
+  // Provider catalogs remain request-driven because adapters may perform unbounded external work.
   const items = params.items ?? dashboardDataPrewarmItems(params.cfgAtStart);
   let stopped = false;
   let nextIndex = 0;

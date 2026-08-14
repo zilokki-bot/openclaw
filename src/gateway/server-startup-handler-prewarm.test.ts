@@ -19,9 +19,6 @@ const mocks = vi.hoisted(() => ({
     mocks.events.push("plugins");
     return { plugins: [] };
   }),
-  prewarmSessionCatalogList: vi.fn(async (params: { agentId: string }) => {
-    mocks.events.push(`catalog.${params.agentId}`);
-  }),
 }));
 
 vi.mock("../config/sessions/combined-store-gateway.js", () => ({
@@ -36,10 +33,6 @@ vi.mock("../plugins/management-service.js", () => ({
   listManagedPlugins: mocks.listManagedPlugins,
 }));
 
-vi.mock("./server-methods/session-catalog.js", () => ({
-  prewarmSessionCatalogList: mocks.prewarmSessionCatalogList,
-}));
-
 const { scheduleGatewayHandlerPrewarm } = await import("./server-startup-handler-prewarm.js");
 
 beforeEach(() => {
@@ -47,7 +40,6 @@ beforeEach(() => {
   mocks.loadCombinedSessionStoreForGateway.mockClear();
   mocks.listSessionsFromStoreAsync.mockClear();
   mocks.listManagedPlugins.mockClear();
-  mocks.prewarmSessionCatalogList.mockClear();
 });
 
 afterEach(() => {
@@ -56,7 +48,7 @@ afterEach(() => {
 });
 
 describe("scheduleGatewayHandlerPrewarm", () => {
-  it("warms the handler-owned caches in bounded dashboard order", async () => {
+  it("warms the default-agent session and process-stable plugin data", async () => {
     vi.useFakeTimers();
     const cfg = {
       agents: { list: [{ id: "main", default: true }, { id: "research" }] },
@@ -70,23 +62,12 @@ describe("scheduleGatewayHandlerPrewarm", () => {
     expect(mocks.events).toEqual([]);
     await vi.runAllTimersAsync();
 
-    expect(mocks.events).toEqual([
-      "sessions.load.main",
-      "sessions.rows.main",
-      "sessions.load.research",
-      "sessions.rows.research",
-      "plugins",
-      "catalog.main",
-      "catalog.research",
-    ]);
+    expect(mocks.events).toEqual(["sessions.load.main", "sessions.rows.main", "plugins"]);
     expect(mocks.loadCombinedSessionStoreForGateway).toHaveBeenNthCalledWith(1, cfg, {
       agentId: "main",
       projection: "list",
     });
-    expect(mocks.loadCombinedSessionStoreForGateway).toHaveBeenNthCalledWith(2, cfg, {
-      agentId: "research",
-      projection: "list",
-    });
+    expect(mocks.loadCombinedSessionStoreForGateway).toHaveBeenCalledTimes(1);
     expect(mocks.listSessionsFromStoreAsync).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -102,16 +83,6 @@ describe("scheduleGatewayHandlerPrewarm", () => {
       }),
     );
     expect(mocks.listManagedPlugins).toHaveBeenCalledWith({ config: cfg });
-    expect(mocks.prewarmSessionCatalogList).toHaveBeenNthCalledWith(1, {
-      config: cfg,
-      agentId: "main",
-      limitPerHost: 40,
-    });
-    expect(mocks.prewarmSessionCatalogList).toHaveBeenNthCalledWith(2, {
-      config: cfg,
-      agentId: "research",
-      limitPerHost: 40,
-    });
     sidecar.stop();
   });
 

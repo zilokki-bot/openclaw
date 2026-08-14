@@ -32,6 +32,7 @@ import {
   createBundledStaticCatalogModelResolver,
   loadBundledProviderStaticCatalogContextModels,
 } from "./embedded-agent-runner/model.static-catalog.js";
+import { createStaticModelIdMatcher } from "./embedded-agent-runner/model.static-id.js";
 import { buildPreparedModelCatalogSnapshot, type ModelCatalogEntry } from "./model-catalog.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import { buildConfiguredModelCatalog } from "./model-selection-shared.js";
@@ -200,6 +201,7 @@ export async function prepareWorkspaceBuildGroup(
     PreparedModelRuntimeBuildStats,
     | "runtimePluginMs"
     | "pluginMetadataMs"
+    | "staticProviderPlanningMs"
     | "staticProviderCatalogMs"
     | "ambientCredentialsMs"
     | "agentFactsMs"
@@ -227,6 +229,10 @@ export async function prepareWorkspaceBuildGroup(
     ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
   });
   const pluginMetadataMs = performance.now() - pluginMetadataStartedAt;
+  const staticProviderPlanningStartedAt = performance.now();
+  const matchesStaticModelId = createStaticModelIdMatcher({
+    manifestPlugins: pluginMetadataSnapshot.plugins,
+  });
   const mediaCapabilityProviders =
     input.readOnly || !runtimePluginRegistry
       ? undefined
@@ -260,8 +266,10 @@ export async function prepareWorkspaceBuildGroup(
   const configuredProviderIds = collectPreparedModelRuntimeProviderIds(input.config, {}, false);
   const staticCatalogProviderIds = collectConfiguredProviderIdsNeedingStaticCatalog({
     config: input.config,
+    matchesStaticModelId,
     resolveStaticCatalogModel: resolveConfiguredManifestModel,
   });
+  const staticProviderPlanningMs = performance.now() - staticProviderPlanningStartedAt;
   const staticProviderCatalogStartedAt = performance.now();
   const preparedStaticProviderCatalog =
     catalogMode === "static"
@@ -337,6 +345,7 @@ export async function prepareWorkspaceBuildGroup(
       metadataSnapshot: pluginMetadataSnapshot,
       ...(preparedStaticProviderCatalog ? { preparedStaticProviderCatalog } : {}),
       providerStaticModels,
+      matchesStaticModelId,
       resolveStaticCatalogModel: resolveConfiguredManifestModel,
     });
     const configuredEntryKeys = new Set(configuredCatalogEntries.map(modelCatalogEntryKey));
@@ -381,6 +390,7 @@ export async function prepareWorkspaceBuildGroup(
     buildStats: {
       runtimePluginMs,
       pluginMetadataMs,
+      staticProviderPlanningMs,
       staticProviderCatalogMs,
       ambientCredentialsMs,
       agentFactsMs,

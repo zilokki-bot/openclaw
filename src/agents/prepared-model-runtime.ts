@@ -3,6 +3,8 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { registerRuntimeAuthProfileStoreMutationListener } from "./auth-profiles/runtime-snapshots.js";
+import { createGatewayPreparedModelRuntimeLifecycle } from "./prepared-model-runtime.gateway-lifecycle.js";
+import { loadPreparedModelRuntimeSnapshotWithLifecycle } from "./prepared-model-runtime.load.js";
 import {
   PreparedModelRuntimeOwnerNotPublishedError,
   PreparedModelRuntimePublicationSupersededError,
@@ -55,71 +57,40 @@ const owners = new Map<string, PreparedModelRuntimeOwner>();
 const agentBuildCompletions = new Map<string, Promise<void>>();
 const standaloneActivationTails = new Map<string, Promise<void>>();
 let retainedDirectRunOwner: { key: string; owner: PreparedModelRuntimeOwner } | undefined;
-let gatewayLifecycleActive = false;
 let refreshTail: Promise<void> = Promise.resolve();
 let refreshRequestEpoch = 0;
 let pendingModelRuntimeReplacement: PreparedModelRuntimeReplacement | undefined;
 type AuthMutationEvent = { agentDir?: string; affectsInheritedStores: boolean };
 const pendingAuthMutations: AuthMutationEvent[] = [];
 
+const gatewayConfiguredRuntime = createGatewayPreparedModelRuntimeLifecycle({
+  owners,
+  getPendingReplacement: () => pendingModelRuntimeReplacement,
+  publishConfigured: (input, catalogMode, onBuildStats) =>
+    publishPreparedModelRuntimeSnapshot(input, {
+      provenance: "configured",
+      catalogMode,
+      ...(onBuildStats ? { onBuildStats } : {}),
+    }),
+});
+
+/** Registers the authoritative Gateway config without scanning model/workspace facts. */
+export const activateGatewayPreparedModelRuntimeStartup = gatewayConfiguredRuntime.activateStartup;
+
+/** Lazily publishes one configured owner from the authoritative Gateway snapshot. */
+export const prepareGatewayConfiguredModelRuntimeAgent = gatewayConfiguredRuntime.prepareAgent;
+
 /** Resolves a published owner or activates a standalone lifecycle owner. */
 export async function loadPreparedModelRuntimeSnapshot(
   rawInput: PreparedModelRuntimeInput,
 ): Promise<PreparedModelRuntimeSnapshot> {
-  let input = normalizePreparedModelRuntimeInput({
-    ...rawInput,
-    preserveWorkspaceDirOnRefresh:
-      rawInput.preserveWorkspaceDirOnRefresh ?? rawInput.workspaceDir !== undefined,
+  return await loadPreparedModelRuntimeSnapshotWithLifecycle(rawInput, {
+    owners,
+    getPendingReplacement: () => pendingModelRuntimeReplacement,
+    prepare: prepareModelRuntimeSnapshot,
+    ensureConfigured: gatewayConfiguredRuntime.ensureForInput,
+    activateStandalone: activateStandalonePreparedModelRuntime,
   });
-  for (;;) {
-    const replacement = pendingModelRuntimeReplacement;
-    if (replacement) {
-      await replacement.promise;
-      if (pendingModelRuntimeReplacement) {
-        continue;
-      }
-      input = rebindInputToCommittedConfiguredOwner(owners, input);
-      continue;
-    }
-    try {
-      return await prepareModelRuntimeSnapshot(input);
-    } catch (error) {
-      if (!(error instanceof PreparedModelRuntimeOwnerNotPublishedError)) {
-        throw error;
-      }
-    }
-    const activationGate = pendingModelRuntimeReplacement;
-    if (activationGate) {
-      await activationGate.promise;
-      if (pendingModelRuntimeReplacement) {
-        continue;
-      }
-      input = rebindInputToCommittedConfiguredOwner(owners, input);
-      continue;
-    }
-    const activated = await activateStandalonePreparedModelRuntime(input);
-    const replacementAfterActivation = pendingModelRuntimeReplacement;
-    if (replacementAfterActivation) {
-      await replacementAfterActivation.promise;
-      if (pendingModelRuntimeReplacement) {
-        continue;
-      }
-      input = rebindInputToCommittedConfiguredOwner(owners, input);
-      continue;
-    }
-    if (!activated) {
-      return await prepareModelRuntimeSnapshot(input);
-    }
-    try {
-      return await prepareModelRuntimeSnapshot(input);
-    } catch (error) {
-      if (!(error instanceof PreparedModelRuntimeOwnerNotPublishedError)) {
-        throw error;
-      }
-      // A concurrent publication boundary may retire the standalone owner between build and read.
-      // Retry only after proving that no replacement gate owns the next generation.
-    }
-  }
 }
 
 /** Returns an already-published generation without starting discovery. */
@@ -162,6 +133,7 @@ export async function publishPreparedModelRuntimeSnapshot(
       existing,
       options.provenance,
       options.catalogMode,
+      options.onBuildStats,
     );
   }
   if (existing?.buildCompletion) {
@@ -186,6 +158,7 @@ export async function publishPreparedModelRuntimeSnapshot(
     existing,
     options.provenance,
     options.catalogMode,
+    options.onBuildStats,
   );
 }
 
@@ -226,7 +199,7 @@ async function activateStandalonePreparedModelRuntimeNow(
         (input.agentId === undefined || owner.input.agentId === input.agentId) &&
         (input.workspaceDir === undefined || owner.input.workspaceDir === input.workspaceDir),
     );
-    if (gatewayLifecycleActive && (!input.readOnly || overlapsConfiguredOwner)) {
+    if (gatewayConfiguredRuntime.isActive() && (!input.readOnly || overlapsConfiguredOwner)) {
       // Gateway startup/reload owns configured identities. Isolated read-only drafts may publish
       // separately, but stale drafts must never replace an overlapping configured generation.
       return undefined;
@@ -284,7 +257,11 @@ async function acquirePreparedModelRuntimeLease(
       existing?.needsRefresh &&
       !existing.pending &&
       (existing.provenance === "run" || existing.provenance === "ephemeral");
-    if (gatewayLifecycleActive && provenance === "run" && (!existing || staleDynamicOwner)) {
+    if (
+      gatewayConfiguredRuntime.isActive() &&
+      provenance === "run" &&
+      (!existing || staleDynamicOwner)
+    ) {
       // Dynamic workspaces still inherit the committed agent/config generation. Only their
       // explicitly pinned workspace may differ from the configured owner. A stale leased owner
       // can share this key, so rebase its input before publishing a replacement generation.
@@ -300,9 +277,15 @@ async function acquirePreparedModelRuntimeLease(
         if (!(error instanceof PreparedModelRuntimeOwnerNotPublishedError)) {
           throw error;
         }
+        if (hasConfiguredOwnerMatching(owners, input)) {
+          throw error;
+        }
+        if (await gatewayConfiguredRuntime.ensureForInput(input, { allowDynamicWorkspace: true })) {
+          continue;
+        }
         const canActivateConfiglessSetup =
           input.agentId !== undefined && isReservedSystemAgentId(input.agentId);
-        if (hasConfiguredOwnerMatching(owners, input) || !canActivateConfiglessSetup) {
+        if (!canActivateConfiglessSetup) {
           throw error;
         }
         // First-run Model Setup uses the reserved system-agent identity before a configless gateway
@@ -495,7 +478,7 @@ async function refreshPreparedModelRuntimeSnapshotsNow(
   publicationEpoch: number,
 ): Promise<void> {
   const catalogMode = options.catalogMode ?? "live";
-  gatewayLifecycleActive ||= options.gatewayLifecycle === true;
+  gatewayConfiguredRuntime.markActive(options.gatewayLifecycle === true);
   const staleError = new Error("prepared model runtime owner is stale after config publication");
   for (const owner of owners.values()) {
     // Invalidate every prior generation before starting any replacement. A failed reload must
@@ -533,7 +516,10 @@ async function refreshPreparedModelRuntimeSnapshotsNow(
     entries.push({ owner, input });
   }
   for (const [key, owner] of owners) {
-    if (!knownKeys.has(key) && (gatewayLifecycleActive || owner.provenance === "configured")) {
+    if (
+      !knownKeys.has(key) &&
+      (gatewayConfiguredRuntime.isActive() || owner.provenance === "configured")
+    ) {
       owners.delete(key);
     }
   }
@@ -616,6 +602,7 @@ async function refreshPreparedModelRuntimeSnapshotsNow(
     void pending.catch(() => undefined);
   }
   await publication;
+  gatewayConfiguredRuntime.recordPublishedConfig(config, options);
 }
 
 /** Serializes config/plugin publications so only the latest completed refresh retires owners. */
@@ -653,6 +640,7 @@ export function refreshPreparedModelRuntimeSnapshots(
       if (requestEpoch === refreshRequestEpoch) {
         // Candidate and queued auth builds may finish independently. A failed transaction must
         // leave no owner from its partially published generation request-visible.
+        gatewayConfiguredRuntime.clearSeed();
         for (const owner of owners.values()) {
           owner.generation += 1;
           owner.pending = undefined;
@@ -755,7 +743,7 @@ function resetPreparedModelRuntimeSnapshotsForTest(): void {
   agentBuildCompletions.clear();
   standaloneActivationTails.clear();
   retainedDirectRunOwner = undefined;
-  gatewayLifecycleActive = false;
+  gatewayConfiguredRuntime.reset();
   refreshTail = Promise.resolve();
   refreshRequestEpoch = 0;
   pendingAuthMutations.length = 0;

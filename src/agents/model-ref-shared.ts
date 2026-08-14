@@ -99,6 +99,22 @@ export function normalizeStaticProviderModelId(
   return normalizeBuiltInProviderModelId(normalizedProvider, manifestModelId);
 }
 
+/** Captures manifest policies once for repeated lifecycle model-id comparisons. */
+export function createStaticProviderModelIdNormalizer(
+  options: ProviderModelIdNormalizationOptions = {},
+): (provider: string, model: string) => string {
+  if (options.allowManifestNormalization === false) {
+    return (provider, model) =>
+      normalizeBuiltInProviderModelId(normalizeProviderId(provider), model);
+  }
+  if (options.manifestPlugins) {
+    const policies = collectManifestModelIdNormalizationPolicies(options.manifestPlugins);
+    return (provider, model) =>
+      normalizeStaticProviderModelIdWithPolicies(normalizeProviderId(provider), model, policies);
+  }
+  return (provider, model) => normalizeStaticProviderModelId(provider, model, options);
+}
+
 /** Normalize a configured catalog model ID for comparisons against provider catalogs. */
 export function normalizeConfiguredProviderCatalogModelId(
   provider: string,

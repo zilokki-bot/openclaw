@@ -546,9 +546,9 @@ async function publishConfiguredModelRuntimeSnapshots(params: {
   log: { warn: (msg: string) => void };
   startupTrace?: GatewayStartupTrace;
 }): Promise<void> {
-  const { refreshPreparedModelRuntimeSnapshots } =
+  const { activateGatewayPreparedModelRuntimeStartup } =
     await import("../agents/prepared-model-runtime.js");
-  await refreshPreparedModelRuntimeSnapshots(params.cfg, {
+  await activateGatewayPreparedModelRuntimeStartup(params.cfg, {
     gatewayLifecycle: true,
     catalogMode: "static",
     ...(params.workspaceDir ? { defaultWorkspaceDir: params.workspaceDir } : {}),
@@ -563,16 +563,19 @@ async function publishConfiguredModelRuntimeSnapshots(params: {
               ["credentialGroupCount", stats.credentialGroupCount],
               ["catalogGroupCount", stats.catalogGroupCount],
               ["runtimeRegistryCount", stats.runtimeRegistryCount],
+              ["configuredModelRefCount", stats.configuredModelRefCount],
               ["configuredRuntimeModelCount", stats.configuredRuntimeModelCount],
               ["generatedCatalogPluginCount", stats.generatedCatalogPluginCount],
               ["generatedCatalogReadCount", stats.generatedCatalogReadCount],
               ["workspaceFactsMs", stats.workspaceFactsMs],
               ["runtimePluginMs", stats.runtimePluginMs],
               ["pluginMetadataMs", stats.pluginMetadataMs],
+              ["staticProviderPlanningMs", stats.staticProviderPlanningMs],
               ["staticProviderCatalogMs", stats.staticProviderCatalogMs],
               ["ambientCredentialsMs", stats.ambientCredentialsMs],
               ["agentFactsMs", stats.agentFactsMs],
               ["configuredProjectionMs", stats.configuredProjectionMs],
+              ["workspaceUnattributedMs", stats.workspaceUnattributedMs],
               ["catalogSourceMs", stats.catalogSourceMs],
               ["registryMs", stats.registryMs],
               ["sourceConcurrencyLimitCount", stats.sourceConcurrencyLimit],

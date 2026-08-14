@@ -212,6 +212,7 @@ async function buildSnapshotBatch(
   const workspaceKeys = new Map<PreparedModelRuntimeInput, string>();
   let runtimePluginMs = 0;
   let pluginMetadataMs = 0;
+  let staticProviderPlanningMs = 0;
   let staticProviderCatalogMs = 0;
   let ambientCredentialsMs = 0;
   let agentFactsMs = 0;
@@ -228,6 +229,7 @@ async function buildSnapshotBatch(
     workspaceFacts.set(key, prepared.workspaceFacts);
     runtimePluginMs += prepared.buildStats.runtimePluginMs;
     pluginMetadataMs += prepared.buildStats.pluginMetadataMs;
+    staticProviderPlanningMs += prepared.buildStats.staticProviderPlanningMs;
     staticProviderCatalogMs += prepared.buildStats.staticProviderCatalogMs;
     ambientCredentialsMs += prepared.buildStats.ambientCredentialsMs;
     agentFactsMs += prepared.buildStats.agentFactsMs;
@@ -238,6 +240,17 @@ async function buildSnapshotBatch(
     }
   }
   const workspaceFactsMs = performance.now() - workspaceFactsStartedAt;
+  const workspaceUnattributedMs = Math.max(
+    0,
+    workspaceFactsMs -
+      (runtimePluginMs +
+        pluginMetadataMs +
+        staticProviderPlanningMs +
+        staticProviderCatalogMs +
+        ambientCredentialsMs +
+        agentFactsMs +
+        configuredProjectionMs),
+  );
   const catalogSourceStartedAt = performance.now();
   const catalogSources = new Map<PreparedModelRuntimeInput, PreparedModelRuntimeCatalogSource>();
   if (catalogMode === "live") {
@@ -341,6 +354,10 @@ async function buildSnapshotBatch(
   }
   const registryMs = performance.now() - registryStartedAt;
   const preparedAgentFacts = [...preparedInputs.values()];
+  const configuredModelRefCount = preparedAgentFacts.reduce(
+    (count, facts) => count + facts.configuredModelRefs.length,
+    0,
+  );
   const configuredRuntimeModelCount = preparedAgentFacts.reduce(
     (count, facts) => count + facts.configuredRuntimeModels.length,
     0,
@@ -367,16 +384,19 @@ async function buildSnapshotBatch(
     ).size,
     catalogGroupCount: catalogMode === "live" ? inputs.length : 0,
     runtimeRegistryCount,
+    configuredModelRefCount,
     configuredRuntimeModelCount,
     generatedCatalogPluginCount,
     generatedCatalogReadCount,
     workspaceFactsMs,
     runtimePluginMs,
     pluginMetadataMs,
+    staticProviderPlanningMs,
     staticProviderCatalogMs,
     ambientCredentialsMs,
     agentFactsMs,
     configuredProjectionMs,
+    workspaceUnattributedMs,
     catalogSourceMs,
     registryMs,
     sourceConcurrencyLimit: MAX_CONCURRENT_MODEL_RUNTIME_AGENT_SOURCE_BUILDS,
@@ -476,6 +496,7 @@ export function startSerializedSnapshotBuild(
   buildTimeoutMs: number,
   catalogMode: PreparedModelRuntimeCatalogMode = "live",
   generationGuard: () => boolean = () => true,
+  onBuildStats?: (stats: PreparedModelRuntimeBuildStats) => void,
 ): {
   pending: Promise<PreparedModelRuntimeSnapshot>;
   completion: Promise<void>;
@@ -485,7 +506,7 @@ export function startSerializedSnapshotBuild(
     agentBuildCompletions,
     buildTimeoutMs,
     catalogMode,
-    undefined,
+    onBuildStats,
     new Map([[input, generationGuard]]),
   );
   return {
