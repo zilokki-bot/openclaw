@@ -49,11 +49,14 @@ import {
   getGatewayAgentResult,
   hasAmbiguousPayloadSendBeforeError,
   hasCommittedOutboundDeliveryEvidence,
+  hasCommittedSourceReplyDeliveryEvidence,
   hasIncompletePartialPayloadOutcomeEvidence,
   hasMessagingToolDeliveryEvidence,
   hasPayloadDeliveryOutcomes,
   hasPayloadOutcomeSendEvidence,
   hasSuppressedPayloadDeliveryStatus,
+  hasUnaccountedMessagingToolAggregateEvidence,
+  resolveExplicitFinalSourceReplyDeliveryEvidence,
 } from "./embedded-agent-runner/delivery-evidence.js";
 import {
   hasIntentionalSilentAgentPayload,
@@ -1105,12 +1108,67 @@ function collectMessagingToolDeliveredMediaUrlsForTarget(
   return Array.from(urls);
 }
 
+function hasMessagingToolDeliveryToSource(
+  result: {
+    didSendViaMessagingTool?: unknown;
+    didDeliverSourceReplyViaMessageTool?: unknown;
+    messagingToolSentTargets?: unknown;
+    messagingToolSourceReplyPayloads?: unknown;
+  },
+  deliveryTarget: Parameters<typeof sourceDeliveryTargetsMatch>[1],
+  options?: { requireFinalReply?: boolean },
+): boolean {
+  const targets = Array.isArray(result.messagingToolSentTargets)
+    ? result.messagingToolSentTargets
+    : [];
+  const sourceTargets = targets.filter((target) => {
+    if (
+      !target ||
+      typeof target !== "object" ||
+      Array.isArray(target) ||
+      !deliveryTarget.channel ||
+      !deliveryTarget.to
+    ) {
+      return false;
+    }
+    const record = target as Parameters<typeof sourceDeliveryTargetsMatch>[0];
+    const sourceTarget =
+      typeof record.to === "string" && record.to.trim()
+        ? record
+        : { ...record, to: deliveryTarget.to };
+    return sourceDeliveryTargetsMatch(sourceTarget, deliveryTarget);
+  });
+  if (options?.requireFinalReply) {
+    const hasCommittedSourceDelivery =
+      hasCommittedSourceReplyDeliveryEvidence(result) ||
+      (hasMessagingToolDeliveryEvidence(result) && sourceTargets.length > 0);
+    return (
+      hasCommittedSourceDelivery &&
+      resolveExplicitFinalSourceReplyDeliveryEvidence({
+        messagingToolSentTargets: sourceTargets,
+        messagingToolSourceReplyPayloads: result.messagingToolSourceReplyPayloads,
+      }) !== false
+    );
+  }
+  if (
+    hasCommittedSourceReplyDeliveryEvidence(result) ||
+    hasUnaccountedMessagingToolAggregateEvidence({ ...result, didSendViaMessagingTool: false })
+  ) {
+    return true;
+  }
+  if (targets.length === 0 || !deliveryTarget.channel || !deliveryTarget.to) {
+    return hasMessagingToolDeliveryEvidence(result);
+  }
+  return hasMessagingToolDeliveryEvidence(result) && sourceTargets.length > 0;
+}
+
 async function sendSubagentAnnounceDirectly(params: {
   requesterSessionKey: string;
   targetRequesterSessionKey: string;
   triggerMessage: string;
   internalEvents?: AgentInternalEvent[];
   expectsCompletionMessage: boolean;
+  requireVisibleReply?: boolean;
   bestEffortDeliver?: boolean;
   durableGeneratedMediaHandoff?: boolean;
   directIdempotencyKey: string;
@@ -1643,8 +1701,32 @@ async function sendSubagentAnnounceDirectly(params: {
     }
     const hasVisibleCompletionReply = Boolean(
       directAnnounceResult &&
-      (hasMessagingToolDelivery ||
-        hasVisibleAgentPayload(directAnnounceResult, { includeSilentReplyPayloads: false })),
+      ((params.requireVisibleReply
+        ? hasMessagingToolDeliveryToSource(directAnnounceResult, deliveryTarget, {
+            requireFinalReply: true,
+          })
+        : hasMessagingToolDelivery) ||
+        (hasVisibleAgentPayload(
+          params.requireVisibleReply
+            ? {
+                payloads: Array.isArray(directAnnounceResult.payloads)
+                  ? directAnnounceResult.payloads.filter((payload) => {
+                      const flags = payload as Record<string, unknown>;
+                      return (
+                        flags?.isCommentary !== true &&
+                        flags?.isCompactionNotice !== true &&
+                        flags?.isFallbackNotice !== true &&
+                        flags?.isStatusNotice !== true &&
+                        flags?.visible !== false
+                      );
+                    })
+                  : [],
+              }
+            : directAnnounceResult,
+          { includeSilentReplyPayloads: false },
+        ) &&
+          (!params.requireVisibleReply ||
+            directAnnounceResult.deliveryStatus?.status !== "suppressed"))),
     );
     const hasCompletionSideEffect = Boolean(
       directAnnounceResult && hasCommittedOutboundDeliveryEvidence(directAnnounceResult),
@@ -1652,12 +1734,13 @@ async function sendSubagentAnnounceDirectly(params: {
     const acceptsIntentionalSilentCompletion =
       hasIntentionalSilentCompletionReply && !isSubagentCompletion;
     if (
-      params.expectsCompletionMessage &&
-      !shouldDeliverAgentFinal &&
-      !requiresMessageToolDelivery &&
       !hasVisibleCompletionReply &&
-      !hasCompletionSideEffect &&
-      !acceptsIntentionalSilentCompletion
+      (params.requireVisibleReply ||
+        (params.expectsCompletionMessage &&
+          !shouldDeliverAgentFinal &&
+          !requiresMessageToolDelivery &&
+          !hasCompletionSideEffect &&
+          !acceptsIntentionalSilentCompletion))
     ) {
       return {
         delivered: false,
@@ -1721,6 +1804,7 @@ export async function deliverSubagentAnnouncement(params: {
   targetRequesterSessionKey: string;
   requesterIsSubagent: boolean;
   expectsCompletionMessage: boolean;
+  requireVisibleReply?: boolean;
   bestEffortDeliver?: boolean;
   durableGeneratedMediaHandoff?: boolean;
   directIdempotencyKey: string;
@@ -1868,6 +1952,7 @@ export async function deliverSubagentAnnouncement(params: {
         sourceTool: params.sourceTool,
         requesterIsSubagent: params.requesterIsSubagent,
         expectsCompletionMessage: params.expectsCompletionMessage,
+        requireVisibleReply: params.requireVisibleReply,
         allowGeneratedMediaDirectFallback: true,
         signal: params.signal,
         bestEffortDeliver: params.bestEffortDeliver,

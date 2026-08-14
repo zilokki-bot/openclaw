@@ -72,12 +72,17 @@ function runIntervalsOverlap(a: SettledRunSummary, b: SettledRunSummary): boolea
   return a.createdAt <= bEnd && b.createdAt <= aEnd;
 }
 
-function buildRequesterSettleWakeMessage(params: { findings?: string }): string {
+function buildRequesterSettleWakeMessage(params: {
+  findings?: string;
+  requireVisibleReply: boolean;
+}): string {
   return [
     "[Subagent Context] Every subagent spawned from this session has now settled — none are still running or awaiting completion delivery.",
     "[Subagent Context] Do not keep waiting or call sessions_yield again for this batch; no further completion events will arrive.",
     "[Subagent Context] Review the completion results and send your consolidated final answer to the user now.",
-    `[Subagent Context] Reply ONLY: ${SILENT_REPLY_TOKEN} only if you already delivered the consolidated final answer for this batch.`,
+    params.requireVisibleReply
+      ? "[Subagent Context] Child completion delivery is internal; the original user request still requires your visible final answer."
+      : `[Subagent Context] Reply ONLY: ${SILENT_REPLY_TOKEN} only if you already delivered the consolidated final answer for this batch.`,
     "",
     params.findings ??
       "(each child result was announced individually in earlier completion events)",
@@ -294,7 +299,10 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       }),
     ),
   );
-  const wakeMessage = buildRequesterSettleWakeMessage({ findings });
+  const wakeMessage = buildRequesterSettleWakeMessage({
+    findings,
+    requireVisibleReply: requesterYieldedAfterDelivery,
+  });
   const requesterSessionOrigin = normalizeDeliveryContext(params.requesterOrigin);
   const directOrigin = resolveAnnounceOrigin(requesterEntry, requesterSessionOrigin);
   const wakeKeyBase = [
@@ -376,6 +384,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
         targetRequesterSessionKey: requesterSessionKey,
         requesterIsSubagent: false,
         expectsCompletionMessage: false,
+        ...(requesterYieldedAfterDelivery ? { requireVisibleReply: true } : {}),
         directIdempotencyKey: buildAnnounceIdempotencyKey(
           attemptIndex === 0 ? wakeKeyBase : `${wakeKeyBase}:retry-${attemptIndex}`,
         ),
