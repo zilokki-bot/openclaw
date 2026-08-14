@@ -369,8 +369,8 @@ export function registerWorkboardGatewayMethods(params: {
         if (existingReceipt) {
           // The card write is already durable. Never release a reservation if
           // recovery detects a corrupted/mismatched receipt; fail closed instead.
-          // reservationMayBeReleased is still false here, so the finally block
-          // cannot release on any path below.
+          // reservationMayBeReleased is still false here, so the catch block
+          // below cannot release on any path from here on.
           cardCommitted = true;
           if (
             !receiptMatchesApprovalBinding(existingReceipt, {
