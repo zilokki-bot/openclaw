@@ -13,6 +13,52 @@ function throwAbortError(): never {
   throw createAbortError("Aborted");
 }
 
+/**
+ * Races a tool execute promise against the combined abort signal so an abort
+ * settles the wrapped call immediately instead of awaiting the tool forever.
+ * Only the initiating sessions_yield tool may keep settling after its run owner
+ * deliberately hands the turn off; caller aborts and sibling tools still cancel.
+ */
+function raceWithAbortSignal<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  yieldRunSignal?: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      const reason = yieldRunSignal?.reason as
+        | { code?: unknown; turnHandoff?: unknown }
+        | undefined;
+      if (
+        yieldRunSignal?.aborted &&
+        signal.reason === reason &&
+        reason?.code === "sessions_yield" &&
+        reason.turnHandoff === true
+      ) {
+        return;
+      }
+      reject(createAbortError("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        // Preserve tool error identity, including non-Error rejections.
+        // oxlint-disable-next-line typescript/prefer-promise-reject-errors
+        reject(error);
+      },
+    );
+    if (signal.aborted) {
+      onAbort();
+    }
+  });
+}
+
 /** Wrap a tool so every execute call observes the supplied run abort signal. */
 export function wrapToolWithAbortSignal(
   tool: AnyAgentTool,
@@ -32,7 +78,11 @@ export function wrapToolWithAbortSignal(
       if (combinedSignal.aborted) {
         throwAbortError();
       }
-      return await execute(toolCallId, params, combinedSignal, onUpdate);
+      return await raceWithAbortSignal(
+        execute(toolCallId, params, combinedSignal, onUpdate),
+        combinedSignal,
+        tool.name === "sessions_yield" ? abortSignal : undefined,
+      );
     },
   };
   copyPluginToolMeta(tool, wrappedTool);
