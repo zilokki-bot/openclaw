@@ -340,6 +340,43 @@ export function resolvePluginMetadataSnapshot(
         : {}),
     });
     if (!current) {
+      const lifecycleSnapshot = getCurrentPluginMetadataSnapshot({
+        config: params.config,
+        env: params.env,
+        ...(params.pluginIds !== undefined ? { pluginIds: params.pluginIds } : {}),
+        ...(params.pluginIdScope !== undefined ? { pluginIdScope: params.pluginIdScope } : {}),
+        allowWorkspaceScopedSnapshot: true,
+      });
+      const targetWorkspace = params.workspaceDir;
+      const hasWorkspacePlugin = lifecycleSnapshot?.index.plugins.some(
+        (plugin) => plugin.origin === "workspace",
+      );
+      // Gateway metadata is lifecycle-stable. A managed worktree without a plugin root reuses the
+      // published graph; only its workspace identity is projected for request-local consumers.
+      if (
+        lifecycleSnapshot &&
+        targetWorkspace &&
+        targetWorkspace !== lifecycleSnapshot.workspaceDir &&
+        !hasWorkspacePlugin &&
+        params.workspacePluginRootPresent === false
+      ) {
+        const index = Object.freeze({
+          ...lifecycleSnapshot.index,
+          workspaceDir: targetWorkspace,
+        });
+        return Object.freeze({
+          ...lifecycleSnapshot,
+          configFingerprint: resolvePluginControlPlaneFingerprint({
+            config: params.config,
+            env: params.env,
+            index,
+            policyHash: lifecycleSnapshot.policyHash,
+            workspaceDir: targetWorkspace,
+          }),
+          index,
+          workspaceDir: targetWorkspace,
+        });
+      }
       return loadPluginMetadataSnapshot(params);
     }
     if (!params.index) {

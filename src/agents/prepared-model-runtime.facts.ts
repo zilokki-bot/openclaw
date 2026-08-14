@@ -227,6 +227,9 @@ export async function prepareWorkspaceBuildGroup(
     config: input.config,
     env,
     ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
+    ...(input.workspacePluginRootPresent === undefined
+      ? {}
+      : { workspacePluginRootPresent: input.workspacePluginRootPresent }),
   });
   const pluginMetadataMs = performance.now() - pluginMetadataStartedAt;
   const staticProviderPlanningStartedAt = performance.now();

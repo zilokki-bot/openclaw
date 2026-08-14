@@ -75,6 +75,7 @@ vi.mock("../agents/embedded-agent-runner/model.static-catalog.js", async (import
 const { resetPreparedModelRuntimeSnapshotsForTest } =
   await import("../agents/prepared-model-runtime.test-support.js");
 const {
+  acquireAgentRunPreparedModelRuntime,
   getPreparedModelRuntimeSnapshot,
   prepareGatewayConfiguredModelRuntimeAgent,
   refreshPreparedModelRuntimeSnapshots,
@@ -413,6 +414,163 @@ describe("Gateway prepared model runtime startup", () => {
           // Readiness publishes only the authoritative seed. Exactly one non-default workspace is
           // materialized by the first request rather than admitting all 19 workspace groups.
           expect(providerMocks.staticCatalog.mock.calls.length).toBeLessThan(19);
+          for (const sidecar of sidecars.postReadySidecars) {
+            await sidecar.stop();
+          }
+        },
+      );
+    } finally {
+      await gatewayProbe.close();
+      closeOpenClawAgentDatabasesForTest();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps two concurrent managed-worktree first turns on one configured generation", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "openclaw-model-runtime-children-"));
+    const stateDir = path.join(root, "state");
+    const configuredWorkspace = path.join(root, "workspace-configured");
+    const childWorkspaces = [
+      path.join(root, "workspace-child-a"),
+      path.join(root, "workspace-child-b"),
+    ];
+    const modelEntries = Object.fromEntries(
+      Array.from({ length: 8 }, (_, index) => [
+        `openai/fleet-${index}`,
+        { agentRuntime: { id: "openclaw" } },
+      ]),
+    );
+    const staticModels = Array.from({ length: 8 }, (_, index) => ({
+      id: `fleet-${index}`,
+      name: `Fleet ${index}`,
+      reasoning: false,
+      input: ["text" as const],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 32_000,
+      maxTokens: 4_096,
+    }));
+    const cfg = {
+      agents: {
+        list: [
+          {
+            id: "developer",
+            default: true,
+            workspace: configuredWorkspace,
+            model: { primary: "openai/fleet-0" },
+            models: modelEntries,
+          },
+        ],
+      },
+      gateway: { mode: "local", bind: "loopback", auth: { mode: "none" } },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://api.openai.com/v1",
+            api: "openai-responses",
+            models: staticModels,
+          },
+        },
+      },
+      plugins: { enabled: false },
+    } satisfies OpenClawConfig;
+    manifestModelMocks.resolve.mockImplementation(
+      ({ provider, modelId }: { provider: string; modelId: string }) =>
+        provider === "openai" && modelId.startsWith("fleet-")
+          ? {
+              id: modelId,
+              name: modelId,
+              provider,
+              api: "openai-responses",
+              baseUrl: "https://api.openai.com/v1",
+              reasoning: false,
+              input: ["text"],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32_000,
+              maxTokens: 4_096,
+            }
+          : undefined,
+    );
+    providerMocks.liveCatalog.mockImplementation(async () => {
+      const stopAt = performance.now() + 250;
+      while (performance.now() < stopAt) {
+        // Models the repeated synchronous live discovery observed on first child admission.
+      }
+      return providerConfig;
+    });
+    const gatewayProbe = await listenGatewayProbe();
+
+    try {
+      await withEnvAsync(
+        { OPENCLAW_SKIP_CHANNELS: "1", OPENCLAW_STATE_DIR: stateDir },
+        async () => {
+          const sidecars = await startGatewaySidecars({
+            cfg,
+            pluginRegistry: { plugins: [], typedHooks: [] } as never,
+            defaultWorkspaceDir: configuredWorkspace,
+            deps: {} as never,
+            startChannels: vi.fn(async () => {}),
+            shouldStartPluginServices: () => false,
+            log: { warn: vi.fn() },
+            logHooks: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+            logChannels: { info: vi.fn(), error: vi.fn() },
+          });
+          const beforeRssBytes = process.memoryUsage().rss;
+          const probes = ["/healthz", "/readyz", "/rpc/ping"].map((pathname) =>
+            requestAfter(gatewayProbe.port, pathname, 25),
+          );
+          const startedAt = performance.now();
+          const [leases, probeResults] = await Promise.all([
+            Promise.all(
+              childWorkspaces.map((workspaceDir) =>
+                acquireAgentRunPreparedModelRuntime(
+                  {
+                    agentId: "developer",
+                    agentDir: resolveAgentDir(cfg, "developer"),
+                    workspaceDir,
+                    config: cfg,
+                  },
+                  { catalogMode: "static" },
+                ),
+              ),
+            ),
+            Promise.all(probes),
+          ]);
+          const elapsedMs = performance.now() - startedAt;
+          const afterRssBytes = process.memoryUsage().rss;
+          if (process.env.OPENCLAW_BENCHMARK_OUTPUT === "1") {
+            process.stdout.write(
+              `${JSON.stringify({
+                benchmark: "gateway-first-use-two-managed-children",
+                childCount: leases.length,
+                workspaceGroupCount: new Set(leases.map(({ snapshot }) => snapshot.workspaceDir))
+                  .size,
+                configuredRuntimeModelCount: leases.reduce(
+                  (count, { snapshot }) => count + snapshot.configuredRuntimeModels.length,
+                  0,
+                ),
+                liveCatalogCalls: providerMocks.liveCatalog.mock.calls.length,
+                staticCatalogCalls: providerMocks.staticCatalog.mock.calls.length,
+                elapsedMs,
+                maxProbeMs: Math.max(...probeResults.map((result) => result.elapsedMs)),
+                beforeRssBytes,
+                afterRssBytes,
+                rssDeltaBytes: afterRssBytes - beforeRssBytes,
+              })}\n`,
+            );
+          }
+          expect(leases).toHaveLength(2);
+          expect(leases.map(({ snapshot }) => snapshot.workspaceDir)).toEqual(childWorkspaces);
+          expect(
+            leases.every(({ snapshot }) => snapshot.configuredRuntimeModels.length === 8),
+          ).toBe(true);
+          expect(providerMocks.liveCatalog).not.toHaveBeenCalled();
+          for (const { elapsedMs: probeMs, response } of probeResults) {
+            expect(response.status).toBe(200);
+            expect(probeMs).toBeLessThan(1_000);
+          }
+          for (const lease of leases) {
+            lease.release();
+          }
           for (const sidecar of sidecars.postReadySidecars) {
             await sidecar.stop();
           }

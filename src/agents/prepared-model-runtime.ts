@@ -1,4 +1,6 @@
 /** Lifecycle-owned auth/model discovery snapshots for agent runs. */
+import fsp from "node:fs/promises";
+import path from "node:path";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
@@ -33,6 +35,7 @@ import {
   type PreparedModelRuntimeReplacementGateId,
   type PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.owner.js";
+import type { PreparedModelRuntimeCatalogMode } from "./prepared-model-runtime.types.js";
 export {
   PreparedModelRuntimeOwnerNotPublishedError,
   preparedModelRuntimeConfigsMatch,
@@ -55,6 +58,7 @@ let modelRuntimeBuildTimeoutMs = DEFAULT_MODEL_RUNTIME_BUILD_TIMEOUT_MS;
 
 const owners = new Map<string, PreparedModelRuntimeOwner>();
 const agentBuildCompletions = new Map<string, Promise<void>>();
+const workspacePluginRootPresenceResolutions = new Map<string, Promise<boolean | undefined>>();
 const standaloneActivationTails = new Map<string, Promise<void>>();
 let retainedDirectRunOwner: { key: string; owner: PreparedModelRuntimeOwner } | undefined;
 let refreshTail: Promise<void> = Promise.resolve();
@@ -227,12 +231,27 @@ async function activateStandalonePreparedModelRuntimeNow(
 async function acquirePreparedModelRuntimeLease(
   rawInput: PreparedModelRuntimeInput,
   provenance: "run" | "ephemeral",
-  options: { retainIdleRunOwner?: boolean } = {},
+  options: {
+    retainIdleRunOwner?: boolean;
+    catalogMode?: PreparedModelRuntimeCatalogMode;
+  } = {},
 ): Promise<PreparedModelRuntimeLease> {
-  let input = normalizePreparedModelRuntimeInput({
+  const normalizedInput = normalizePreparedModelRuntimeInput({
     ...rawInput,
     preserveWorkspaceDirOnRefresh:
       rawInput.preserveWorkspaceDirOnRefresh ?? rawInput.workspaceDir !== undefined,
+  });
+  const retainedWorkspacePluginRootPresent = owners.get(ownerKey(normalizedInput))?.input
+    .workspacePluginRootPresent;
+  const workspacePluginRootPresent =
+    rawInput.workspacePluginRootPresent ??
+    retainedWorkspacePluginRootPresent ??
+    (provenance === "run"
+      ? await resolveCoalescedWorkspacePluginRootPresence(normalizedInput)
+      : undefined);
+  let input = normalizePreparedModelRuntimeInput({
+    ...normalizedInput,
+    ...(workspacePluginRootPresent === undefined ? {} : { workspacePluginRootPresent }),
   });
   let key = ownerKey(input);
   let owner: PreparedModelRuntimeOwner;
@@ -278,6 +297,22 @@ async function acquirePreparedModelRuntimeLease(
           throw error;
         }
         if (hasConfiguredOwnerMatching(owners, input)) {
+          // Joining is valid only for an in-flight lifecycle publication. A stale committed owner
+          // must remain fail-closed until its owning replacement boundary publishes a generation.
+          const pendingConfiguredOwner = [...owners.values()].some(
+            (candidate) =>
+              candidate.provenance === "configured" &&
+              candidate.pending !== undefined &&
+              (input.agentId !== undefined
+                ? candidate.input.agentId === input.agentId
+                : candidate.input.agentDir === input.agentDir),
+          );
+          if (
+            pendingConfiguredOwner &&
+            (await gatewayConfiguredRuntime.ensureForInput(input, { allowDynamicWorkspace: true }))
+          ) {
+            continue;
+          }
           throw error;
         }
         if (await gatewayConfiguredRuntime.ensureForInput(input, { allowDynamicWorkspace: true })) {
@@ -303,11 +338,15 @@ async function acquirePreparedModelRuntimeLease(
           modelRuntimeBuildTimeoutMs,
           undefined,
           provenance,
+          options.catalogMode,
         );
       } else if (existing) {
         snapshot = await prepareModelRuntimeSnapshot(input);
       } else {
-        snapshot = await publishPreparedModelRuntimeSnapshot(input, { provenance });
+        snapshot = await publishPreparedModelRuntimeSnapshot(input, {
+          provenance,
+          catalogMode: options.catalogMode,
+        });
       }
     } catch (error) {
       if (error instanceof PreparedModelRuntimePublicationSupersededError) {
@@ -368,9 +407,49 @@ async function acquirePreparedModelRuntimeLease(
 /** Acquires the exact writable workspace generation at agent-run admission. */
 export async function acquireAgentRunPreparedModelRuntime(
   rawInput: PreparedModelRuntimeInput,
-  options: { retainIdleRunOwner?: boolean } = {},
+  options: {
+    retainIdleRunOwner?: boolean;
+    catalogMode?: PreparedModelRuntimeCatalogMode;
+  } = {},
 ): Promise<PreparedModelRuntimeLease> {
   return await acquirePreparedModelRuntimeLease(rawInput, "run", options);
+}
+
+async function resolveCoalescedWorkspacePluginRootPresence(
+  input: PreparedModelRuntimeInput,
+): Promise<boolean | undefined> {
+  const key = ownerKey(input);
+  const existing = workspacePluginRootPresenceResolutions.get(key);
+  if (existing) {
+    return await existing;
+  }
+  const pending = resolveWorkspacePluginRootPresence(input);
+  workspacePluginRootPresenceResolutions.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    if (workspacePluginRootPresenceResolutions.get(key) === pending) {
+      workspacePluginRootPresenceResolutions.delete(key);
+    }
+  }
+}
+
+async function resolveWorkspacePluginRootPresence(
+  input: PreparedModelRuntimeInput,
+): Promise<boolean | undefined> {
+  if (input.workspacePluginRootPresent !== undefined || !input.workspaceDir) {
+    return input.workspacePluginRootPresent;
+  }
+  return await fsp
+    .stat(path.join(input.workspaceDir, ".openclaw", "extensions"))
+    .then(() => true)
+    .catch((error: unknown) => {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        return false;
+      }
+      throw error;
+    });
 }
 
 /** Acquires an exact read-only generation scoped to the returned lease. */
@@ -741,6 +820,7 @@ function resetPreparedModelRuntimeSnapshotsForTest(): void {
   pendingModelRuntimeReplacement = undefined;
   owners.clear();
   agentBuildCompletions.clear();
+  workspacePluginRootPresenceResolutions.clear();
   standaloneActivationTails.clear();
   retainedDirectRunOwner = undefined;
   gatewayConfiguredRuntime.reset();

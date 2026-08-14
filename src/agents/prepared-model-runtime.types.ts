@@ -49,6 +49,8 @@ export type PreparedModelRuntimeInput = {
   agentDir: string;
   inheritedAuthDir?: string;
   workspaceDir?: string;
+  /** Admission-owned fact; plugin root changes require the normal reload/restart lifecycle. */
+  workspacePluginRootPresent?: boolean;
   preserveWorkspaceDirOnRefresh?: boolean;
   readOnly?: boolean;
   skipCredentials?: boolean;
