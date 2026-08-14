@@ -5,6 +5,13 @@
  * steering a subagent and directly delivering a message, with phase evidence.
  */
 type SubagentDeliveryPath = "steered" | "direct" | "queued" | "none";
+type SubagentAnnounceDeliveryDisposition =
+  | "delivered"
+  | "session_queued"
+  | "intentional_non_delivery"
+  | "retryable"
+  | "ambiguous"
+  | "permanent_failure";
 /** Stable reasons an announcement delivery can fail without throwing. */
 type SubagentAnnounceDeliveryFailureReason =
   | "completion_handoff_pending"
@@ -27,6 +34,7 @@ export type SubagentAnnounceDeliveryResult = {
   reason?: SubagentAnnounceDeliveryFailureReason;
   error?: string;
   terminal?: boolean;
+  disposition?: SubagentAnnounceDeliveryDisposition;
   missingMediaUrls?: string[];
   phases?: SubagentAnnounceDispatchPhaseResult[];
 };
