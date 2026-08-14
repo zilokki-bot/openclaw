@@ -531,15 +531,18 @@ function completeEmbeddedRun(
     : input.attempt.yieldDetected
       ? "end_turn"
       : (input.attemptAssistant?.stopReason as string | undefined);
-  // Existing visible payloads already avoid the silent-park symptom. The diagnostic
-  // fills only an otherwise empty yielded turn and must not duplicate visible output.
+  // A yielded turn with a real continuation parks silently so pre-tool assistant text
+  // cannot finalize the parent before descendant wake/resume. Without continuation,
+  // preserve existing visible output or emit the diagnostic for an otherwise empty turn.
   const terminalPayloads = input.emptyAssistantReplyIsSilent
     ? [{ text: SILENT_REPLY_TOKEN }]
-    : input.payloadsForTerminalPath?.length
-      ? input.payloadsForTerminalPath
-      : input.attempt.yieldDetected && !yieldHasContinuation
-        ? [{ text: YIELD_DIAGNOSTIC_TEXT }]
-        : input.payloadsForTerminalPath;
+    : !input.attempt.clientToolCalls && input.attempt.yieldDetected && yieldHasContinuation
+      ? [{ text: SILENT_REPLY_TOKEN }]
+      : input.payloadsForTerminalPath?.length
+        ? input.payloadsForTerminalPath
+        : input.attempt.yieldDetected && !yieldHasContinuation
+          ? [{ text: YIELD_DIAGNOSTIC_TEXT }]
+          : input.payloadsForTerminalPath;
   input.setTerminalLifecycleMeta({
     replayInvalid,
     livenessState,

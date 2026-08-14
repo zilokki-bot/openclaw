@@ -66,6 +66,30 @@ function buildSession(messages: AgentMessage[], sessionManager = SessionManager.
 }
 
 describe("stripSessionsYieldArtifacts", () => {
+  it("keeps the successful sessions_yield tool result while removing synthetic abort artifacts", () => {
+    const yieldResult: ToolResultMessage = {
+      ...makeToolResultMessage(),
+      toolName: "sessions_yield",
+      isError: false,
+      details: { status: "yielded", yielded: true },
+    };
+    const session = buildSession([
+      makeUserMessage(),
+      yieldResult,
+      makeYieldInterruptMessage(),
+      makeAssistantMessage({ content: [], stopReason: "aborted" }),
+    ]);
+
+    stripSessionsYieldArtifacts(session);
+
+    expect(session.agent.state.messages.at(-1)).toMatchObject({
+      role: "toolResult",
+      toolName: "sessions_yield",
+      isError: false,
+      details: { status: "yielded", yielded: true },
+    });
+  });
+
   it("removes the full non-continuable yield suffix", () => {
     const toolResult = makeToolResultMessage();
     const session = buildSession([

@@ -1353,6 +1353,127 @@ describe("handleToolExecutionEnd sessions_spawn terminal success tracking", () =
   });
 });
 
+describe("handleToolExecutionEnd sessions_yield presentation", () => {
+  it("serializes a successful handoff as completed instead of failed", async () => {
+    const { ctx, onAgentEvent } = createTestContext();
+
+    await handleToolExecutionStart(ctx, {
+      type: "tool_execution_start",
+      toolName: "sessions_yield",
+      toolCallId: "tool-yield-success",
+      args: { message: "Waiting for descendants" },
+    });
+    await handleToolExecutionEnd(ctx, {
+      type: "tool_execution_end",
+      toolName: "sessions_yield",
+      toolCallId: "tool-yield-success",
+      isError: false,
+      result: {
+        content: [{ type: "text", text: "Yielded until descendants settle." }],
+        details: { status: "yielded", yielded: true },
+      },
+    });
+    await Promise.resolve();
+
+    const events = onAgentEvent.mock.calls.map((call) => call[0] as CapturedAgentEvent);
+    expect(
+      requireEvent(
+        events,
+        (event) => event.stream === "tool" && event.data?.phase === "result",
+        "sessions_yield tool result",
+      ),
+    ).toMatchObject({
+      stream: "tool",
+      data: {
+        phase: "result",
+        name: "sessions_yield",
+        toolCallId: "tool-yield-success",
+        isError: false,
+      },
+    });
+    expect(
+      requireEvent(
+        events,
+        (event) => event.stream === "item" && event.data?.phase === "end",
+        "sessions_yield item end",
+      ),
+    ).toMatchObject({
+      stream: "item",
+      data: {
+        phase: "end",
+        kind: "tool",
+        name: "sessions_yield",
+        status: "completed",
+      },
+    });
+    expect(ctx.state.lastToolError).toBeUndefined();
+    expect(ctx.state.toolMetas).toEqual([expect.objectContaining({ toolName: "sessions_yield" })]);
+    expect(ctx.state.toolMetas[0]).not.toHaveProperty("isError");
+  });
+
+  it("keeps a real sessions_yield execution error failed", async () => {
+    const { ctx, onAgentEvent } = createTestContext();
+
+    await handleToolExecutionStart(ctx, {
+      type: "tool_execution_start",
+      toolName: "sessions_yield",
+      toolCallId: "tool-yield-failed",
+      args: { message: "Waiting for descendants" },
+    });
+    await handleToolExecutionEnd(ctx, {
+      type: "tool_execution_end",
+      toolName: "sessions_yield",
+      toolCallId: "tool-yield-failed",
+      isError: true,
+      result: {
+        content: [{ type: "text", text: "Aborted" }],
+        details: { status: "error", error: "Aborted" },
+      },
+    });
+    await Promise.resolve();
+
+    const events = onAgentEvent.mock.calls.map((call) => call[0] as CapturedAgentEvent);
+    expect(
+      requireEvent(
+        events,
+        (event) => event.stream === "tool" && event.data?.phase === "result",
+        "failed sessions_yield tool result",
+      ),
+    ).toMatchObject({
+      stream: "tool",
+      data: {
+        phase: "result",
+        name: "sessions_yield",
+        toolCallId: "tool-yield-failed",
+        isError: true,
+      },
+    });
+    expect(
+      requireEvent(
+        events,
+        (event) => event.stream === "item" && event.data?.phase === "end",
+        "failed sessions_yield item end",
+      ),
+    ).toMatchObject({
+      stream: "item",
+      data: {
+        phase: "end",
+        kind: "tool",
+        name: "sessions_yield",
+        status: "failed",
+        error: "Aborted",
+      },
+    });
+    expect(ctx.state.lastToolError).toMatchObject({
+      toolName: "sessions_yield",
+      error: "Aborted",
+    });
+    expect(ctx.state.toolMetas).toEqual([
+      expect.objectContaining({ toolName: "sessions_yield", isError: true }),
+    ]);
+  });
+});
+
 describe("handleToolExecutionEnd mutating failure recovery", () => {
   it("marks middleware failures on the last tool error", async () => {
     const { ctx } = createTestContext();
