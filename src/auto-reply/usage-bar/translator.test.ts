@@ -225,3 +225,103 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
     ).toBe("🧹1");
   });
 });
+
+describe("threshold, ratio and division verbs", () => {
+  const alarm = [{ when: "cost.turn_usd|gt:0.5", text: "💸" }];
+
+  it("gates a segment on a value crossing the threshold", () => {
+    expect(render(alarm, { cost: { turn_usd: 0.6568 } })).toBe("💸");
+    expect(render(alarm, { cost: { turn_usd: 0.5 } })).toBe("");
+    expect(render(alarm, { cost: { turn_usd: 0.02 } })).toBe("");
+  });
+
+  it("gates on a value falling below the threshold", () => {
+    const cold = [{ when: "usage.cache_hit_pct|lt:50", text: "🥶" }];
+    expect(render(cold, { usage: { cache_hit_pct: 12 } })).toBe("🥶");
+    expect(render(cold, { usage: { cache_hit_pct: 94 } })).toBe("");
+  });
+
+  it("leaves a segment out when the compared value is missing", () => {
+    expect(render(alarm, {})).toBe("");
+    expect(render(alarm, { cost: { turn_usd: null } })).toBe("");
+  });
+
+  it("does not treat booleans as numbers", () => {
+    expect(
+      render([{ when: "state.fast_mode|gt:0", text: "!" }], { state: { fast_mode: true } }),
+    ).toBe("");
+  });
+
+  it("compares against another contract path, not just a literal", () => {
+    const overBudget = [{ when: "usage.total_tokens|gt:context.max_tokens", text: "🪫" }];
+    expect(render(overBudget, { usage: { total_tokens: 300 }, context: { max_tokens: 200 } })).toBe(
+      "🪫",
+    );
+    expect(render(overBudget, { usage: { total_tokens: 100 }, context: { max_tokens: 200 } })).toBe(
+      "",
+    );
+  });
+
+  it("divides by a literal and by a path", () => {
+    expect(
+      render([{ text: "{usage.total_tokens|div:1000|fixed:1}k" }], {
+        usage: { total_tokens: 4200 },
+      }),
+    ).toBe("4.2k");
+    expect(
+      render([{ text: "{usage.output_tokens|div:timing.duration_ms|fixed:2}/ms" }], {
+        usage: { output_tokens: 120 },
+        timing: { duration_ms: 400 },
+      }),
+    ).toBe("0.30/ms");
+  });
+
+  it("drops the segment when dividing by zero or a missing path", () => {
+    expect(render([{ text: "{a|div:b}" }], { a: 10, b: 0 })).toBe("");
+    expect(render([{ text: "{a|div:missing}" }], { a: 10 })).toBe("");
+  });
+
+  it("renders the ratio against the previous turn with a direction arrow", () => {
+    const trend = [{ text: "{usage.total_tokens|delta:usage.last.total_tokens}" }];
+    expect(render(trend, { usage: { total_tokens: 2100, last: { total_tokens: 1000 } } })).toBe(
+      "↑2.1×",
+    );
+    expect(render(trend, { usage: { total_tokens: 500, last: { total_tokens: 1000 } } })).toBe(
+      "↓2.0×",
+    );
+    expect(render(trend, { usage: { total_tokens: 1000, last: { total_tokens: 1000 } } })).toBe("");
+    expect(render(trend, { usage: { total_tokens: 1000 } })).toBe("");
+  });
+
+  it("stays silent on turn-to-turn noise", () => {
+    const trend = [{ text: "{a|delta:b}" }];
+    for (const [a, b] of [
+      [1040, 1000],
+      [1000, 1040],
+      [1140, 1000],
+    ]) {
+      expect(render(trend, { a, b })).toBe("");
+    }
+    expect(render(trend, { a: 1160, b: 1000 })).toBe("↑1.2×");
+  });
+
+  it("rounds a large ratio to a whole multiplier", () => {
+    expect(render([{ text: "{a|delta:b}" }], { a: 1200, b: 100 })).toBe("↑12×");
+  });
+
+  it("keeps a plain path condition working as before", () => {
+    expect(
+      render([{ when: "runtime.branch", text: "🌿{runtime.branch}" }], {
+        runtime: { branch: "fix/thing" },
+      }),
+    ).toBe("🌿fix/thing");
+    expect(render([{ when: "runtime.branch", text: "🌿" }], {})).toBe("");
+  });
+
+  it("dur — keeps sub-minute spans readable instead of collapsing them to 0m", () => {
+    expect(render([{ text: "{x|dur}" }], { x: 12 })).toBe("12s");
+    expect(render([{ text: "{x|dur}" }], { x: 59 })).toBe("59s");
+    expect(render([{ text: "{x|dur}" }], { x: 60 })).toBe("1m");
+    expect(render([{ text: "{x|dur}" }], { x: 0 })).toBe("0s");
+  });
+});
