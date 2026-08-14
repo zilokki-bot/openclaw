@@ -16,9 +16,14 @@ function formatFooterCompactions(count?: number): number | null {
   return Math.floor(count);
 }
 
-function formatFooterGitBranch(branch?: string): string | null {
+/**
+ * Surfaces the branch a run happened on, mainline included: a fleet of agents can sit on
+ * stale or detached branches for weeks, and hiding `main` hides that signal too. Templates
+ * that only want non-mainline branches can gate on the value themselves.
+ */
+function formatFooterGitBranch(branch?: string | null): string | null {
   const trimmed = branch?.trim();
-  if (!trimmed || trimmed === "main" || trimmed === "master" || trimmed === "HEAD") {
+  if (!trimmed) {
     return null;
   }
   return trimmed.length > 32 ? `${trimmed.slice(0, 29)}…` : trimmed;

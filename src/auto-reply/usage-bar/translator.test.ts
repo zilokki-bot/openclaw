@@ -177,12 +177,33 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
     );
   });
 
-  it("omits mainline branches from the footer contract", () => {
+  it("keeps mainline branches in the footer contract", () => {
+    // Inverted deliberately. This test previously asserted that main/master/HEAD
+    // were hidden. Hiding them also hid the signal that an agent had been sitting
+    // on mainline for weeks, so the contract now surfaces every branch and lets a
+    // template gate on the value if it only wants non-mainline ones.
     const pieces = [{ when: "runtime.branch", text: "🌿{runtime.branch}" }];
 
     for (const branch of ["main", "master", "HEAD"]) {
       const contract = buildUsageContract(
         { provider: "openai", model: "gpt-5.5", gitBranch: branch },
+        "discord",
+      );
+
+      expect(renderUsageBar(tpl(pieces), contract)).toBe(`🌿${branch}`);
+    }
+  });
+
+  it("still omits the branch segment when there is no branch at all", () => {
+    const pieces = [{ when: "runtime.branch", text: "🌿{runtime.branch}" }];
+
+    for (const branch of [undefined, "", "   "]) {
+      const contract = buildUsageContract(
+        {
+          provider: "openai",
+          model: "gpt-5.5",
+          ...(branch === undefined ? {} : { gitBranch: branch }),
+        },
         "discord",
       );
 
@@ -323,5 +344,34 @@ describe("threshold, ratio and division verbs", () => {
     expect(render([{ text: "{x|dur}" }], { x: 59 })).toBe("59s");
     expect(render([{ text: "{x|dur}" }], { x: 60 })).toBe("1m");
     expect(render([{ text: "{x|dur}" }], { x: 0 })).toBe("0s");
+  });
+});
+
+describe("footer contract fields", () => {
+  it("keeps mainline and detached branches visible", () => {
+    for (const branch of ["main", "master", "HEAD", "fix/thing"]) {
+      const contract = buildUsageContract({
+        provider: "openai",
+        model: "gpt-5.5",
+        gitBranch: branch,
+      });
+      expect(
+        renderUsageBar(tpl([{ when: "runtime.branch", text: "🌿{runtime.branch}" }]), {
+          ...contract,
+          surface: "discord",
+        }),
+      ).toBe(`🌿${branch}`);
+    }
+  });
+
+  it("truncates a very long branch name", () => {
+    const contract = buildUsageContract({
+      provider: "openai",
+      model: "gpt-5.5",
+      gitBranch: "codex/some-extremely-long-branch-name-that-keeps-going",
+    });
+    expect(
+      renderUsageBar(tpl([{ text: "{runtime.branch}" }]), { ...contract, surface: "discord" }),
+    ).toBe("codex/some-extremely-long-bra…");
   });
 });
