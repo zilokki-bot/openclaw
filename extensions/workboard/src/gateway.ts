@@ -357,11 +357,20 @@ export function registerWorkboardGatewayMethods(params: {
       let cardCommitted = false;
       let reservationMayBeReleased = false;
       try {
-        const reservation = api.runtime.approvalBoundMutation.reserve(binding);
+        // Recovery-by-receipt is checked BEFORE reserve(), which is expiry
+        // sensitive. If the card write committed but finalize was interrupted,
+        // a retry arriving after the redemption window must still replay and
+        // finalize; reserving first would reject it as expired and leave the
+        // approval permanently unfinalized. finalize() re-asserts the full
+        // binding (pluginId/resourceKind/resourceId/requester/expectedRevision)
+        // against the reservation row, so skipping reserve() here does not
+        // weaken the binding check, and it never widens the plugin boundary.
         const existingReceipt = await store.lookupApprovalMutationReceipt(approvalId);
         if (existingReceipt) {
-          // The card write is already durable. Never release this reservation if
+          // The card write is already durable. Never release a reservation if
           // recovery detects a corrupted/mismatched receipt; fail closed instead.
+          // reservationMayBeReleased is still false here, so the finally block
+          // cannot release on any path below.
           cardCommitted = true;
           if (
             !receiptMatchesApprovalBinding(existingReceipt, {
@@ -384,6 +393,7 @@ export function registerWorkboardGatewayMethods(params: {
           respond(true, { card: redactClaimToken(card), receipt: existingReceipt, replayed: true });
           return;
         }
+        const reservation = api.runtime.approvalBoundMutation.reserve(binding);
         if (reservation.outcome === "already-finalized") {
           throw new Error("finalized approval mutation is missing its Workboard receipt.");
         }

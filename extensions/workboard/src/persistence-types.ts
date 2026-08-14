@@ -40,7 +40,7 @@ export type WorkboardKeyedStore<T = PersistedWorkboardCard> = {
   entries(): Promise<Array<{ key: string; value: T }>>;
 };
 
-export type WorkboardRevisionStore = WorkboardKeyedStore<PersistedWorkboardCard> & {
+export type WorkboardRevisionStore = WorkboardKeyedStore & {
   updateIfRevision(params: {
     key: string;
     expectedRevision: number;
