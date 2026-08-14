@@ -75,6 +75,13 @@ export type OperatorApprovalRecord = {
   runtimeEpoch: string;
   createdAtMs: number;
   expiresAtMs: number;
+  approvalMutationBinding?: {
+    pluginId: string;
+    mutationId: string;
+    resourceKind: string;
+    resourceId: string;
+    expectedRevision: number;
+  };
   updatedAtMs: number;
   decision: OperatorApprovalDecision | null;
   terminalReason: OperatorApprovalTerminalReason | null;
@@ -95,6 +102,13 @@ export type NewOperatorApproval = {
   runtimeEpoch: string;
   createdAtMs: number;
   expiresAtMs: number;
+  approvalMutationBinding?: {
+    pluginId: string;
+    mutationId: string;
+    resourceKind: string;
+    resourceId: string;
+    expectedRevision: number;
+  };
 };
 
 export type InsertOperatorApprovalResult =
@@ -140,7 +154,10 @@ export type TerminalizeOperatorApprovalsResult = {
   records: OperatorApprovalRecord[];
 };
 
-type OperatorApprovalDatabase = Pick<OpenClawStateKyselyDatabase, "operator_approvals">;
+type OperatorApprovalDatabase = Pick<
+  OpenClawStateKyselyDatabase,
+  "approval_bound_mutations" | "operator_approvals"
+>;
 type OperatorApprovalRow = Selectable<OperatorApprovals>;
 
 const OPERATOR_APPROVAL_DECISIONS = new Set<OperatorApprovalDecision>([
@@ -315,6 +332,36 @@ function decodeOperatorApprovalRow(row: OperatorApprovalRow): OperatorApprovalRe
   const decision = row.decision as OperatorApprovalDecision | null;
   const terminalReason = row.terminal_reason as OperatorApprovalTerminalReason | null;
   const resolverKind = row.resolver_kind as OperatorApprovalResolverKind | null;
+  let approvalMutationBinding: OperatorApprovalRecord["approvalMutationBinding"];
+  if (row.approval_mutation_binding_json !== null) {
+    try {
+      const parsed = JSON.parse(row.approval_mutation_binding_json) as Record<string, unknown>;
+      if (
+        typeof parsed.pluginId !== "string" ||
+        !parsed.pluginId.trim() ||
+        typeof parsed.mutationId !== "string" ||
+        !parsed.mutationId.trim() ||
+        typeof parsed.resourceKind !== "string" ||
+        !parsed.resourceKind.trim() ||
+        typeof parsed.resourceId !== "string" ||
+        !parsed.resourceId.trim() ||
+        typeof parsed.expectedRevision !== "number" ||
+        !Number.isSafeInteger(parsed.expectedRevision) ||
+        parsed.expectedRevision < 0
+      ) {
+        return null;
+      }
+      approvalMutationBinding = {
+        pluginId: parsed.pluginId,
+        mutationId: parsed.mutationId,
+        resourceKind: parsed.resourceKind,
+        resourceId: parsed.resourceId,
+        expectedRevision: parsed.expectedRevision,
+      };
+    } catch {
+      return null;
+    }
+  }
   if (
     !presentation ||
     !isWellFormedApprovalId(row.approval_id) ||
@@ -347,6 +394,10 @@ function decodeOperatorApprovalRow(row: OperatorApprovalRow): OperatorApprovalRe
   }
   if (
     presentation.kind !== kind ||
+    (approvalMutationBinding !== undefined &&
+      (kind !== "plugin" ||
+        presentation.kind !== "plugin" ||
+        presentation.pluginId !== approvalMutationBinding.pluginId)) ||
     row.resolution_ref !==
       buildApprovalResolutionRef({ approvalId: row.approval_id, approvalKind: kind }) ||
     !hasValidLifecycleTuple({ row, status, decision, terminalReason, resolverKind }) ||
@@ -379,6 +430,7 @@ function decodeOperatorApprovalRow(row: OperatorApprovalRow): OperatorApprovalRe
     runtimeEpoch: row.runtime_epoch,
     createdAtMs: row.created_at_ms,
     expiresAtMs: row.expires_at_ms,
+    ...(approvalMutationBinding ? { approvalMutationBinding } : {}),
     updatedAtMs: row.updated_at_ms,
     decision,
     terminalReason,
@@ -514,6 +566,40 @@ function requireDecodedRecord(row: OperatorApprovalRow): OperatorApprovalRecord 
   return record;
 }
 
+function normalizeApprovalMutationBinding(input: NewOperatorApproval): {
+  binding: NonNullable<NewOperatorApproval["approvalMutationBinding"]>;
+  json: string;
+} | null {
+  const raw = input.approvalMutationBinding;
+  if (!raw) {
+    return null;
+  }
+  if (input.kind !== "plugin" || input.presentation.kind !== "plugin") {
+    throw new Error("approval mutation binding requires a plugin approval");
+  }
+  const requirePart = (value: string, label: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      throw new Error(`${label} is required`);
+    }
+    return trimmed;
+  };
+  const binding = {
+    pluginId: requirePart(raw.pluginId, "approval mutation pluginId"),
+    mutationId: requirePart(raw.mutationId, "approval mutation mutationId"),
+    resourceKind: requirePart(raw.resourceKind, "approval mutation resourceKind"),
+    resourceId: requirePart(raw.resourceId, "approval mutation resourceId"),
+    expectedRevision: raw.expectedRevision,
+  };
+  if (!Number.isSafeInteger(binding.expectedRevision) || binding.expectedRevision < 0) {
+    throw new Error("approval mutation expectedRevision must be a non-negative safe integer");
+  }
+  if (input.presentation.pluginId !== binding.pluginId) {
+    throw new Error("approval mutation pluginId must match the reviewer presentation");
+  }
+  return { binding, json: JSON.stringify(binding) };
+}
+
 function inputMatchesExistingRow(
   input: NewOperatorApproval,
   row: OperatorApprovalRow,
@@ -521,6 +607,7 @@ function inputMatchesExistingRow(
     presentationJson: string;
     reviewerDeviceIdsJson: string;
     audienceSessionKeysJson: string;
+    approvalMutationBindingJson: string | null;
   },
 ): boolean {
   const source = input.source ?? {};
@@ -541,7 +628,8 @@ function inputMatchesExistingRow(
     row.audience_session_keys_json === serialized.audienceSessionKeysJson &&
     row.runtime_epoch === input.runtimeEpoch.trim() &&
     row.created_at_ms === input.createdAtMs &&
-    row.expires_at_ms === input.expiresAtMs
+    row.expires_at_ms === input.expiresAtMs &&
+    row.approval_mutation_binding_json === serialized.approvalMutationBindingJson
   );
 }
 
@@ -574,10 +662,12 @@ export function insertOperatorApproval(params: {
     );
   }
   const audienceSessionKeysJson = JSON.stringify(audienceSessionKeys);
+  const approvalMutationBinding = normalizeApprovalMutationBinding(input);
   const serialized = {
     presentationJson,
     reviewerDeviceIdsJson,
     audienceSessionKeysJson,
+    approvalMutationBindingJson: approvalMutationBinding?.json ?? null,
   };
 
   return runOpenClawStateWriteTransaction((database) => {
@@ -626,6 +716,7 @@ export function insertOperatorApproval(params: {
           resolver_id: null,
           consumed_at_ms: null,
           consumed_by: null,
+          approval_mutation_binding_json: approvalMutationBinding?.json ?? null,
         })
         .onConflict((conflict) => conflict.column("approval_id").doNothing()),
     );
@@ -642,6 +733,35 @@ export function insertOperatorApproval(params: {
         createdAtMs: row.created_at_ms,
       });
       return { outcome: "conflict" };
+    }
+    const exactPendingRequest =
+      result.numAffectedRows === 1n || inputMatchesExistingRow(input, row, serialized);
+    if (approvalMutationBinding && exactPendingRequest) {
+      const binding = approvalMutationBinding.binding;
+      executeSqliteQuerySync(
+        database.db,
+        stateDb
+          .insertInto("approval_bound_mutations")
+          .values({
+            approval_id: id,
+            plugin_id: binding.pluginId,
+            mutation_id: binding.mutationId,
+            resource_kind: binding.resourceKind,
+            resource_id: binding.resourceId,
+            requester_device_id: normalizeString(input.requester?.deviceId),
+            requester_client_id: normalizeString(input.requester?.clientId),
+            requester_device_token_auth: input.requester?.deviceTokenAuth === true ? 1 : 0,
+            expected_revision: binding.expectedRevision,
+            approval_expires_at_ms: input.expiresAtMs,
+            status: "bound",
+            bound_at_ms: input.createdAtMs,
+            reserved_at_ms: 0,
+            reservation_expires_at_ms: 0,
+            finalized_at_ms: null,
+            released_at_ms: null,
+          })
+          .onConflict((conflict) => conflict.column("approval_id").doNothing()),
+      );
     }
     if (result.numAffectedRows === 1n) {
       return { outcome: "inserted", record };

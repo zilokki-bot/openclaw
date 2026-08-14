@@ -253,6 +253,7 @@ type DispatchGatewayMethodInProcessOptions = {
   expectFinal?: boolean;
   forceSyntheticClient?: boolean;
   pluginRuntimeOwnerId?: string;
+  preserveScopedRequester?: boolean;
   requireScopedClient?: boolean;
   syntheticScopes?: string[];
   timeoutMs?: number;
@@ -368,6 +369,21 @@ export async function dispatchGatewayMethodInProcessRaw(
     ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
     scopes: options?.syntheticScopes,
   });
+  if (!syntheticClient) {
+    throw new Error(`In-process gateway dispatch could not create a client (method: ${method}).`);
+  }
+  const scopedRequesterClient =
+    options?.preserveScopedRequester === true && scope?.client
+      ? {
+          ...syntheticClient,
+          connect: {
+            ...syntheticClient.connect,
+            client: scope.client.connect.client,
+            ...(scope.client.connect.device ? { device: scope.client.connect.device } : {}),
+          },
+          isDeviceTokenAuth: scope.client.isDeviceTokenAuth === true,
+        }
+      : syntheticClient;
   const scopedClient = mergeGatewayClientInternal(
     scope?.client,
     pluginRuntimeOwnerId || options?.agentRunTracking
@@ -389,7 +405,7 @@ export async function dispatchGatewayMethodInProcessRaw(
     },
     client:
       options?.forceSyntheticClient === true
-        ? syntheticClient
+        ? scopedRequesterClient
         : (scopedClient ?? (options?.disableSyntheticClient === true ? null : syntheticClient)),
     isWebchatConnect,
     respond: (ok, payload, error, meta) => {
@@ -501,6 +517,31 @@ export async function dispatchTrustedPluginGatewayMethod<T>(
     agentRuntimeIdentity: scope?.client?.internal?.agentRuntimeIdentity,
     pluginRuntimeOwnerId: pluginId,
     ...(syntheticScopes ? { syntheticScopes } : {}),
+    ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  });
+}
+
+/**
+ * Dispatches an approval request with trusted plugin authority while retaining
+ * the authenticated caller identity that initiated the plugin gateway method.
+ */
+export async function dispatchTrustedPluginApprovalRequest<T>(
+  params: Record<string, unknown>,
+  options?: { timeoutMs?: number },
+): Promise<T> {
+  const scope = getPluginRuntimeGatewayRequestScope();
+  const pluginId = scope?.pluginId?.trim();
+  if (!canTrustedOfficialPluginRequestScopes(scope ?? {})) {
+    throw new Error("Approval-bound requests are only available to bundled or trusted plugins.");
+  }
+  if (!scope?.client) {
+    throw new Error("Approval-bound requests require an authenticated gateway request scope.");
+  }
+  return await dispatchGatewayMethod<T>("plugin.approval.request", params, {
+    forceSyntheticClient: true,
+    preserveScopedRequester: true,
+    pluginRuntimeOwnerId: pluginId,
+    syntheticScopes: ["operator.approvals"],
     ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
   });
 }

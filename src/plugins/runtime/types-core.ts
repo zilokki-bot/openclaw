@@ -8,6 +8,7 @@ import type {
   TextToSpeechStream,
   TextToSpeechTelephony,
 } from "../../plugin-sdk/tts-runtime.types.js";
+import type { PluginRuntimeApprovalBoundMutation } from "./runtime-approval-bound-mutation.types.js";
 import type { PluginRuntimeTaskFlows, PluginRuntimeTaskRuns } from "./runtime-tasks.types.js";
 
 type RuntimeRequestHeartbeatOptions = Parameters<
@@ -228,6 +229,8 @@ type RuntimeRunEmbeddedAgent = (
 /** Core runtime helpers exposed to trusted native plugins. */
 export type PluginRuntimeCore = {
   version: string;
+  /** Bundled-plugin-only durable one-time approval mutation capability. */
+  approvalBoundMutation: PluginRuntimeApprovalBoundMutation;
   config: {
     /** Current process runtime config snapshot. Prefer config passed into the active call path. */
     current: () => DeepReadonly<import("../../config/types.openclaw.js").OpenClawConfig>;

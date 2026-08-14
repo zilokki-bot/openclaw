@@ -258,6 +258,7 @@ CREATE TABLE IF NOT EXISTS operator_approvals (
   resolver_id TEXT,
   consumed_at_ms INTEGER,
   consumed_by TEXT,
+  approval_mutation_binding_json TEXT,
   CHECK (expires_at_ms >= created_at_ms),
   CHECK (updated_at_ms >= created_at_ms),
   CHECK (resolved_at_ms IS NULL OR resolved_at_ms >= created_at_ms),
@@ -321,6 +322,34 @@ CREATE TABLE IF NOT EXISTS operator_approvals (
     )
   )
 );
+
+-- Durable reservation ledger for one-time, approval-bound plugin mutations.
+-- The immutable binding prevents an approval issued for one requester/resource
+-- from being replayed against another card or revision. The mutable status is a
+-- small saga state machine: reserved -> finalized, or reserved -> released.
+CREATE TABLE IF NOT EXISTS approval_bound_mutations (
+  approval_id TEXT PRIMARY KEY,
+  plugin_id TEXT NOT NULL,
+  mutation_id TEXT NOT NULL,
+  resource_kind TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  requester_device_id TEXT,
+  requester_client_id TEXT,
+  requester_device_token_auth INTEGER NOT NULL DEFAULT 0,
+  expected_revision INTEGER NOT NULL CHECK (expected_revision >= 0),
+  approval_expires_at_ms INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('bound', 'reserved', 'finalized', 'released')),
+  bound_at_ms INTEGER NOT NULL,
+  reserved_at_ms INTEGER NOT NULL,
+  reservation_expires_at_ms INTEGER NOT NULL,
+  finalized_at_ms INTEGER,
+  released_at_ms INTEGER,
+  UNIQUE (plugin_id, mutation_id),
+  FOREIGN KEY (approval_id) REFERENCES operator_approvals(approval_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_bound_mutations_status_expiry
+  ON approval_bound_mutations(status, reservation_expires_at_ms, approval_id);
 
 CREATE INDEX IF NOT EXISTS idx_operator_approvals_status_expiry
   ON operator_approvals(status, expires_at_ms, approval_id);

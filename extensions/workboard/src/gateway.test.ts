@@ -1,7 +1,11 @@
 // Workboard tests cover gateway plugin behavior.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
+import { createWorkboardSqliteStores } from "./sqlite-store.js";
 import { WorkboardStore, type PersistedWorkboardCard, type WorkboardKeyedStore } from "./store.js";
 
 function createMemoryStore<T = PersistedWorkboardCard>(): WorkboardKeyedStore<T> {
@@ -23,6 +27,208 @@ function createMemoryStore<T = PersistedWorkboardCard>(): WorkboardKeyedStore<T>
 }
 
 describe("workboard gateway methods", () => {
+  it("binds approval requests to a server-derived digest of card, revision, and exact patch", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const methods = new Map<string, RegisteredMethod>();
+    const requestApproval = vi.fn(async () => ({ status: "accepted", id: "plugin:bound" }));
+    const api = {
+      runtime: { approvalBoundMutation: { request: requestApproval } },
+      registerGatewayMethod: vi.fn(
+        (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
+          methods.set(method, { handler, opts });
+        },
+      ),
+    } as unknown as OpenClawPluginApi;
+    const store = new WorkboardStore(createMemoryStore());
+    const card = await store.create({ title: "Approval digest" });
+    registerWorkboardGatewayMethods({ api, store });
+    const handler = methods.get("workboard.cards.approvalBoundRequest")?.handler;
+
+    const firstRespond = vi.fn();
+    await handler?.({
+      params: {
+        id: card.id,
+        expectedRevision: 0,
+        patch: { notes: "approved exact value" },
+      },
+      respond: firstRespond,
+    } as never);
+    const firstMutationId = requestApproval.mock.calls[0]?.[0].mutationId;
+    expect(firstMutationId).toMatch(/^workboard-card-update:[a-f0-9]{64}$/);
+    expect(requestApproval.mock.calls[0]?.[0]).toMatchObject({
+      resourceKind: "workboard-card",
+      resourceId: card.id,
+      expectedRevision: 0,
+    });
+    expect(requestApproval.mock.calls[0]?.[0].description).toContain(`card=${card.id}`);
+    expect(requestApproval.mock.calls[0]?.[0].description).toContain("revision=0");
+    expect(requestApproval.mock.calls[0]?.[0].description).toContain("fields=notes");
+    expect(requestApproval.mock.calls[0]?.[0].description).toContain(`mutation=${firstMutationId}`);
+
+    const secondRespond = vi.fn();
+    await handler?.({
+      params: {
+        id: card.id,
+        expectedRevision: 0,
+        patch: { notes: "different value" },
+      },
+      respond: secondRespond,
+    } as never);
+    expect(requestApproval.mock.calls[1]?.[0].mutationId).not.toBe(firstMutationId);
+  });
+
+  it("never releases a durable receipt and finalizes after a later card revision", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-workboard-gateway-cas-"));
+    const stores = createWorkboardSqliteStores({ dbPath: path.join(dir, "workboard.sqlite") });
+    try {
+      const methods = new Map<string, RegisteredMethod>();
+      const reserve = vi.fn(() => ({ outcome: "already-reserved" as const, reservation: {} }));
+      const finalize = vi.fn(() => ({ outcome: "finalized", reservation: {} }));
+      const release = vi.fn();
+      const api = {
+        runtime: { approvalBoundMutation: { reserve, finalize, release } },
+        registerGatewayMethod: vi.fn(
+          (
+            method: string,
+            handler: RegisteredMethod["handler"],
+            opts: RegisteredMethod["opts"],
+          ) => {
+            methods.set(method, { handler, opts });
+          },
+        ),
+      } as unknown as OpenClawPluginApi;
+      const store = new WorkboardStore(stores.cards, {
+        boards: stores.boards,
+        subscriptions: stores.subscriptions,
+        attachments: stores.attachments,
+      });
+      const card = await store.create({ title: "Recoverable card" });
+      const lookupApprovalMutationReceipt = store.lookupApprovalMutationReceipt.bind(store);
+      const lookupSpy = vi
+        .spyOn(store, "lookupApprovalMutationReceipt")
+        .mockImplementationOnce(lookupApprovalMutationReceipt)
+        .mockRejectedValueOnce(new Error("simulated receipt readback failure"));
+      const updateIfRevision = store.updateIfRevision.bind(store);
+      vi.spyOn(store, "updateIfRevision").mockImplementationOnce(async (params) => {
+        await updateIfRevision(params);
+        throw new Error("simulated post-commit cleanup failure");
+      });
+      registerWorkboardGatewayMethods({ api, store });
+      const handler = methods.get("workboard.cards.approvalBoundUpdate")?.handler;
+      const request = {
+        params: {
+          id: card.id,
+          approvalId: "approval-a",
+          mutationId: "mutation-a",
+          expectedRevision: 0,
+          patch: { notes: "approved" },
+        },
+        client: {
+          connect: { client: { id: "client-a" }, device: { id: "device-a" } },
+          isDeviceTokenAuth: true,
+        },
+      };
+
+      const firstRespond = vi.fn();
+      await handler?.({ ...request, respond: firstRespond } as never);
+      expect(firstRespond.mock.calls[0]?.[0]).toBe(false);
+      expect(firstRespond.mock.calls[0]?.[2]?.message).toContain(
+        "simulated post-commit cleanup failure",
+      );
+      expect(await store.get(card.id)).toMatchObject({ revision: 1, notes: "approved" });
+      expect(release).not.toHaveBeenCalled();
+      expect(lookupSpy).toHaveBeenCalledTimes(1);
+
+      lookupSpy.mockReset().mockImplementation(lookupApprovalMutationReceipt);
+
+      await store.update(card.id, { notes: "later legitimate update" });
+      expect(await store.get(card.id)).toMatchObject({
+        revision: 2,
+        notes: "later legitimate update",
+      });
+
+      const retryRespond = vi.fn();
+      await handler?.({ ...request, respond: retryRespond } as never);
+      expect(retryRespond.mock.calls[0]?.[0]).toBe(true);
+      expect(retryRespond.mock.calls[0]?.[1]).toMatchObject({
+        replayed: true,
+        card: { revision: 2, notes: "later legitimate update" },
+        receipt: { approvalId: "approval-a", oldRevision: 0, newRevision: 1 },
+      });
+      expect(reserve).toHaveBeenCalledTimes(2);
+      expect(finalize).toHaveBeenCalledTimes(1);
+      expect(release).not.toHaveBeenCalled();
+    } finally {
+      stores.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("releases only a proven pre-commit Workboard rejection", async () => {
+    type RegisteredMethod = {
+      handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+      opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
+    };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-workboard-gateway-release-"));
+    const stores = createWorkboardSqliteStores({ dbPath: path.join(dir, "workboard.sqlite") });
+    try {
+      const methods = new Map<string, RegisteredMethod>();
+      const release = vi.fn();
+      const api = {
+        runtime: {
+          approvalBoundMutation: {
+            reserve: vi.fn(() => ({ outcome: "reserved", reservation: {} })),
+            finalize: vi.fn(),
+            release,
+          },
+        },
+        registerGatewayMethod: vi.fn(
+          (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) =>
+            methods.set(method, { handler, opts }),
+        ),
+      } as unknown as OpenClawPluginApi;
+      const store = new WorkboardStore(stores.cards, {
+        boards: stores.boards,
+        subscriptions: stores.subscriptions,
+        attachments: stores.attachments,
+      });
+      const card = await store.create({ title: "Pre-commit rejection" });
+      registerWorkboardGatewayMethods({ api, store });
+      const respond = vi.fn();
+
+      await methods.get("workboard.cards.approvalBoundUpdate")?.handler({
+        params: {
+          id: card.id,
+          approvalId: "approval-precommit",
+          expectedRevision: 0,
+          patch: { status: "not-a-workboard-status" },
+        },
+        client: {
+          connect: { client: { id: "client-a" }, device: { id: "device-a" } },
+          isDeviceTokenAuth: true,
+        },
+        respond,
+      } as never);
+
+      expect(respond.mock.calls[0]?.[0]).toBe(false);
+      expect(release).toHaveBeenCalledTimes(1);
+      const unchanged = await store.get(card.id);
+      expect(unchanged).toMatchObject({ revision: 0 });
+      expect(unchanged?.notes).toBeUndefined();
+      expect(await store.lookupApprovalMutationReceipt("approval-precommit")).toBeUndefined();
+    } finally {
+      stores.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("registers CRUD methods with read/write scopes", async () => {
     type RegisteredMethod = {
       handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
@@ -48,6 +254,8 @@ describe("workboard gateway methods", () => {
     expect([...methods.keys()]).toEqual([
       "workboard.cards.list",
       "workboard.cards.create",
+      "workboard.cards.approvalBoundRequest",
+      "workboard.cards.approvalBoundUpdate",
       "workboard.cards.safeChildCreate",
       "workboard.cards.update",
       "workboard.cards.move",

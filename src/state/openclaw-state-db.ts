@@ -1541,6 +1541,7 @@ function ensureAdditiveStateColumns(db: DatabaseSync): void {
     "teardown_terminal_state TEXT CHECK (teardown_terminal_state IN ('destroyed', 'failed'))",
   );
   ensureOperatorApprovalResolutionRefs(db);
+  ensureColumn(db, "operator_approvals", "approval_mutation_binding_json TEXT");
 }
 
 function ensureSchema(db: DatabaseSync, pathname: string): void {

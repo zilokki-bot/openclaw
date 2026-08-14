@@ -3,6 +3,11 @@ import { normalizeOptionalAgentRuntimeId } from "../agents/agent-runtime-id.js";
 import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import {
+  finalizeApprovalBoundMutation,
+  releaseApprovalBoundMutation,
+  reserveApprovalBoundMutation,
+} from "../gateway/approval-bound-mutation-store.js";
+import {
   createPluginStateKeyedStore,
   createPluginStateSyncKeyedStore,
   type OpenKeyedStoreOptions,
@@ -496,6 +501,61 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
               });
             },
           } satisfies PluginRuntime["state"];
+        }
+        if (prop === "approvalBoundMutation") {
+          const record =
+            pluginRuntimeRecordById.get(pluginId) ??
+            registry.plugins.find((entry) => entry.id === pluginId);
+          if (record?.origin !== "bundled") {
+            throw new Error("approvalBoundMutation is only available to bundled plugins.");
+          }
+          return {
+            request: (params) =>
+              runWithPluginScope(async () => {
+                const { dispatchTrustedPluginApprovalRequest } =
+                  await import("../gateway/server-plugins.js");
+                return await dispatchTrustedPluginApprovalRequest(
+                  {
+                    pluginId,
+                    title: params.title,
+                    description: params.description,
+                    severity: params.severity,
+                    toolName: params.toolName,
+                    toolCallId: params.toolCallId,
+                    agentId: params.agentId,
+                    sessionKey: params.sessionKey,
+                    timeoutMs: params.timeoutMs,
+                    twoPhase: true,
+                    allowedDecisions: ["allow-once", "deny"],
+                    approvalBoundMutation: {
+                      mutationId: params.mutationId,
+                      resourceKind: params.resourceKind,
+                      resourceId: params.resourceId,
+                      expectedRevision: params.expectedRevision,
+                    },
+                  },
+                  params.timeoutMs === undefined ? undefined : { timeoutMs: params.timeoutMs },
+                );
+              }),
+            reserve: (params) =>
+              runWithPluginScope(() =>
+                reserveApprovalBoundMutation({
+                  pluginId,
+                  binding: params,
+                  reservationTtlMs: params.reservationTtlMs,
+                  redemptionWindowMs: params.redemptionWindowMs,
+                  nowMs: params.nowMs,
+                }),
+              ),
+            finalize: (params) =>
+              runWithPluginScope(() =>
+                finalizeApprovalBoundMutation({ pluginId, binding: params, nowMs: params.nowMs }),
+              ),
+            release: (params) =>
+              runWithPluginScope(() =>
+                releaseApprovalBoundMutation({ pluginId, binding: params, nowMs: params.nowMs }),
+              ),
+          } satisfies PluginRuntime["approvalBoundMutation"];
         }
         if (prop === "config") {
           const config: PluginRuntime["config"] = getRuntimeProperty();

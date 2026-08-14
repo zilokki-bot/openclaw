@@ -28,6 +28,13 @@ export type PluginApprovalRequestPayload = {
   turnSourceTo?: string | null;
   turnSourceAccountId?: string | null;
   turnSourceThreadId?: string | number | null;
+  /** Immutable one-time mutation scope persisted atomically with the approval request. */
+  approvalBoundMutation?: {
+    mutationId: string;
+    resourceKind: string;
+    resourceId: string;
+    expectedRevision: number;
+  } | null;
 };
 
 /** Timed plugin approval request persisted while awaiting a decision. */

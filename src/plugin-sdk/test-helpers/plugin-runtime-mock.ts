@@ -367,6 +367,12 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
   };
   const base: PluginRuntime = {
     version: "1.0.0-test",
+    approvalBoundMutation: {
+      request: vi.fn() as unknown as PluginRuntime["approvalBoundMutation"]["request"],
+      reserve: vi.fn() as unknown as PluginRuntime["approvalBoundMutation"]["reserve"],
+      finalize: vi.fn() as unknown as PluginRuntime["approvalBoundMutation"]["finalize"],
+      release: vi.fn() as unknown as PluginRuntime["approvalBoundMutation"]["release"],
+    },
     gateway: {
       isAvailable: vi.fn(async () => false),
       request: vi.fn(),

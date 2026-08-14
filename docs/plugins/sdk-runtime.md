@@ -682,6 +682,37 @@ two-party event loops that do not go through the shared inbound reply runner.
     </Warning>
 
   </Accordion>
+  <Accordion title="api.runtime.approvalBoundMutation">
+    Durable one-time approval binding for bundled plugins that must commit an
+    exact revisioned mutation after an operator decision.
+
+    The plugin first calls `request(...)` with a server-derived mutation id,
+    resource identity, and expected revision. OpenClaw persists that immutable
+    tuple, the authenticated requester, and the approval expiry atomically with
+    the pending approval. After an `allow-once` decision, the same requester can
+    call `reserve(...)`, commit its own storage transaction, then call
+    `finalize(...)`. Call `release(...)` only when the plugin storage write did
+    not commit. If the write committed but finalize was interrupted, recover
+    from the plugin's durable receipt and finalize the exact same binding.
+
+    ```typescript
+    const approval = await api.runtime.approvalBoundMutation.request({
+      mutationId,
+      resourceKind: "card",
+      resourceId: card.id,
+      expectedRevision: card.revision,
+      title: "Update card",
+      description: "Apply one exact revisioned update.",
+    });
+    ```
+
+    <Warning>
+    This capability is available only to bundled plugins. A normal plugin
+    approval, an approval for another action/resource/revision, or a request
+    from another client cannot be redeemed for the mutation.
+    </Warning>
+
+  </Accordion>
   <Accordion title="api.runtime.channel">
     Channel-specific runtime helpers (available when a channel plugin is loaded). Grouped by concern:
 

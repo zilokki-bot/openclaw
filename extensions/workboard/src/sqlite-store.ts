@@ -10,7 +10,9 @@ import type {
   PersistedWorkboardCard,
   PersistedWorkboardNotificationSubscription,
   WorkboardKeyedStore,
+  WorkboardRevisionStore,
 } from "./persistence-types.js";
+import { WorkboardMutationNotCommittedError } from "./persistence-types.js";
 import type {
   WorkboardArtifact,
   WorkboardAttachment,
@@ -25,10 +27,11 @@ import type {
   WorkboardProof,
   WorkboardRunAttempt,
   WorkboardWorkerLog,
+  WorkboardApprovalMutationReceipt,
 } from "./types.js";
 
 const WORKBOARD_DB_RELATIVE_PATH = ["plugins", "workboard", "workboard.sqlite"] as const;
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const WORKBOARD_SQLITE_BUSY_TIMEOUT_MS = 5000;
 const WORKBOARD_SQLITE_DIR_MODE = 0o700;
 const WORKBOARD_SQLITE_FILE_MODE = 0o600;
@@ -36,7 +39,7 @@ const WORKBOARD_SQLITE_FILE_MODE = 0o600;
 type Row = Record<string, unknown>;
 
 type WorkboardSqliteStores = {
-  cards: WorkboardKeyedStore;
+  cards: WorkboardRevisionStore;
   boards: WorkboardKeyedStore<PersistedWorkboardBoard>;
   subscriptions: WorkboardKeyedStore<PersistedWorkboardNotificationSubscription>;
   attachments: WorkboardKeyedStore<PersistedWorkboardAttachment>;
@@ -158,6 +161,7 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS workboard_cards (
       id TEXT PRIMARY KEY,
+      revision INTEGER NOT NULL DEFAULT 0,
       board_id TEXT NOT NULL,
       title TEXT NOT NULL,
       notes TEXT,
@@ -195,6 +199,20 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
       ON workboard_cards(board_id, status, position);
     CREATE INDEX IF NOT EXISTS workboard_cards_session_idx
       ON workboard_cards(session_key, run_id);
+
+    CREATE TABLE IF NOT EXISTS workboard_approval_mutation_receipts (
+      approval_id TEXT PRIMARY KEY,
+      mutation_id TEXT NOT NULL UNIQUE,
+      card_id TEXT NOT NULL REFERENCES workboard_cards(id) ON DELETE RESTRICT,
+      requester_device_id TEXT,
+      requester_client_id TEXT,
+      requester_device_token_auth INTEGER NOT NULL DEFAULT 0,
+      old_revision INTEGER NOT NULL CHECK (old_revision >= 0),
+      new_revision INTEGER NOT NULL CHECK (new_revision = old_revision + 1),
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS workboard_approval_mutation_receipts_card_idx
+      ON workboard_approval_mutation_receipts(card_id, created_at, approval_id);
 
     CREATE TABLE IF NOT EXISTS workboard_card_labels (
       card_id TEXT NOT NULL REFERENCES workboard_cards(id) ON DELETE CASCADE,
@@ -357,6 +375,7 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
     "lifecycle_status_source_updated_at",
     "lifecycle_status_source_updated_at INTEGER",
   );
+  ensureColumn(db, "workboard_cards", "revision", "revision INTEGER NOT NULL DEFAULT 0");
   db.prepare(
     "INSERT OR IGNORE INTO workboard_schema_migrations (id, applied_at) VALUES (?, ?)",
   ).run(`schema-${SCHEMA_VERSION}`, Date.now());
@@ -707,6 +726,7 @@ function readMetadata(db: DatabaseSync, row: Row): WorkboardMetadata | undefined
 function readCard(db: DatabaseSync, row: Row): WorkboardCard {
   const card: WorkboardCard = {
     id: requiredString(row, "id"),
+    revision: numberValue(row, "revision") ?? 0,
     title: requiredString(row, "title"),
     status: requiredString(row, "status") as WorkboardCard["status"],
     priority: requiredString(row, "priority") as WorkboardCard["priority"],
@@ -771,14 +791,14 @@ function insertCard(db: DatabaseSync, card: WorkboardCard): void {
   db.prepare(
     `
       INSERT INTO workboard_cards (
-        id, board_id, title, notes, status, priority, agent_id, session_key, run_id, task_id,
+        id, revision, board_id, title, notes, status, priority, agent_id, session_key, run_id, task_id,
         source_url, position, created_at, updated_at, started_at, completed_at,
         execution_id, execution_kind, execution_engine, execution_mode, execution_status,
         execution_model, execution_session_key, execution_run_id, execution_started_at,
         execution_updated_at, automation_json, claim_json, template_id, archived_at, stale_json,
         lifecycle_status_source_updated_at, failure_count
       ) VALUES (
-        @id, @board_id, @title, @notes, @status, @priority, @agent_id, @session_key, @run_id,
+        @id, @revision, @board_id, @title, @notes, @status, @priority, @agent_id, @session_key, @run_id,
         @task_id, @source_url, @position, @created_at, @updated_at, @started_at, @completed_at,
         @execution_id, @execution_kind, @execution_engine, @execution_mode, @execution_status,
         @execution_model, @execution_session_key, @execution_run_id, @execution_started_at,
@@ -786,6 +806,7 @@ function insertCard(db: DatabaseSync, card: WorkboardCard): void {
         @stale_json, @lifecycle_status_source_updated_at, @failure_count
       )
       ON CONFLICT(id) DO UPDATE SET
+        revision = excluded.revision,
         board_id = excluded.board_id,
         title = excluded.title,
         notes = excluded.notes,
@@ -821,6 +842,7 @@ function insertCard(db: DatabaseSync, card: WorkboardCard): void {
     `,
   ).run({
     id: card.id,
+    revision: card.revision ?? 0,
     board_id: cardBoardId(card),
     title: card.title,
     notes: bindNull(card.notes),
@@ -1075,7 +1097,39 @@ function insertCard(db: DatabaseSync, card: WorkboardCard): void {
   }
 }
 
-class WorkboardSqliteCardStore implements WorkboardKeyedStore {
+function readApprovalMutationReceipt(row: Row): WorkboardApprovalMutationReceipt {
+  return {
+    approvalId: requiredString(row, "approval_id"),
+    mutationId: requiredString(row, "mutation_id"),
+    cardId: requiredString(row, "card_id"),
+    requesterDeviceId: stringValue(row, "requester_device_id") ?? null,
+    requesterClientId: stringValue(row, "requester_client_id") ?? null,
+    requesterDeviceTokenAuth: requiredNumber(row, "requester_device_token_auth") === 1,
+    oldRevision: requiredNumber(row, "old_revision"),
+    newRevision: requiredNumber(row, "new_revision"),
+    createdAt: requiredNumber(row, "created_at"),
+  };
+}
+
+function assertReceiptMatches(
+  actual: WorkboardApprovalMutationReceipt,
+  expected: WorkboardApprovalMutationReceipt,
+): void {
+  if (
+    actual.approvalId !== expected.approvalId ||
+    actual.mutationId !== expected.mutationId ||
+    actual.cardId !== expected.cardId ||
+    actual.requesterDeviceId !== expected.requesterDeviceId ||
+    actual.requesterClientId !== expected.requesterClientId ||
+    actual.requesterDeviceTokenAuth !== expected.requesterDeviceTokenAuth ||
+    actual.oldRevision !== expected.oldRevision ||
+    actual.newRevision !== expected.newRevision
+  ) {
+    throw new Error("approval mutation receipt is bound to a different mutation");
+  }
+}
+
+class WorkboardSqliteCardStore implements WorkboardRevisionStore {
   constructor(private readonly db: DatabaseSync) {}
 
   async register(key: string, value: PersistedWorkboardCard): Promise<void> {
@@ -1090,6 +1144,79 @@ class WorkboardSqliteCardStore implements WorkboardKeyedStore {
       | Row
       | undefined;
     return row ? { version: 1, card: readCard(this.db, row) } : undefined;
+  }
+
+  async lookupApprovalMutationReceipt(
+    approvalId: string,
+  ): Promise<WorkboardApprovalMutationReceipt | undefined> {
+    const row = this.db
+      .prepare("SELECT * FROM workboard_approval_mutation_receipts WHERE approval_id = ?")
+      .get(approvalId) as Row | undefined;
+    return row ? readApprovalMutationReceipt(row) : undefined;
+  }
+
+  async updateIfRevision(params: {
+    key: string;
+    expectedRevision: number;
+    value: PersistedWorkboardCard;
+    receipt: WorkboardApprovalMutationReceipt;
+  }): Promise<{ value: PersistedWorkboardCard; replayed: boolean }> {
+    if (params.value.version !== 1 || params.value.card.id !== params.key) {
+      throw new WorkboardMutationNotCommittedError("invalid workboard card payload");
+    }
+    return runTransaction(this.db, () => {
+      const receiptRow = this.db
+        .prepare("SELECT * FROM workboard_approval_mutation_receipts WHERE approval_id = ?")
+        .get(params.receipt.approvalId) as Row | undefined;
+      if (receiptRow) {
+        const receipt = readApprovalMutationReceipt(receiptRow);
+        assertReceiptMatches(receipt, params.receipt);
+        const current = this.db
+          .prepare("SELECT * FROM workboard_cards WHERE id = ?")
+          .get(params.key) as Row | undefined;
+        if (!current) {
+          throw new Error(`card not found: ${params.key}`);
+        }
+        return { value: { version: 1, card: readCard(this.db, current) }, replayed: true };
+      }
+      const current = this.db
+        .prepare("SELECT revision FROM workboard_cards WHERE id = ?")
+        .get(params.key) as Row | undefined;
+      if (!current) {
+        throw new WorkboardMutationNotCommittedError(`card not found: ${params.key}`);
+      }
+      const revision = numberValue(current, "revision") ?? 0;
+      if (revision !== params.expectedRevision) {
+        throw new WorkboardMutationNotCommittedError(
+          `workboard revision conflict: expected ${params.expectedRevision}, current ${revision}`,
+        );
+      }
+      if ((params.value.card.revision ?? 0) !== revision + 1) {
+        throw new WorkboardMutationNotCommittedError(
+          "approval mutation must increment the workboard revision exactly once",
+        );
+      }
+      insertCard(this.db, params.value.card);
+      this.db
+        .prepare(
+          `INSERT INTO workboard_approval_mutation_receipts (
+            approval_id, mutation_id, card_id, requester_device_id, requester_client_id,
+            requester_device_token_auth, old_revision, new_revision, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          params.receipt.approvalId,
+          params.receipt.mutationId,
+          params.receipt.cardId,
+          params.receipt.requesterDeviceId,
+          params.receipt.requesterClientId,
+          params.receipt.requesterDeviceTokenAuth ? 1 : 0,
+          params.receipt.oldRevision,
+          params.receipt.newRevision,
+          params.receipt.createdAt,
+        );
+      return { value: params.value, replayed: false };
+    });
   }
 
   async delete(key: string): Promise<boolean> {

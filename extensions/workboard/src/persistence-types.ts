@@ -3,8 +3,14 @@ import type {
   WorkboardAttachment,
   WorkboardBoardMetadata,
   WorkboardCard,
+  WorkboardApprovalMutationReceipt,
   WorkboardNotificationSubscription,
 } from "./types.js";
+
+/** A proven pre-commit rejection; callers may safely release a reservation. */
+export class WorkboardMutationNotCommittedError extends Error {
+  override readonly name = "WorkboardMutationNotCommittedError";
+}
 
 export type PersistedWorkboardCard = {
   version: 1;
@@ -32,4 +38,16 @@ export type WorkboardKeyedStore<T = PersistedWorkboardCard> = {
   lookup(key: string): Promise<T | undefined>;
   delete(key: string): Promise<boolean>;
   entries(): Promise<Array<{ key: string; value: T }>>;
+};
+
+export type WorkboardRevisionStore = WorkboardKeyedStore<PersistedWorkboardCard> & {
+  updateIfRevision(params: {
+    key: string;
+    expectedRevision: number;
+    value: PersistedWorkboardCard;
+    receipt: WorkboardApprovalMutationReceipt;
+  }): Promise<{ value: PersistedWorkboardCard; replayed: boolean }>;
+  lookupApprovalMutationReceipt(
+    approvalId: string,
+  ): Promise<WorkboardApprovalMutationReceipt | undefined>;
 };

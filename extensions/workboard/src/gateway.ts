@@ -2,6 +2,7 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { OpenClawPluginApi } from "../api.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { WorkboardMutationNotCommittedError } from "./persistence-types.js";
 import { WorkboardStore } from "./store.js";
 import { WORKBOARD_STATUSES, type WorkboardCard } from "./types.js";
 
@@ -36,6 +37,10 @@ function readPatch(params: Record<string, unknown>): Record<string, unknown> {
   return params;
 }
 
+function readApprovalPatch(params: Record<string, unknown>): Record<string, unknown> {
+  return readObjectParam(params, "patch");
+}
+
 function readObjectParam(params: Record<string, unknown>, key: string): Record<string, unknown> {
   const value = params[key];
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -52,6 +57,22 @@ function readOptionalString(params: Record<string, unknown>, key: string): strin
 function readOptionalBoolean(params: Record<string, unknown>, key: string): boolean | undefined {
   const value = params[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+function readRequiredRevision(params: Record<string, unknown>): number {
+  const value = params.expectedRevision;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("expectedRevision must be a non-negative safe integer.");
+  }
+  return value;
+}
+
+function readRequiredString(params: Record<string, unknown>, key: string): string {
+  const value = readOptionalString(params, key);
+  if (!value) {
+    throw new Error(`${key} is required.`);
+  }
+  return value;
 }
 
 function assertNoSafeChildCreateEscapeHatches(params: Record<string, unknown>) {
@@ -116,6 +137,39 @@ function stableJson(value: unknown): string {
 async function argsHash(value: unknown): Promise<string> {
   const { createHash } = await import("node:crypto");
   return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+async function approvalMutationId(params: {
+  cardId: string;
+  expectedRevision: number;
+  patch: Record<string, unknown>;
+}): Promise<string> {
+  return `workboard-card-update:${await argsHash(params)}`;
+}
+
+function receiptMatchesApprovalBinding(
+  receipt: Awaited<ReturnType<WorkboardStore["lookupApprovalMutationReceipt"]>>,
+  binding: {
+    approvalId: string;
+    mutationId: string;
+    cardId: string;
+    requesterDeviceId: string | null;
+    requesterClientId: string | null;
+    requesterDeviceTokenAuth: boolean;
+    expectedRevision: number;
+  },
+): boolean {
+  return Boolean(
+    receipt &&
+    receipt.approvalId === binding.approvalId &&
+    receipt.mutationId === binding.mutationId &&
+    receipt.cardId === binding.cardId &&
+    receipt.requesterDeviceId === binding.requesterDeviceId &&
+    receipt.requesterClientId === binding.requesterClientId &&
+    receipt.requesterDeviceTokenAuth === binding.requesterDeviceTokenAuth &&
+    receipt.oldRevision === binding.expectedRevision &&
+    receipt.newRevision === binding.expectedRevision + 1,
+  );
 }
 
 function readRestrictedWorkboardReceipt(receipts: unknown[]): {
@@ -235,6 +289,146 @@ export function registerWorkboardGatewayMethods(params: {
       try {
         respond(true, { card: redactClaimToken(await store.create(requestParams)) });
       } catch (error) {
+        respondError(respond, error);
+      }
+    },
+    { scope: WRITE_SCOPE },
+  );
+
+  api.registerGatewayMethod(
+    "workboard.cards.approvalBoundRequest",
+    async ({ params: requestParams, respond }) => {
+      try {
+        const id = readId(requestParams);
+        const expectedRevision = readRequiredRevision(requestParams);
+        const patch = readApprovalPatch(requestParams);
+        const card = await store.get(id);
+        if (!card) {
+          throw new Error(`card not found: ${id}`);
+        }
+        if ((card.revision ?? 0) !== expectedRevision) {
+          throw new Error(
+            `workboard revision conflict: expected ${expectedRevision}, current ${card.revision ?? 0}`,
+          );
+        }
+        const mutationId = await approvalMutationId({ cardId: id, expectedRevision, patch });
+        const changedFields = (Object.keys(patch).toSorted().join(", ") || "(none)").slice(0, 160);
+        const approval = await api.runtime.approvalBoundMutation.request({
+          mutationId,
+          resourceKind: "workboard-card",
+          resourceId: id,
+          expectedRevision,
+          title: "Update Workboard card",
+          description: `Apply exact Workboard update: card=${id}; revision=${expectedRevision}; fields=${changedFields}; mutation=${mutationId}.`,
+          severity: "warning",
+          toolName: "workboard.cards.approvalBoundUpdate",
+          timeoutMs:
+            typeof requestParams.timeoutMs === "number" ? requestParams.timeoutMs : undefined,
+        });
+        respond(true, { approval, mutationId });
+      } catch (error) {
+        respondError(respond, error);
+      }
+    },
+    { scope: WRITE_SCOPE },
+  );
+
+  api.registerGatewayMethod(
+    "workboard.cards.approvalBoundUpdate",
+    async ({ params: requestParams, client, respond }) => {
+      const id = readId(requestParams);
+      const approvalId = readRequiredString(requestParams, "approvalId");
+      const expectedRevision = readRequiredRevision(requestParams);
+      const patch = readApprovalPatch(requestParams);
+      const mutationId = await approvalMutationId({ cardId: id, expectedRevision, patch });
+      const requester = {
+        deviceId: client?.connect.device?.id?.trim() || null,
+        clientId: client?.connect.client.id?.trim() || null,
+        deviceTokenAuth: client?.isDeviceTokenAuth === true,
+      };
+      const binding = {
+        approvalId,
+        mutationId,
+        resourceKind: "workboard-card",
+        resourceId: id,
+        requester,
+        expectedRevision,
+      };
+      let cardCommitted = false;
+      let reservationMayBeReleased = false;
+      try {
+        const reservation = api.runtime.approvalBoundMutation.reserve(binding);
+        const existingReceipt = await store.lookupApprovalMutationReceipt(approvalId);
+        if (existingReceipt) {
+          // The card write is already durable. Never release this reservation if
+          // recovery detects a corrupted/mismatched receipt; fail closed instead.
+          cardCommitted = true;
+          if (
+            !receiptMatchesApprovalBinding(existingReceipt, {
+              approvalId,
+              mutationId,
+              cardId: id,
+              requesterDeviceId: requester.deviceId,
+              requesterClientId: requester.clientId,
+              requesterDeviceTokenAuth: requester.deviceTokenAuth,
+              expectedRevision,
+            })
+          ) {
+            throw new Error("approval mutation receipt does not match this request.");
+          }
+          const card = await store.get(id);
+          if (!card || (card.revision ?? 0) < existingReceipt.newRevision) {
+            throw new Error("approval mutation receipt is ahead of the current card revision.");
+          }
+          api.runtime.approvalBoundMutation.finalize(binding);
+          respond(true, { card: redactClaimToken(card), receipt: existingReceipt, replayed: true });
+          return;
+        }
+        if (reservation.outcome === "already-finalized") {
+          throw new Error("finalized approval mutation is missing its Workboard receipt.");
+        }
+        reservationMayBeReleased = true;
+        let updated: Awaited<ReturnType<WorkboardStore["updateIfRevision"]>>;
+        try {
+          updated = await store.updateIfRevision({
+            id,
+            expectedRevision,
+            patch,
+            receipt: {
+              approvalId,
+              mutationId,
+              requesterDeviceId: requester.deviceId,
+              requesterClientId: requester.clientId,
+              requesterDeviceTokenAuth: requester.deviceTokenAuth,
+              createdAt: Date.now(),
+            },
+          });
+        } catch (error) {
+          if (!(error instanceof WorkboardMutationNotCommittedError)) {
+            // An unknown storage error can occur during or after COMMIT. Keep
+            // the reservation for exact recovery instead of risking release
+            // of an already-applied mutation.
+            reservationMayBeReleased = false;
+          }
+          throw error;
+        }
+        cardCommitted = true;
+        reservationMayBeReleased = false;
+        api.runtime.approvalBoundMutation.finalize(binding);
+        respond(true, {
+          card: redactClaimToken(updated.card),
+          receipt: updated.receipt,
+          replayed: updated.replayed,
+        });
+      } catch (error) {
+        if (!cardCommitted && reservationMayBeReleased) {
+          try {
+            api.runtime.approvalBoundMutation.release(binding);
+          } catch {
+            // Preserve the original failure. A missing or finalized reservation
+            // is safe to leave for exact retry/recovery.
+          }
+        }
         respondError(respond, error);
       }
     },
