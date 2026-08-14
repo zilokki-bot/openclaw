@@ -487,6 +487,9 @@ export function createSubagentRegistryLifecycleCleanup(
       spawnMode: pendingPayload.spawnMode,
       expectsCompletionMessage: pendingPayload.expectsCompletionMessage,
       wakeOnDescendantSettle: pendingPayload.wakeOnDescendantSettle === true,
+      isCompletionOwnedByRequesterYield: () =>
+        entry.requesterTurnYielded === true ||
+        entry.requesterSettleWake?.requesterYieldBatch === true,
       onBeforeDeleteChildSession:
         cleanup === "delete"
           ? () => {

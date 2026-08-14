@@ -1178,6 +1178,7 @@ async function sendSubagentAnnounceDirectly(params: {
   sourceSessionKey?: string;
   sourceChannel?: string;
   sourceTool?: string;
+  isCompletionOwnedByRequesterYield?: () => boolean;
   requesterIsSubagent: boolean;
   allowGeneratedMediaDirectFallback: boolean;
   signal?: AbortSignal;
@@ -1263,6 +1264,17 @@ async function sendSubagentAnnounceDirectly(params: {
         path: "none",
         reason: "requester_abandoned",
         error: "requester session abandoned after timeout",
+      };
+    }
+    if (params.expectsCompletionMessage && params.isCompletionOwnedByRequesterYield?.()) {
+      // sessions_yield owns the post-turn synthesis. Starting or steering a
+      // requester turn here would replay the original fanout during handoff.
+      return {
+        delivered: false,
+        path: "none",
+        reason: "completion_handoff_pending",
+        terminal: true,
+        disposition: "intentional_non_delivery",
       };
     }
     let activeRequesterWakeFailed = false;
@@ -1801,6 +1813,7 @@ export async function deliverSubagentAnnouncement(params: {
   sourceSessionKey?: string;
   sourceChannel?: string;
   sourceTool?: string;
+  isCompletionOwnedByRequesterYield?: () => boolean;
   targetRequesterSessionKey: string;
   requesterIsSubagent: boolean;
   expectsCompletionMessage: boolean;
@@ -1950,6 +1963,7 @@ export async function deliverSubagentAnnouncement(params: {
         sourceSessionKey: params.sourceSessionKey,
         sourceChannel: params.sourceChannel,
         sourceTool: params.sourceTool,
+        isCompletionOwnedByRequesterYield: params.isCompletionOwnedByRequesterYield,
         requesterIsSubagent: params.requesterIsSubagent,
         expectsCompletionMessage: params.expectsCompletionMessage,
         requireVisibleReply: params.requireVisibleReply,

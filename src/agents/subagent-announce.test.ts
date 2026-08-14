@@ -520,6 +520,67 @@ describe("subagent announce seam flow", () => {
     expect(agentCall.params?.accountId).toBe("default");
   });
 
+  it("defers individual child delivery for a yielded requester batch until every child settles", async () => {
+    const requesterSessionKey = "agent:developer:telegram:developer:direct:163844254";
+    subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockImplementation((sessionKey) =>
+      sessionKey === requesterSessionKey
+        ? [
+            {
+              runId: "run-yield-a",
+              childSessionKey: "agent:developer:dashboard:yield-a",
+              requesterSessionKey,
+              expectsCompletionMessage: true,
+              endedAt: 20,
+              requesterSettleWake: {
+                status: "pending",
+                attemptCount: 0,
+                requesterYieldBatch: true,
+                batchRunIds: ["run-yield-a", "run-yield-b"],
+                rearmGeneration: 1,
+              },
+            },
+            {
+              runId: "run-yield-b",
+              childSessionKey: "agent:developer:dashboard:yield-b",
+              requesterSessionKey,
+              expectsCompletionMessage: true,
+              requesterSettleWake: {
+                status: "pending",
+                attemptCount: 0,
+                requesterYieldBatch: true,
+                batchRunIds: ["run-yield-a", "run-yield-b"],
+                rearmGeneration: 1,
+              },
+            },
+          ]
+        : [],
+    );
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:developer:dashboard:yield-a",
+      childRunId: "run-yield-a",
+      requesterSessionKey,
+      requesterDisplayKey: "developer",
+      requesterOrigin: {
+        channel: "telegram",
+        to: "163844254",
+        accountId: "developer",
+      },
+      task: "child A",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      startedAt: 10,
+      endedAt: 20,
+      outcome: { status: "ok" },
+      roundOneReply: "child A done",
+      expectsCompletionMessage: true,
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(agentSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps nested subagent completion announces channel-less in session-only mode", async () => {
     const didAnnounce = await runSubagentAnnounceFlow({
       childSessionKey: "agent:main:subagent:worker",
