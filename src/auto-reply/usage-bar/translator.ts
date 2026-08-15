@@ -179,8 +179,11 @@ function delta(value: unknown, previous: number | undefined): string {
     return "";
   }
   const ratio = n / previous;
-  if (!Number.isFinite(ratio) || ratio <= 0) {
+  if (Number.isNaN(ratio) || ratio < 0) {
     return "";
+  }
+  if (ratio === 0) {
+    return `↓>${DELTA_MAX_DISPLAY - 1}×`;
   }
   const magnitude = ratio > 1 ? ratio : 1 / ratio;
   if (magnitude < DELTA_MIN_RATIO) {
@@ -190,13 +193,14 @@ function delta(value: unknown, previous: number | undefined): string {
   // A multiplier this large is a spike, not a measurement worth a decimal --
   // and without a bound the value renders in exponent form ("1e+300"), which is
   // meaningless in a footer.
-  if (magnitude >= DELTA_MAX_DISPLAY) {
+  const rounded = Math.round(magnitude);
+  if (magnitude >= DELTA_MAX_DISPLAY || rounded >= DELTA_MAX_DISPLAY) {
     return `${arrow}>${DELTA_MAX_DISPLAY - 1}×`;
   }
   // Decide the shape on the value that will actually be shown: 9.99 rounds to
   // 10.0, and rendering that as "10.0" next to a plain "10" is inconsistent.
   const oneDecimal = magnitude.toFixed(1);
-  return Number(oneDecimal) < 10 ? `${arrow}${oneDecimal}×` : `${arrow}${Math.round(magnitude)}×`;
+  return Number(oneDecimal) < 10 ? `${arrow}${oneDecimal}×` : `${arrow}${rounded}×`;
 }
 
 const VERB_NAMES = new Set([
@@ -316,7 +320,7 @@ function interp(text: string, ctx: unknown, vocab: Vocab): string {
     // nothing themselves -- a threshold that did not hold -- so the fallback has
     // to be honoured here as well, or `{cost|gt:0.5||-}` renders empty instead
     // of the text its author asked for.
-    if (val === null || val === undefined) {
+    if (val === null || val === undefined || val === "") {
       return fallback ?? "";
     }
     if (typeof val === "string") {
@@ -345,7 +349,7 @@ function evalCondition(expr: string, ctx: unknown, vocab: Vocab): unknown {
     const seg = segRaw.trim();
     const name = expectDefined(seg.split(":")[0], 'seg.split(":") entry at 0');
     if (!VERB_NAMES.has(name)) {
-      continue;
+      return undefined;
     }
     if (val === null || val === undefined || val === "") {
       return undefined;

@@ -282,6 +282,17 @@ describe("verb-yielded nothing and delta display bounds", () => {
     expect(render([{ text: "{missing||—}" }], {})).toBe("—");
   });
 
+  it("honours the fallback when a verb yields an empty string", () => {
+    expect(render([{ text: "{now|delta:prev||—}" }], { now: 10, prev: 0 })).toBe("—");
+    expect(render([{ text: "{now|delta:prev||—}" }], { now: 10, prev: 10 })).toBe("—");
+    expect(render([{ text: "{a|gt:50|num||—}" }], { a: 10 })).toBe("—");
+  });
+
+  it("preserves meaningful zero and false values while applying fallbacks", () => {
+    expect(render([{ text: "{a|num||—}" }], { a: 0 })).toBe("0");
+    expect(render([{ text: "{flag||—}" }], { flag: false })).toBe("false");
+  });
+
   it("still renders nothing when a verb yields nothing and no fallback was given", () => {
     expect(render([{ text: "{a|gt:50}" }], { a: 10 })).toBe("");
   });
@@ -295,6 +306,40 @@ describe("verb-yielded nothing and delta display bounds", () => {
   it("bounds a runaway multiplier instead of printing an exponent", () => {
     expect(render([{ text: "{now|delta:prev}" }], { now: 1, prev: 1e-300 })).toBe("↑>999×");
     expect(render([{ text: "{now|delta:prev}" }], { now: 1e-300, prev: 1 })).toBe("↓>999×");
+  });
+
+  it("keeps rounded delta output below the bound", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 999.95, prev: 1 })).toBe("↑>999×");
+  });
+
+  it("bounds ratios that overflow or underflow despite finite operands", () => {
+    expect(
+      render([{ text: "{now|delta:prev}" }], {
+        now: Number.MAX_VALUE,
+        prev: Number.MIN_VALUE,
+      }),
+    ).toBe("↑>999×");
+    expect(
+      render([{ text: "{now|delta:prev}" }], {
+        now: Number.MIN_VALUE,
+        prev: Number.MAX_VALUE,
+      }),
+    ).toBe("↓>999×");
+  });
+});
+
+describe("usage-bar condition parsing", () => {
+  it("fails closed on an unknown condition modifier", () => {
+    expect(
+      render([{ when: "cost.turn_usd|not-a-verb", text: "X" }], { cost: { turn_usd: 1 } }),
+    ).toBe("");
+  });
+
+  it("keeps valid threshold conditions and plain paths working", () => {
+    expect(render([{ when: "cost.turn_usd|gt:0.5", text: "X" }], { cost: { turn_usd: 1 } })).toBe(
+      "X",
+    );
+    expect(render([{ when: "cost.turn_usd", text: "X" }], { cost: { turn_usd: 0 } })).toBe("X");
   });
 });
 
