@@ -265,3 +265,48 @@ describe("threshold, ratio and division verbs", () => {
     expect(render([{ text: "{m|alias:models}" }], { m: "claude-opus-4-6" })).toBe("opus46");
   });
 });
+
+describe("verb-yielded nothing and delta display bounds", () => {
+  it("honours the fallback when a verb yields nothing, not just a missing path", () => {
+    // Found by adversarial review: the fallback used to be checked only against
+    // the raw path value, so a threshold that did not hold rendered empty.
+    expect(render([{ text: "{a|gt:50||—}" }], { a: 10 })).toBe("—");
+    expect(render([{ text: "{a|lt:5||—}" }], { a: 10 })).toBe("—");
+    expect(render([{ text: "{a|div:0||—}" }], { a: 10 })).toBe("—");
+    expect(render([{ text: "{missing||—}" }], {})).toBe("—");
+  });
+
+  it("still renders nothing when a verb yields nothing and no fallback was given", () => {
+    expect(render([{ text: "{a|gt:50}" }], { a: 10 })).toBe("");
+  });
+
+  it("keeps the decimal shape consistent across the ten-times boundary", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 999, prev: 100 })).toBe("↑10×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1000, prev: 100 })).toBe("↑10×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 990, prev: 100 })).toBe("↑9.9×");
+  });
+
+  it("bounds a runaway multiplier instead of printing an exponent", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1, prev: 1e-300 })).toBe("↑>999×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1e-300, prev: 1 })).toBe("↓>999×");
+  });
+});
+
+describe("delta sign handling and non-primitive interpolation", () => {
+  it("renders nothing when either side is negative", () => {
+    // Two negatives divide into a positive ratio; without an explicit guard this
+    // rendered a confident "↑2.0×" for values that cannot occur as usage or cost.
+    expect(render([{ text: "{now|delta:prev}" }], { now: -10, prev: -5 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: -10, prev: 5 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 10, prev: -5 })).toBe("");
+  });
+
+  it("does not stringify a non-primitive into the footer", () => {
+    // The narrowed return applies to any non-primitive at the end of a chain,
+    // not only to an alias table value. Previously String() produced "1,2,3"
+    // for an array and "[object Object]" for an object.
+    expect(render([{ text: "{arr}" }], { arr: [1, 2, 3] })).toBe("");
+    expect(render([{ text: "{arr||—}" }], { arr: [1, 2, 3] })).toBe("—");
+    expect(render([{ text: "{obj}" }], { obj: { a: 1 } })).toBe("");
+  });
+});

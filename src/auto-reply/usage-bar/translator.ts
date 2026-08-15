@@ -164,10 +164,17 @@ function div(value: unknown, by: number | undefined): number | undefined {
  * otherwise every footer would carry a meaningless `↑1.0×`.
  */
 const DELTA_MIN_RATIO = 1.15;
+const DELTA_MAX_DISPLAY = 1000;
 
 function delta(value: unknown, previous: number | undefined): string {
   const n = toFiniteNumber(value);
   if (n === undefined || previous === undefined || previous === 0) {
+    return "";
+  }
+  // These are usage and cost magnitudes; a negative on either side is not a
+  // smaller quantity, it is nonsense input. Two negatives divide into a
+  // positive ratio and would otherwise render a confident arrow for it.
+  if (n < 0 || previous < 0) {
     return "";
   }
   const ratio = n / previous;
@@ -178,7 +185,17 @@ function delta(value: unknown, previous: number | undefined): string {
   if (magnitude < DELTA_MIN_RATIO) {
     return "";
   }
-  return `${ratio > 1 ? "↑" : "↓"}${magnitude < 10 ? magnitude.toFixed(1) : Math.round(magnitude)}×`;
+  const arrow = ratio > 1 ? "↑" : "↓";
+  // A multiplier this large is a spike, not a measurement worth a decimal --
+  // and without a bound the value renders in exponent form ("1e+300"), which is
+  // meaningless in a footer.
+  if (magnitude >= DELTA_MAX_DISPLAY) {
+    return `${arrow}>${DELTA_MAX_DISPLAY - 1}×`;
+  }
+  // Decide the shape on the value that will actually be shown: 9.99 rounds to
+  // 10.0, and rendering that as "10.0" next to a plain "10" is inconsistent.
+  const oneDecimal = magnitude.toFixed(1);
+  return Number(oneDecimal) < 10 ? `${arrow}${oneDecimal}×` : `${arrow}${Math.round(magnitude)}×`;
 }
 
 const VERB_NAMES = new Set([
@@ -294,8 +311,12 @@ function interp(text: string, ctx: unknown, vocab: Vocab): string {
     // hold). Narrow explicitly instead of String()-ing an unknown: stringifying
     // an object here would put "[object Object]" in a footer, and oxlint’s
     // no-base-to-string rejects it outright.
+    // The fallback above only saw the raw path value. Verbs can now yield
+    // nothing themselves -- a threshold that did not hold -- so the fallback has
+    // to be honoured here as well, or `{cost|gt:0.5||-}` renders empty instead
+    // of the text its author asked for.
     if (val === null || val === undefined) {
-      return "";
+      return fallback ?? "";
     }
     if (typeof val === "string") {
       return val;
@@ -303,7 +324,9 @@ function interp(text: string, ctx: unknown, vocab: Vocab): string {
     if (typeof val === "number" || typeof val === "bigint" || typeof val === "boolean") {
       return String(val);
     }
-    return "";
+    // Not renderable as text (object, symbol, function). Never String() it: that
+    // puts "[object Object]" in a footer.
+    return fallback ?? "";
   });
 }
 
