@@ -57,7 +57,7 @@ import type {
   PreparedModelRuntimeInput,
 } from "./prepared-model-runtime.types.js";
 import { ensureRuntimePluginsLoaded } from "./runtime-plugins.js";
-import type { AuthStorage, AuthStorageData } from "./sessions/auth-storage.js";
+import { AuthStorage, type AuthStorageData } from "./sessions/auth-storage.js";
 import type { ModelRegistry } from "./sessions/model-registry.js";
 import { stableStringify } from "./stable-stringify.js";
 
