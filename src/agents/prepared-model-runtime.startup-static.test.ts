@@ -327,10 +327,12 @@ describe("prepared model runtime Gateway catalog mode", () => {
       affectsInheritedStores: false,
     });
     await expect(snapshot?.loadFullModelCatalog?.()).resolves.toBe(fullCatalog);
-    await vi.waitFor(() => expect(mocks.prepareStaticCatalog).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mocks.discoverModels).toHaveBeenCalledTimes(3));
     expect(mocks.ensureOpenClawModelsJson).not.toHaveBeenCalled();
     expect(mocks.planOpenClawModelsJsonSource).toHaveBeenCalledOnce();
-    expect(mocks.prepareStaticCatalog).toHaveBeenCalledTimes(2);
+    // Auth publication refreshes credential-bearing projections without rebuilding the
+    // immutable provider static catalog for the same config/workspace generation.
+    expect(mocks.prepareStaticCatalog).toHaveBeenCalledOnce();
     expect(mocks.discoverModels).toHaveBeenCalledTimes(3);
   });
 

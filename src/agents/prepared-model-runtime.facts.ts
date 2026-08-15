@@ -55,6 +55,7 @@ import type {
   PreparedModelRuntimeInput,
 } from "./prepared-model-runtime.types.js";
 import {
+  clearSharedStaticWorkspaceAgentFacts,
   clearSharedStaticWorkspaceBuilds,
   prepareSharedStaticWorkspaceBuildGroup,
   preparedModelRuntimeWorkspaceFactsKey,
@@ -212,6 +213,7 @@ export async function prepareWorkspaceBuildGroup(
 async function prepareWorkspaceBuildGroupUnshared(
   inputs: readonly PreparedModelRuntimeInput[],
   catalogMode: PreparedModelRuntimeCatalogMode,
+  cachedWorkspaceFacts?: PreparedModelRuntimeWorkspaceFacts,
 ): Promise<{
   agentFacts: PreparedModelRuntimeAgentFacts[];
   workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
@@ -233,7 +235,7 @@ async function prepareWorkspaceBuildGroupUnshared(
   const env = input.env ?? process.env;
   const runtimePluginStartedAt = performance.now();
   const runtimePluginRegistry =
-    catalogMode === "live" && !input.readOnly
+    !cachedWorkspaceFacts && catalogMode === "live" && !input.readOnly
       ? ensureRuntimePluginsLoaded({
           config: input.config,
           ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
@@ -241,32 +243,34 @@ async function prepareWorkspaceBuildGroupUnshared(
       : undefined;
   const runtimePluginMs = performance.now() - runtimePluginStartedAt;
   const pluginMetadataStartedAt = performance.now();
-  const pluginMetadataSnapshot = resolvePluginMetadataSnapshot({
-    config: input.config,
-    env,
-    ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
-    ...(input.workspacePluginRootPresent === undefined
-      ? {}
-      : { workspacePluginRootPresent: input.workspacePluginRootPresent }),
-  });
+  const pluginMetadataSnapshot =
+    cachedWorkspaceFacts?.pluginMetadataSnapshot ??
+    resolvePluginMetadataSnapshot({
+      config: input.config,
+      env,
+      ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
+      ...(input.workspacePluginRootPresent === undefined
+        ? {}
+        : { workspacePluginRootPresent: input.workspacePluginRootPresent }),
+    });
   const pluginMetadataMs = performance.now() - pluginMetadataStartedAt;
   const staticProviderPlanningStartedAt = performance.now();
   const matchesStaticModelId = createStaticModelIdMatcher({
     manifestPlugins: pluginMetadataSnapshot.plugins,
   });
   const mediaCapabilityProviders =
-    input.readOnly || !runtimePluginRegistry
+    cachedWorkspaceFacts?.mediaCapabilityProviders ??
+    (input.readOnly || !runtimePluginRegistry
       ? undefined
       : prepareMediaCapabilityProviders({
           cfg: input.config,
           pluginMetadataSnapshot,
           registry: runtimePluginRegistry,
-        });
+        }));
   const messageToolCatalog = runtimePluginRegistry
     ? getPreparedMessageToolCatalogForRegistry(runtimePluginRegistry)
-    : catalogMode === "live"
-      ? getPreparedMessageToolCatalog()
-      : undefined;
+    : (cachedWorkspaceFacts?.messageToolCatalog ??
+      (catalogMode === "live" ? getPreparedMessageToolCatalog() : undefined));
   const resolveManifestStaticCatalogModel = createBundledStaticCatalogModelResolver({
     cfg: input.config,
     env,
@@ -293,7 +297,8 @@ async function prepareWorkspaceBuildGroupUnshared(
   const staticProviderPlanningMs = performance.now() - staticProviderPlanningStartedAt;
   const staticProviderCatalogStartedAt = performance.now();
   const preparedStaticProviderCatalog =
-    catalogMode === "static"
+    cachedWorkspaceFacts?.preparedStaticProviderCatalog ??
+    (catalogMode === "static"
       ? await prepareImplicitProviderStaticCatalog({
           config: input.config,
           env,
@@ -302,7 +307,7 @@ async function prepareWorkspaceBuildGroupUnshared(
           staticCatalogProviderIds,
           ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
         })
-      : undefined;
+      : undefined);
   const staticProviderCatalogMs = performance.now() - staticProviderCatalogStartedAt;
   const preparedSyntheticAuthProviders = preparedStaticProviderCatalog?.providers ?? [];
   // Static Gateway publication consumes provider discovery entrypoints without activating plugin
@@ -341,23 +346,28 @@ async function prepareWorkspaceBuildGroupUnshared(
   const agentFactsMs = performance.now() - agentFactsStartedAt;
   const configuredProjectionStartedAt = performance.now();
   const providerStaticModels =
-    catalogMode === "static"
+    cachedWorkspaceFacts?.providerStaticModels ??
+    (catalogMode === "static"
       ? []
       : await loadBundledProviderStaticCatalogContextModels({
           cfg: input.config,
           env,
           metadataSnapshot: pluginMetadataSnapshot,
           ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
-        });
+        }));
   // Provider definitions are process/config facts. Which refs are admitted remains agent-owned.
-  const inlineProviderModels = buildInlineProviderModels(input.config.models?.providers ?? {}, {
-    providerMetadataOwners: pluginMetadataSnapshot.owners,
-  });
-  const configuredCatalogEntries = buildConfiguredModelCatalog({
-    cfg: input.config,
-    manifestPlugins: pluginMetadataSnapshot.plugins,
-    ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
-  });
+  const inlineProviderModels =
+    cachedWorkspaceFacts?.inlineProviderModels ??
+    buildInlineProviderModels(input.config.models?.providers ?? {}, {
+      providerMetadataOwners: pluginMetadataSnapshot.owners,
+    });
+  const configuredCatalogEntries =
+    cachedWorkspaceFacts?.configuredCatalogEntries ??
+    buildConfiguredModelCatalog({
+      cfg: input.config,
+      manifestPlugins: pluginMetadataSnapshot.plugins,
+      ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
+    });
   const agentFacts: PreparedModelRuntimeAgentFacts[] = [];
   for (const facts of agentBaseFacts) {
     const configuredRuntimeModels = prepareConfiguredRuntimeModels({
@@ -434,6 +444,12 @@ async function prepareWorkspaceBuildGroupUnshared(
 /** Clears request-shared static facts when the lifecycle owner is invalidated. */
 export function clearPreparedModelRuntimeSharedWorkspaceBuilds(): void {
   clearSharedStaticWorkspaceBuilds();
+  clearSharedStaticConfiguredCatalogFacts();
+}
+
+/** Invalidates credential-bearing projections without repeating static provider discovery. */
+export function clearPreparedModelRuntimeSharedAgentFacts(): void {
+  clearSharedStaticWorkspaceAgentFacts();
   clearSharedStaticConfiguredCatalogFacts();
 }
 

@@ -5,7 +5,10 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { registerRuntimeAuthProfileStoreMutationListener } from "./auth-profiles/runtime-snapshots.js";
-import { clearPreparedModelRuntimeSharedWorkspaceBuilds } from "./prepared-model-runtime.facts.js";
+import {
+  clearPreparedModelRuntimeSharedAgentFacts,
+  clearPreparedModelRuntimeSharedWorkspaceBuilds,
+} from "./prepared-model-runtime.facts.js";
 import { createGatewayPreparedModelRuntimeLifecycle } from "./prepared-model-runtime.gateway-lifecycle.js";
 import { loadPreparedModelRuntimeSnapshotWithLifecycle } from "./prepared-model-runtime.load.js";
 import {
@@ -782,7 +785,7 @@ async function drainPendingAuthMutations(): Promise<void> {
 }
 
 function invalidateForAuthMutation(event: AuthMutationEvent): void {
-  clearPreparedModelRuntimeSharedWorkspaceBuilds();
+  clearPreparedModelRuntimeSharedAgentFacts();
   const normalizedEvent = {
     ...event,
     agentDir: normalizeOptionalDir(event.agentDir),
