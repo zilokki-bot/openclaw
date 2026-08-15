@@ -272,6 +272,51 @@ describe("threshold, ratio and division verbs", () => {
   });
 });
 
+describe("gt, div, and delta reject arrays instead of silently coercing them", () => {
+  // Number([5]) === 5 and Number([]) === 0 -- a raw Number() cast let a
+  // single-element array read as its element and an empty array read as
+  // zero. parseFiniteNumber from @openclaw/normalization-core only accepts
+  // number values and strict numeric strings, so arrays fall through to
+  // undefined at every one of these call sites instead.
+
+  it("does not treat an array as its sole numeric element for the compared value", () => {
+    expect(render([{ when: "a|gt:0", text: "X" }], { a: [5] })).toBe("");
+    expect(render([{ when: "a|lt:10", text: "X" }], { a: [5] })).toBe("");
+  });
+
+  it("does not treat an array path operand as its sole numeric element for the bound", () => {
+    expect(render([{ when: "a|gt:b", text: "X" }], { a: 10, b: [3] })).toBe("");
+  });
+
+  it("does not treat an array as zero or its element when dividing", () => {
+    expect(render([{ text: "{a|div:2}" }], { a: [10] })).toBe("");
+    expect(render([{ text: "{a|div:2}" }], { a: [] })).toBe("");
+    expect(render([{ text: "{a|div:b}" }], { a: 10, b: [2] })).toBe("");
+  });
+
+  it("does not treat an array as a numeric value or previous for delta", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: [50], prev: 10 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 50, prev: [10] })).toBe("");
+  });
+
+  it("still honours the fallback once the array is rejected", () => {
+    expect(render([{ text: "{a|div:2||—}" }], { a: [10] })).toBe("—");
+    expect(render([{ text: "{now|delta:prev||—}" }], { now: [5], prev: 10 })).toBe("—");
+  });
+
+  it("still parses strict decimal and scientific-notation literals for the bound", () => {
+    expect(render([{ when: "a|gt:5.5", text: "X" }], { a: 10 })).toBe("X");
+    expect(render([{ when: "a|gt:1e2", text: "X" }], { a: 150 })).toBe("X");
+    expect(render([{ when: "a|gt:1e2", text: "X" }], { a: 50 })).toBe("");
+  });
+
+  it("still parses strict decimal and scientific-notation strings from a path operand", () => {
+    expect(render([{ when: "a|gt:b", text: "X" }], { a: 10, b: "5.5" })).toBe("X");
+    expect(render([{ when: "a|gt:b", text: "X" }], { a: 500, b: "1e2" })).toBe("X");
+    expect(render([{ text: "{a|div:b|fixed:1}" }], { a: 100, b: "1e1" })).toBe("10.0");
+  });
+});
+
 describe("verb-yielded nothing and delta display bounds", () => {
   it("honours the fallback when a verb yields nothing, not just a missing path", () => {
     // Found by adversarial review: the fallback used to be checked only against

@@ -1,6 +1,7 @@
 import {
   asSafeIntegerInRange,
   expectDefined,
+  parseFiniteNumber,
   parseStrictInteger,
 } from "@openclaw/normalization-core";
 export type UsageBarTemplate = Record<string, unknown>;
@@ -122,27 +123,19 @@ function meter(value: unknown, width: number, scale: unknown): string {
   return cells.slice(0, width).join("");
 }
 
-function toFiniteNumber(value: unknown): number | undefined {
-  if (value === null || value === undefined || value === "" || typeof value === "boolean") {
-    return undefined;
-  }
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
-}
-
 /** Resolves a verb argument that is either a literal number or a contract path. */
 function resolveNumericArg(raw: string | undefined, ctx: unknown): number | undefined {
   const arg = raw?.trim();
   if (!arg) {
     return undefined;
   }
-  const literal = toFiniteNumber(arg);
-  return literal === undefined ? toFiniteNumber(getPath(ctx, arg)) : literal;
+  const literal = parseFiniteNumber(arg);
+  return literal === undefined ? parseFiniteNumber(getPath(ctx, arg)) : literal;
 }
 
 /** Threshold verbs return true when the comparison holds so `when` can gate on them. */
 function compare(value: unknown, bound: number | undefined, want: "gt" | "lt"): true | undefined {
-  const n = toFiniteNumber(value);
+  const n = parseFiniteNumber(value);
   if (n === undefined || bound === undefined) {
     return undefined;
   }
@@ -151,7 +144,7 @@ function compare(value: unknown, bound: number | undefined, want: "gt" | "lt"): 
 }
 
 function div(value: unknown, by: number | undefined): number | undefined {
-  const n = toFiniteNumber(value);
+  const n = parseFiniteNumber(value);
   if (n === undefined || by === undefined || by === 0) {
     return undefined;
   }
@@ -168,7 +161,7 @@ const DELTA_MIN_RATIO = 1.15;
 const DELTA_MAX_DISPLAY = 1000;
 
 function delta(value: unknown, previous: number | undefined): string {
-  const n = toFiniteNumber(value);
+  const n = parseFiniteNumber(value);
   if (n === undefined || previous === undefined || previous === 0) {
     return "";
   }
