@@ -968,6 +968,50 @@ describe("loadGatewayPlugins", () => {
     ).resolves.toEqual({ status: "ok" });
   });
 
+  test("approval-bound requests keep the authenticated requester while adding plugin authority", async () => {
+    const originalClient = {
+      connect: {
+        client: {
+          id: "openclaw-control-ui",
+          version: "test",
+          platform: "darwin",
+          mode: "ui",
+        },
+        device: { id: "device-requester" },
+        scopes: ["operator.write"],
+      },
+      isDeviceTokenAuth: true,
+    } as unknown as GatewayRequestOptions["client"];
+    const scope = {
+      context: createTestContext("approval-bound-requester"),
+      client: originalClient,
+      isWebchatConnect: () => false,
+    } satisfies PluginRuntimeGatewayRequestScope;
+    handleGatewayRequest.mockImplementationOnce(async (opts: HandleGatewayRequestOptions) => {
+      expect(opts.req.method).toBe("plugin.approval.request");
+      expect(opts.client?.connect.client.id).toBe("openclaw-control-ui");
+      expect(opts.client?.connect.device?.id).toBe("device-requester");
+      expect(opts.client?.isDeviceTokenAuth).toBe(true);
+      expect(opts.client?.connect.scopes).toEqual(["operator.approvals"]);
+      expect(opts.client?.internal?.pluginRuntimeOwnerId).toBe("workboard");
+      opts.respond(true, { status: "accepted", id: "plugin:bound" });
+    });
+
+    await expect(
+      gatewayRequestScopeModule.withPluginRuntimeGatewayRequestScope(scope, () =>
+        gatewayRequestScopeModule.withPluginRuntimePluginScope(
+          { pluginId: "workboard", pluginOrigin: "bundled" },
+          () =>
+            serverPluginsModule.dispatchTrustedPluginApprovalRequest({
+              pluginId: "workboard",
+              title: "Update Workboard card",
+              description: "Apply one exact update.",
+            }),
+        ),
+      ),
+    ).resolves.toEqual({ status: "accepted", id: "plugin:bound" });
+  });
+
   test("uses one timeout budget across accepted and final in-process responses", async () => {
     vi.useFakeTimers();
     try {

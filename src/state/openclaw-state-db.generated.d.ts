@@ -110,6 +110,25 @@ export interface ApnsRegistrations {
   updated_at_ms: number;
 }
 
+export interface ApprovalBoundMutations {
+  approval_expires_at_ms: number;
+  approval_id: string;
+  bound_at_ms: number;
+  expected_revision: number;
+  finalized_at_ms: number | null;
+  mutation_id: string;
+  plugin_id: string;
+  released_at_ms: number | null;
+  requester_client_id: string | null;
+  requester_device_id: string | null;
+  requester_device_token_auth: Generated<number>;
+  reservation_expires_at_ms: number;
+  reserved_at_ms: number;
+  resource_id: string;
+  resource_kind: string;
+  status: string;
+}
+
 export interface AuditEvents {
   account_ref: string | null;
   action: string;
@@ -936,6 +955,7 @@ export interface OnboardingRecommendations {
 
 export interface OperatorApprovals {
   approval_id: string;
+  approval_mutation_binding_json: string | null;
   audience_session_keys_json: string;
   consumed_at_ms: number | null;
   consumed_by: string | null;
@@ -1554,6 +1574,7 @@ export interface DB {
   android_notification_recent_packages: AndroidNotificationRecentPackages;
   apns_registration_tombstones: ApnsRegistrationTombstones;
   apns_registrations: ApnsRegistrations;
+  approval_bound_mutations: ApprovalBoundMutations;
   audit_events: AuditEvents;
   audit_identity_keys: AuditIdentityKeys;
   auth_profile_state: AuthProfileState;

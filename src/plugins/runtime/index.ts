@@ -314,6 +314,28 @@ export function createPluginRuntime(_options: CreatePluginRuntimeOptions = {}): 
     // Sourced from the shared OpenClaw version resolver (#52899) so plugins
     // always see the same version the CLI reports, avoiding API-version drift.
     version: VERSION,
+    approvalBoundMutation: {
+      request: async () => {
+        throw new Error(
+          "approvalBoundMutation is only available through the plugin runtime proxy.",
+        );
+      },
+      reserve: () => {
+        throw new Error(
+          "approvalBoundMutation is only available through the plugin runtime proxy.",
+        );
+      },
+      finalize: () => {
+        throw new Error(
+          "approvalBoundMutation is only available through the plugin runtime proxy.",
+        );
+      },
+      release: () => {
+        throw new Error(
+          "approvalBoundMutation is only available through the plugin runtime proxy.",
+        );
+      },
+    },
     gateway: createRuntimeGateway(),
     config: createRuntimeConfig(),
     agent,

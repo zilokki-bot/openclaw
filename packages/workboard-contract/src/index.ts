@@ -340,6 +340,8 @@ export type WorkboardMetadata = {
 
 export type WorkboardCard = {
   id: string;
+  /** Monotonic optimistic-concurrency revision. Legacy rows start at zero. */
+  revision?: number;
   title: string;
   notes?: string;
   status: WorkboardStatus;
@@ -358,6 +360,24 @@ export type WorkboardCard = {
   completedAt?: number;
   events?: WorkboardEvent[];
   metadata?: WorkboardMetadata;
+};
+
+export type WorkboardApprovalMutationReceipt = {
+  approvalId: string;
+  mutationId: string;
+  cardId: string;
+  requesterDeviceId: string | null;
+  requesterClientId: string | null;
+  requesterDeviceTokenAuth: boolean;
+  oldRevision: number;
+  newRevision: number;
+  createdAt: number;
+};
+
+export type WorkboardApprovalBoundUpdateResult = {
+  card: WorkboardCard;
+  receipt: WorkboardApprovalMutationReceipt;
+  replayed: boolean;
 };
 
 export type WorkboardListResult = {

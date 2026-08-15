@@ -49,6 +49,8 @@ describe("workboard gateway methods", () => {
       "workboard.cards.list",
       "workboard.cards.create",
       "workboard.cards.update",
+      "workboard.cards.approvalBoundRequest",
+      "workboard.cards.approvalBoundUpdate",
       "workboard.cards.move",
       "workboard.cards.delete",
       "workboard.cards.comment",

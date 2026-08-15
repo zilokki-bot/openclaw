@@ -12,6 +12,7 @@ import {
   closeOpenClawStateDatabase,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
+import { reserveApprovalBoundMutation } from "./approval-bound-mutation-store.js";
 import {
   ExecApprovalManager,
   InvalidApprovalIdError,
@@ -650,6 +651,106 @@ describe("ExecApprovalManager", () => {
       expect(manager.awaitDecision(id)).toBeNull();
       expect(getOperatorApproval({ id, databaseOptions })).toBeNull();
     }
+  });
+
+  it("persists and redeems only the request-time approval mutation binding", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-manager-"));
+    tempDirs.push(dir);
+    const databaseOptions = { path: path.join(dir, "state.sqlite") };
+    const manager = new ExecApprovalManager<PluginApprovalRequestPayload>({
+      approvalKind: "plugin",
+      persistence: { runtimeEpoch: "runtime-plugin", databaseOptions },
+    });
+    const record = manager.create(
+      {
+        pluginId: "workboard",
+        title: "Update Workboard card",
+        description: "Apply one exact approved update.",
+        toolName: "workboard.cards.approvalBoundUpdate",
+        allowedDecisions: ["allow-once", "deny"],
+        approvalBoundMutation: {
+          mutationId: "workboard-card-update:digest-a",
+          resourceKind: "workboard-card",
+          resourceId: "card-a",
+          expectedRevision: 0,
+        },
+      },
+      60_000,
+      "plugin:approval-bound",
+    );
+    record.requestedByDeviceId = "device-a";
+    record.requestedByClientId = "client-a";
+    record.requestedByDeviceTokenAuth = true;
+    const decisionPromise = manager.register(record, 60_000);
+
+    const database = openOpenClawStateDatabase(databaseOptions);
+    const row = database.db
+      .prepare(
+        `SELECT o.approval_mutation_binding_json, m.*
+         FROM operator_approvals o
+         JOIN approval_bound_mutations m ON m.approval_id = o.approval_id
+         WHERE o.approval_id = ?`,
+      )
+      .get(record.id) as Record<string, unknown> | undefined;
+    expect(row).toMatchObject({
+      plugin_id: "workboard",
+      mutation_id: "workboard-card-update:digest-a",
+      resource_kind: "workboard-card",
+      resource_id: "card-a",
+      requester_device_id: "device-a",
+      requester_client_id: "client-a",
+      requester_device_token_auth: 1,
+      expected_revision: 0,
+      approval_expires_at_ms: record.expiresAtMs,
+      status: "bound",
+      bound_at_ms: record.createdAtMs,
+    });
+    expect(JSON.parse(String(row?.approval_mutation_binding_json))).toEqual({
+      pluginId: "workboard",
+      mutationId: "workboard-card-update:digest-a",
+      resourceKind: "workboard-card",
+      resourceId: "card-a",
+      expectedRevision: 0,
+    });
+
+    manager.resolveDetailed(record.id, "allow-once", { kind: "device", id: "reviewer" });
+    await expect(decisionPromise).resolves.toBe("allow-once");
+    expect(
+      reserveApprovalBoundMutation({
+        pluginId: "workboard",
+        binding: {
+          approvalId: record.id,
+          mutationId: "workboard-card-update:digest-a",
+          resourceKind: "workboard-card",
+          resourceId: "card-a",
+          requester: {
+            deviceId: "device-a",
+            clientId: "client-a",
+            deviceTokenAuth: true,
+          },
+          expectedRevision: 0,
+        },
+        databaseOptions,
+      }),
+    ).toMatchObject({ outcome: "reserved" });
+    expect(() =>
+      reserveApprovalBoundMutation({
+        pluginId: "workboard",
+        binding: {
+          approvalId: record.id,
+          mutationId: "workboard-card-update:other-digest",
+          resourceKind: "workboard-card",
+          resourceId: "card-a",
+          requester: {
+            deviceId: "device-a",
+            clientId: "client-a",
+            deviceTokenAuth: true,
+          },
+          expectedRevision: 0,
+        },
+        databaseOptions,
+      }),
+    ).toThrow(/different mutation, requester, resource, or revision/);
   });
 
   it("keeps the first durable answer when a later surface conflicts", async () => {

@@ -182,6 +182,41 @@ function resolveApprovalSource(request: unknown): OperatorApprovalSource {
   };
 }
 
+function resolveApprovalMutationBinding(
+  request: unknown,
+):
+  | NonNullable<
+      import("./operator-approval-store.js").NewOperatorApproval["approvalMutationBinding"]
+    >
+  | undefined {
+  if (typeof request !== "object" || request === null) {
+    return undefined;
+  }
+  const record = request as Record<string, unknown>;
+  const raw = record.approvalBoundMutation;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const binding = raw as Record<string, unknown>;
+  const pluginId = readRequestString(request, "pluginId");
+  if (
+    !pluginId ||
+    typeof binding.mutationId !== "string" ||
+    typeof binding.resourceKind !== "string" ||
+    typeof binding.resourceId !== "string" ||
+    typeof binding.expectedRevision !== "number"
+  ) {
+    throw new Error("approval mutation binding is malformed");
+  }
+  return {
+    pluginId,
+    mutationId: binding.mutationId,
+    resourceKind: binding.resourceKind,
+    resourceId: binding.resourceId,
+    expectedRevision: binding.expectedRevision,
+  };
+}
+
 function normalizeAllowedDecisions(
   decisions: readonly ExecApprovalDecision[] | undefined,
 ): ExecApprovalDecision[] {
@@ -323,6 +358,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
           runtimeEpoch: persistence.runtimeEpoch,
           createdAtMs: record.createdAtMs,
           expiresAtMs: record.expiresAtMs,
+          approvalMutationBinding: resolveApprovalMutationBinding(record.request),
         },
         databaseOptions: persistence.databaseOptions,
       });
