@@ -108,7 +108,10 @@ function findSharedStaticAgentFacts(
 ): PreparedModelRuntimeAgentFacts | undefined {
   return facts.find(
     (candidate) =>
-      candidate.input.agentId === input.agentId && candidate.input.agentDir === input.agentDir,
+      candidate.input.agentId === input.agentId &&
+      candidate.input.agentDir === input.agentDir &&
+      (input.workspacePluginRootPresent === false ||
+        candidate.input.workspaceDir === input.workspaceDir),
   );
 }
 
@@ -290,7 +293,7 @@ export async function prepareWorkspaceBuildGroup(
     throw new Error("prepared model runtime workspace group is empty");
   }
   const sharedBuildKey = sharedStaticWorkspaceBuildKey(input, catalogMode);
-  if (!sharedBuildKey || input.workspacePluginRootPresent !== false) {
+  if (!sharedBuildKey || input.workspacePluginRootPresent === true) {
     return await prepareWorkspaceBuildGroupUnshared(inputs, catalogMode);
   }
   const cached = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
