@@ -612,6 +612,32 @@ describe("Gateway prepared model runtime startup", () => {
             logHooks: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
             logChannels: { info: vi.fn(), error: vi.fn() },
           });
+          // Match the live first-use order: the configured parent turns once, then its runtime
+          // auth owner publishes a new generation before two managed-worktree children start.
+          // Credential ownership may refresh, but immutable plugin/provider static facts must not
+          // pay the provider-discovery cost a second time.
+          const parentLease = await acquireAgentRunPreparedModelRuntime(
+            {
+              agentId: "developer",
+              agentDir: resolveAgentDir(cfg, "developer"),
+              workspaceDir: configuredWorkspace,
+              config: cfg,
+            },
+            { catalogMode: "static" },
+          );
+          parentLease.release();
+          replaceRuntimeAuthProfileStoreSnapshots([
+            {
+              agentDir: resolveAgentDir(cfg, "developer"),
+              store: {
+                version: 1,
+                profiles: {},
+                order: { openai: [] },
+                runtimeExternalProfileIds: [],
+                runtimeExternalProfileIdsAuthoritative: true,
+              },
+            },
+          ]);
           const beforeRssBytes = process.memoryUsage().rss;
           const probes = ["/healthz", "/readyz", "/rpc/ping"].map((pathname) =>
             requestAfter(gatewayProbe.port, pathname, 25),
@@ -680,10 +706,10 @@ describe("Gateway prepared model runtime startup", () => {
             firstUseAttribution.metadataSnapshotCalls,
             JSON.stringify(firstUseAttribution.metadataSnapshots),
           ).toBe(1);
-          // A published auth generation still crosses the facts seam once, but must not
-          // re-enter external CLI/plugin hydration (covered by the prepared-store test).
-          expect(firstUseAttribution.authFactsCalls).toBe(1);
-          expect(firstUseAttribution.capturedModelDiscoveryCalls).toBe(1);
+          // Credential-bearing facts and their registry projection refresh exactly once after
+          // the auth owner changes. The immutable provider/static workspace facts above do not.
+          expect(firstUseAttribution.authFactsCalls).toBe(2);
+          expect(firstUseAttribution.capturedModelDiscoveryCalls).toBe(2);
           expect(leases.map(({ snapshot }) => snapshot.workspaceDir)).toEqual(childWorkspaces);
           expect(
             leases.every(({ snapshot }) => snapshot.configuredRuntimeModels.length === 8),

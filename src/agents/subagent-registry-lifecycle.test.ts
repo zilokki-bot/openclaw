@@ -3478,10 +3478,90 @@ describe("requester settle wake trigger", () => {
     expect(later.requesterSettleWake).toEqual({ status: "pending", attemptCount: 0 });
   });
 
+  it("defers a yielded two-child wake until the exact batch is frozen, then wakes once", async () => {
+    const requesterTurnRunId = "run-requester-yield-batch";
+    const first = createRunEntry({
+      runId: "run-yield-a",
+      childSessionKey: "agent:main:subagent:yield-a",
+      requesterTurnRunId,
+      requesterTurnYielded: true,
+      endedAt: 4_000,
+      expectsCompletionMessage: true,
+      delivery: { status: "delivered" },
+    });
+    const second = createRunEntry({
+      runId: "run-yield-b",
+      childSessionKey: "agent:main:subagent:yield-b",
+      requesterTurnRunId,
+      requesterTurnYielded: true,
+      expectsCompletionMessage: true,
+      delivery: { status: "pending" },
+    });
+    const runs = new Map([
+      [first.runId, first],
+      [second.runId, second],
+    ]);
+    const settleWake = vi.fn(
+      async (
+        params: Parameters<
+          LifecycleControllerParams["maybeWakeRequesterAfterAllChildrenSettled"]
+        >[0],
+      ) => {
+        const generation = params.settledEntry.requesterSettleWake?.rearmGeneration;
+        params.completeBatch([first.runId, second.runId], generation);
+        return true;
+      },
+    );
+    const controller = createLifecycleController({
+      entry: first,
+      runs,
+      maybeWakeRequesterAfterAllChildrenSettled: settleWake,
+    });
+
+    controller.completeCleanupBookkeeping({
+      runId: first.runId,
+      entry: first,
+      cleanup: "keep",
+      completedAt: 5_000,
+    });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(settleWake).not.toHaveBeenCalled();
+
+    second.endedAt = 6_000;
+    second.delivery = { status: "delivered" };
+    controller.completeCleanupBookkeeping({
+      runId: second.runId,
+      entry: second,
+      cleanup: "keep",
+      completedAt: 7_000,
+    });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(settleWake).not.toHaveBeenCalled();
+
+    expect(
+      controller.settleRequesterTurnAfterSessionSpawns({
+        requesterSessionKey: first.requesterSessionKey,
+        requesterTurnRunId,
+        requesterYielded: true,
+        acceptedSessionSpawns: [
+          { runId: first.runId, childSessionKey: first.childSessionKey },
+          { runId: second.runId, childSessionKey: second.childSessionKey },
+        ],
+      }),
+    ).toBe(true);
+
+    await waitForLifecycleState(() => expect(settleWake).toHaveBeenCalledTimes(1));
+    expect(first.requesterSettleWake).toBeUndefined();
+    expect(second.requesterSettleWake).toBeUndefined();
+  });
+
   it("preserves a yielded batch re-armed during an earlier successful wake", async () => {
     const entry = createRunEntry({
       requesterTurnRunId: "run-requester",
-      requesterTurnYielded: true,
       endedAt: 4_000,
       expectsCompletionMessage: true,
       delivery: { status: "delivered" },
@@ -3494,6 +3574,9 @@ describe("requester settle wake trigger", () => {
       ) => {
         const firstInvocation = settleWake.mock.calls.length === 1;
         if (firstInvocation) {
+          // The older wake was admitted before sessions_yield marked the
+          // requester turn. Model that mark occurring while the wake is live.
+          entry.requesterTurnYielded = true;
           controller.settleRequesterTurnAfterSessionSpawns({
             requesterSessionKey: entry.requesterSessionKey,
             requesterTurnRunId: "run-requester",

@@ -23,7 +23,7 @@ type PreparedWorkspaceBuildStats = Pick<
 >;
 
 type SharedStaticWorkspaceBuild = {
-  agentFacts: readonly PreparedModelRuntimeAgentFacts[];
+  agentFacts?: readonly PreparedModelRuntimeAgentFacts[];
   workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
   buildStats: PreparedWorkspaceBuildStats;
 };
@@ -37,6 +37,7 @@ type PreparedWorkspaceBuildResult = {
 type PrepareWorkspaceBuildGroupUnshared = (
   inputs: readonly PreparedModelRuntimeInput[],
   catalogMode: PreparedModelRuntimeCatalogMode,
+  cachedWorkspaceFacts?: PreparedModelRuntimeWorkspaceFacts,
 ) => Promise<PreparedWorkspaceBuildResult>;
 
 // Managed worktrees without a workspace extension root have the same static plugin/provider
@@ -46,6 +47,7 @@ type PrepareWorkspaceBuildGroupUnshared = (
 const sharedStaticWorkspaceBuilds = new Map<string, SharedStaticWorkspaceBuild>();
 const sharedStaticWorkspaceBuildInflight = new Map<string, Promise<void>>();
 let sharedStaticWorkspaceBuildEpoch = 0;
+let sharedStaticAgentFactsEpoch = 0;
 
 function normalizedInheritedAuthDir(input: PreparedModelRuntimeInput): string | undefined {
   return input.inheritedAuthDir ? path.resolve(input.inheritedAuthDir) : undefined;
@@ -86,6 +88,9 @@ function materializeSharedStaticWorkspaceBuild(
   inputs: readonly PreparedModelRuntimeInput[],
   key: string,
 ): PreparedWorkspaceBuildResult | undefined {
+  if (!cached.agentFacts) {
+    return undefined;
+  }
   const agentFacts: PreparedModelRuntimeAgentFacts[] = [];
   for (const input of inputs) {
     const cachedFacts = findSharedStaticAgentFacts(cached.agentFacts, input);
@@ -150,7 +155,8 @@ export async function prepareSharedStaticWorkspaceBuildGroup(
   }
 
   const epoch = sharedStaticWorkspaceBuildEpoch;
-  const inflightKey = `${epoch}\0${sharedBuildKey}`;
+  const agentFactsEpoch = sharedStaticAgentFactsEpoch;
+  const inflightKey = `${epoch}\0${agentFactsEpoch}\0${sharedBuildKey}`;
   const existing = sharedStaticWorkspaceBuildInflight.get(inflightKey);
   if (existing) {
     await existing.catch(() => undefined);
@@ -172,7 +178,15 @@ export async function prepareSharedStaticWorkspaceBuildGroup(
   sharedStaticWorkspaceBuildInflight.set(inflightKey, inflight);
   void inflight.catch(() => undefined);
   try {
-    const result = await prepareUnshared(inputs, catalogMode);
+    const retained = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
+    const result = await prepareUnshared(
+      inputs,
+      catalogMode,
+      // Reuse workspace facts only when auth invalidation intentionally scrubbed the
+      // credential-bearing projection. A normal agent-identity miss keeps the previous
+      // fail-closed behavior and builds that group's workspace facts independently.
+      retained && !retained.agentFacts ? retained.workspaceFacts : undefined,
+    );
     if (
       sharedStaticWorkspaceBuildEpoch === epoch &&
       !result.workspaceFacts.pluginMetadataSnapshot.plugins.some(
@@ -180,7 +194,9 @@ export async function prepareSharedStaticWorkspaceBuildGroup(
       )
     ) {
       sharedStaticWorkspaceBuilds.set(sharedBuildKey, {
-        agentFacts: result.agentFacts,
+        ...(sharedStaticAgentFactsEpoch === agentFactsEpoch
+          ? { agentFacts: result.agentFacts }
+          : {}),
         workspaceFacts: result.workspaceFacts,
         buildStats: result.buildStats,
       });
@@ -199,6 +215,18 @@ export async function prepareSharedStaticWorkspaceBuildGroup(
 
 export function clearSharedStaticWorkspaceBuilds(): void {
   sharedStaticWorkspaceBuildEpoch += 1;
+  sharedStaticAgentFactsEpoch += 1;
   sharedStaticWorkspaceBuilds.clear();
   sharedStaticWorkspaceBuildInflight.clear();
+}
+
+/** Drops credential-bearing facts while retaining immutable plugin/provider discovery. */
+export function clearSharedStaticWorkspaceAgentFacts(): void {
+  sharedStaticAgentFactsEpoch += 1;
+  for (const [key, cached] of sharedStaticWorkspaceBuilds) {
+    sharedStaticWorkspaceBuilds.set(key, {
+      workspaceFacts: cached.workspaceFacts,
+      buildStats: cached.buildStats,
+    });
+  }
 }

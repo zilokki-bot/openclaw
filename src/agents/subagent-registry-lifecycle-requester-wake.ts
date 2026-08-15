@@ -218,7 +218,12 @@ export function createSubagentRegistryLifecycleRequesterWake(
 
   function scheduleRequesterSettleWake(runId: string, entry: SubagentRunRecord): void {
     const requesterSessionKey = entry.requesterSessionKey?.trim();
-    if (entry.collect || !requesterSessionKey || scheduledRequesterSettleWakeRuns.has(runId)) {
+    if (
+      entry.collect ||
+      !requesterSessionKey ||
+      (entry.requesterTurnRunId && entry.requesterTurnYielded === true) ||
+      scheduledRequesterSettleWakeRuns.has(runId)
+    ) {
       return;
     }
     const now = Date.now();

@@ -414,6 +414,52 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(completeBatchSpy).toHaveBeenCalledWith(["run-b"], 1);
   });
 
+  it("delivers exactly one visible final after both yielded children settle", async () => {
+    const batchRunIds = ["run-a", "run-b"];
+    const first = makeSettledChild({
+      runId: "run-a",
+      completion: { required: true, resultText: "first findings" },
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds,
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      },
+    });
+    const second = makeSettledChild({
+      runId: "run-b",
+      completion: { required: true, resultText: "second findings" },
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds,
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      },
+    });
+    registryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([first, second]);
+
+    await expect(
+      maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: first })),
+    ).resolves.toBe(true);
+
+    expect(deliverSpy).toHaveBeenCalledTimes(1);
+    expect(deliveredCallArg()).toMatchObject({
+      requireVisibleReply: true,
+      directIdempotencyKey: `announce:requester-settle:${REQUESTER}:run-a,run-b:yield-1`,
+    });
+    const message = String(deliveredCallArg().triggerMessage);
+    expect(message).toContain("first findings");
+    expect(message).toContain("second findings");
+    expect(completeBatchSpy).toHaveBeenCalledWith(batchRunIds, 1);
+
+    await expect(
+      maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: second })),
+    ).resolves.toBe(false);
+    expect(deliverSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("wakes after a requester yields with one already-delivered completion", async () => {
     const child = makeSettledChild({
       runId: "run-b",
