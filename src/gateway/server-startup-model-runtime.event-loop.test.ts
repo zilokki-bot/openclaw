@@ -18,6 +18,11 @@ const manifestModelMocks = vi.hoisted(() => ({
 }));
 const firstUseAttribution = vi.hoisted(() => ({
   metadataSnapshotCalls: 0,
+  metadataSnapshots: [] as Array<{
+    workspaceDir?: string;
+    workspacePluginRootPresent?: boolean;
+    origins: string[];
+  }>,
   authDiscoveryCalls: 0,
   capturedModelDiscoveryCalls: 0,
   metadataSnapshotMs: 0,
@@ -89,7 +94,15 @@ vi.mock("../plugins/plugin-metadata-snapshot.js", async (importOriginal) => {
         firstUseAttribution.metadataSnapshotCalls += 1;
         const startedAt = performance.now();
         try {
-          return actual.resolvePluginMetadataSnapshot(...args);
+          const snapshot = actual.resolvePluginMetadataSnapshot(...args);
+          firstUseAttribution.metadataSnapshots.push({
+            ...(args[0].workspaceDir ? { workspaceDir: args[0].workspaceDir } : {}),
+            ...(args[0].workspacePluginRootPresent !== undefined
+              ? { workspacePluginRootPresent: args[0].workspacePluginRootPresent }
+              : {}),
+            origins: snapshot.plugins.map((plugin) => plugin.origin),
+          });
+          return snapshot;
         } finally {
           firstUseAttribution.metadataSnapshotMs += performance.now() - startedAt;
         }
@@ -141,6 +154,7 @@ beforeEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
   vi.clearAllMocks();
   firstUseAttribution.metadataSnapshotCalls = 0;
+  firstUseAttribution.metadataSnapshots.length = 0;
   firstUseAttribution.authDiscoveryCalls = 0;
   firstUseAttribution.capturedModelDiscoveryCalls = 0;
   firstUseAttribution.metadataSnapshotMs = 0;
@@ -643,7 +657,10 @@ describe("Gateway prepared model runtime startup", () => {
           expect(afterRssBytes - beforeRssBytes).toBeLessThan(512 * 1024 * 1024);
           // Both visible isolated child worktrees inherit one configured agent generation. The
           // static metadata/auth discovery must therefore happen once, not once per child.
-          expect(firstUseAttribution.metadataSnapshotCalls).toBe(1);
+          expect(
+            firstUseAttribution.metadataSnapshotCalls,
+            JSON.stringify(firstUseAttribution.metadataSnapshots),
+          ).toBe(1);
           expect(firstUseAttribution.authDiscoveryCalls).toBe(1);
           expect(firstUseAttribution.capturedModelDiscoveryCalls).toBe(1);
           expect(leases.map(({ snapshot }) => snapshot.workspaceDir)).toEqual(childWorkspaces);
