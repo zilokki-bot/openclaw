@@ -231,6 +231,12 @@ describe("threshold, ratio and division verbs", () => {
     expect(render([{ when: "a|div:missing", text: "X" }], { a: 9 })).toBe("");
   });
 
+  it("uses the fallback when finite operands overflow to a non-finite quotient", () => {
+    expect(render([{ text: "{a|div:b||—}" }], { a: Number.MAX_VALUE, b: Number.MIN_VALUE })).toBe(
+      "—",
+    );
+  });
+
   it("renders the ratio against the previous turn with a direction arrow", () => {
     expect(render([{ text: "{now|delta:prev}" }], { now: 21, prev: 10 })).toBe("↑2.1×");
     expect(render([{ text: "{now|delta:prev}" }], { now: 10, prev: 21 })).toBe("↓2.1×");

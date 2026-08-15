@@ -155,7 +155,8 @@ function div(value: unknown, by: number | undefined): number | undefined {
   if (n === undefined || by === undefined || by === 0) {
     return undefined;
   }
-  return n / by;
+  const quotient = n / by;
+  return Number.isFinite(quotient) ? quotient : undefined;
 }
 
 /**
