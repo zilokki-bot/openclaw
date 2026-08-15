@@ -15,12 +15,14 @@ import {
   ensureAuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
 } from "./auth-profiles/store.js";
+import type { AuthProfileStore } from "./auth-profiles/types.js";
 
 /** Options for discovering credentials without prompting for secret material. */
 export type DiscoverAuthStorageOptions = {
   ambientCredentials?: Readonly<AgentCredentialMap>;
   externalCli?: ExternalCliAuthDiscovery;
   inheritedAuthDir?: string;
+  preparedStore?: AuthProfileStore;
   readOnly?: boolean;
   skipExternalAuthProfiles?: boolean;
   skipCredentials?: boolean;
@@ -83,19 +85,20 @@ export function resolveAmbientAgentCredentialsForDiscovery(
   return credentials;
 }
 
-/** Resolves agent credentials from auth profiles, env, and synthetic auth hooks. */
-export function resolveAgentCredentialsForDiscovery(
+/** Resolves the effective auth store and provider credentials for one discovery generation. */
+export function resolveAgentDiscoveryAuthFacts(
   agentDir: string,
   options?: DiscoverAuthStorageOptions,
-): AgentCredentialMap {
+): { store: AuthProfileStore; credentials: AgentCredentialMap } {
   const storeOptions = {
     allowKeychainPrompt: false,
     ...(options?.config ? { config: options.config } : {}),
     ...(options?.externalCli ? { externalCli: options.externalCli } : {}),
     ...(options?.inheritedAuthDir ? { inheritedAuthDir: options.inheritedAuthDir } : {}),
   };
-  const store =
-    options?.skipExternalAuthProfiles === true
+  const store = options?.preparedStore
+    ? options.preparedStore
+    : options?.skipExternalAuthProfiles === true
       ? ensureAuthProfileStoreWithoutExternalProfiles(agentDir, {
           allowKeychainPrompt: false,
           ...(options?.inheritedAuthDir ? { inheritedAuthDir: options.inheritedAuthDir } : {}),
@@ -124,5 +127,13 @@ export function resolveAgentCredentialsForDiscovery(
     // Ambient auth is a lifecycle-owned fallback. Agent-local profiles remain authoritative.
     credentials[provider] = credential;
   }
-  return credentials;
+  return { store, credentials };
+}
+
+/** Resolves only credentials for callers that do not need store provenance. */
+export function resolveAgentCredentialsForDiscovery(
+  agentDir: string,
+  options?: DiscoverAuthStorageOptions,
+): AgentCredentialMap {
+  return resolveAgentDiscoveryAuthFacts(agentDir, options).credentials;
 }

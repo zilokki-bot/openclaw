@@ -172,15 +172,8 @@ export async function finalizeEmbeddedAgentCommand(params: {
     publishSessionOwnership();
 
     const transcriptPersistenceRunner = result.meta.executionTrace?.runner;
-    const embeddedAssistantGapFill =
-      transcriptPersistenceRunner === "embedded" ||
-      (transcriptPersistenceRunner === undefined &&
-        Boolean(result.meta.finalAssistantVisibleText?.trim()));
     let persistedCliTurnTranscript = false;
-    if (
-      !sessionReboundDuringRun &&
-      (transcriptPersistenceRunner === "cli" || embeddedAssistantGapFill)
-    ) {
+    if (!sessionReboundDuringRun && transcriptPersistenceRunner === "cli") {
       try {
         const transcriptResult = await attemptExecutionRuntime.persistCliTurnTranscript({
           body,
@@ -195,7 +188,6 @@ export async function finalizeEmbeddedAgentCommand(params: {
           threadId: params.opts.threadId,
           sessionCwd: effectiveCwd,
           config: cfg,
-          embeddedAssistantGapFill,
           skipAssistantTurn: assistantTranscriptOwned,
           skipUserTurn:
             suppressUserTurnPersistence ||

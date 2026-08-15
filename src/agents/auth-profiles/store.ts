@@ -1315,6 +1315,24 @@ export function getRuntimeAuthProfileStoreSnapshot(
   return getRuntimeAuthProfileStoreSnapshotImpl(agentDir);
 }
 
+/** Return the lifecycle-published effective auth store without persisted fallback reads. */
+export function getPreparedRuntimeAuthProfileStoreSnapshot(
+  agentDir?: string,
+  inheritedAuthDir?: string,
+): AuthProfileStore | undefined {
+  const inherited = getRuntimeAuthProfileStoreSnapshotImpl(inheritedAuthDir);
+  const requested = getRuntimeAuthProfileStoreSnapshotImpl(agentDir);
+  if (!agentDir || resolveAuthStorePath(agentDir) === resolveAuthStorePath(inheritedAuthDir)) {
+    return requested ?? inherited;
+  }
+  if (inherited && requested) {
+    return mergeAuthProfileStores(inherited, requested, {
+      preserveBaseRuntimeExternalProfiles: true,
+    });
+  }
+  return requested ?? inherited;
+}
+
 /** Replace runtime auth-profile snapshots, used by tests and prepared runtimes. */
 export function replaceRuntimeAuthProfileStoreSnapshots(
   entries: Array<{ agentDir?: string; store: AuthProfileStore }>,

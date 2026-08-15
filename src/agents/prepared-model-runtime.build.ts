@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import pLimit from "p-limit";
 import { withTimeout } from "../node-host/with-timeout.js";
 import { runTasksWithConcurrency } from "../utils/run-with-concurrency.js";
@@ -50,6 +51,9 @@ function runSerializedPreparedModelRuntimeTask<T>(params: {
     if (previous) {
       await previous;
     }
+    // Workspace generations serialize to bound heap growth. Yield before each queued build so
+    // Gateway accepts and health probes get an admission turn between synchronous fact phases.
+    await yieldToEventLoop();
     if (!params.isCurrent()) {
       throw new PreparedModelRuntimePublicationSupersededError(
         `prepared model runtime catalog generation was superseded for ${params.agentDir}`,
