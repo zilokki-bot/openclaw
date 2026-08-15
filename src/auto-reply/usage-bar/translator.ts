@@ -1,6 +1,7 @@
 import {
   asSafeIntegerInRange,
   expectDefined,
+  parseFiniteNumber,
   parseStrictInteger,
 } from "@openclaw/normalization-core";
 export type UsageBarTemplate = Record<string, unknown>;
@@ -62,7 +63,10 @@ function dur(value: unknown): string {
     const m = Math.floor((s % 3600) / 60);
     return `${Math.floor(s / 3600)}h${String(m).padStart(2, "0")}m`;
   }
-  return `${Math.floor(s / 60)}m`;
+  if (s >= 60) {
+    return `${Math.floor(s / 60)}m`;
+  }
+  return `${s}s`;
 }
 
 function pct(value: unknown): string {
@@ -119,7 +123,92 @@ function meter(value: unknown, width: number, scale: unknown): string {
   return cells.slice(0, width).join("");
 }
 
-const VERB_NAMES = new Set(["num", "fixed", "dur", "pct", "inv", "alias", "meter"]);
+/** Resolves a verb argument that is either a literal number or a contract path. */
+function resolveNumericArg(raw: string | undefined, ctx: unknown): number | undefined {
+  const arg = raw?.trim();
+  if (!arg) {
+    return undefined;
+  }
+  const literal = parseFiniteNumber(arg);
+  return literal === undefined ? parseFiniteNumber(getPath(ctx, arg)) : literal;
+}
+
+/** Threshold verbs return true when the comparison holds so `when` can gate on them. */
+function compare(value: unknown, bound: number | undefined, want: "gt" | "lt"): true | undefined {
+  const n = parseFiniteNumber(value);
+  if (n === undefined || bound === undefined) {
+    return undefined;
+  }
+  const holds = want === "gt" ? n > bound : n < bound;
+  return holds ? true : undefined;
+}
+
+function div(value: unknown, by: number | undefined): number | undefined {
+  const n = parseFiniteNumber(value);
+  if (n === undefined || by === undefined || by === 0) {
+    return undefined;
+  }
+  const quotient = n / by;
+  return Number.isFinite(quotient) ? quotient : undefined;
+}
+
+/**
+ * Renders the ratio against a previous value as an arrow plus multiplier, e.g. `↑2.1×`.
+ * Turn-to-turn noise is suppressed: a swing under DELTA_MIN_RATIO reads as "unchanged",
+ * otherwise every footer would carry a meaningless `↑1.0×`.
+ */
+const DELTA_MIN_RATIO = 1.15;
+const DELTA_MAX_DISPLAY = 1000;
+
+function delta(value: unknown, previous: number | undefined): string {
+  const n = parseFiniteNumber(value);
+  if (n === undefined || previous === undefined || previous === 0) {
+    return "";
+  }
+  // These are usage and cost magnitudes; a negative on either side is not a
+  // smaller quantity, it is nonsense input. Two negatives divide into a
+  // positive ratio and would otherwise render a confident arrow for it.
+  if (n < 0 || previous < 0) {
+    return "";
+  }
+  const ratio = n / previous;
+  if (Number.isNaN(ratio) || ratio < 0) {
+    return "";
+  }
+  if (ratio === 0) {
+    return `↓>${DELTA_MAX_DISPLAY - 1}×`;
+  }
+  const magnitude = ratio > 1 ? ratio : 1 / ratio;
+  if (magnitude < DELTA_MIN_RATIO) {
+    return "";
+  }
+  const arrow = ratio > 1 ? "↑" : "↓";
+  // A multiplier this large is a spike, not a measurement worth a decimal --
+  // and without a bound the value renders in exponent form ("1e+300"), which is
+  // meaningless in a footer.
+  const rounded = Math.round(magnitude);
+  if (magnitude >= DELTA_MAX_DISPLAY || rounded >= DELTA_MAX_DISPLAY) {
+    return `${arrow}>${DELTA_MAX_DISPLAY - 1}×`;
+  }
+  // Decide the shape on the value that will actually be shown: 9.99 rounds to
+  // 10.0, and rendering that as "10.0" next to a plain "10" is inconsistent.
+  const oneDecimal = magnitude.toFixed(1);
+  return Number(oneDecimal) < 10 ? `${arrow}${oneDecimal}×` : `${arrow}${rounded}×`;
+}
+
+const VERB_NAMES = new Set([
+  "num",
+  "fixed",
+  "dur",
+  "pct",
+  "inv",
+  "alias",
+  "meter",
+  "gt",
+  "lt",
+  "div",
+  "delta",
+]);
 
 function parseBoundedIntegerArg(
   raw: string | undefined,
@@ -129,7 +218,13 @@ function parseBoundedIntegerArg(
   return asSafeIntegerInRange(value, options);
 }
 
-function applyVerb(name: string, args: string[], value: unknown, vocab: Vocab): unknown {
+function applyVerb(
+  name: string,
+  args: string[],
+  value: unknown,
+  vocab: Vocab,
+  ctx: unknown,
+): unknown {
   switch (name) {
     case "num":
       return num(value);
@@ -160,6 +255,14 @@ function applyVerb(name: string, args: string[], value: unknown, vocab: Vocab): 
       const scale = args.length > 1 ? vocab[expectDefined(args[1], "args entry at 1")] : undefined;
       return width === undefined ? "" : meter(value, width, scale);
     }
+    case "gt":
+      return compare(value, resolveNumericArg(args[0], ctx), "gt");
+    case "lt":
+      return compare(value, resolveNumericArg(args[0], ctx), "lt");
+    case "div":
+      return div(value, resolveNumericArg(args[0], ctx));
+    case "delta":
+      return delta(value, resolveNumericArg(args[0], ctx));
     default:
       return String(value);
   }
@@ -200,17 +303,58 @@ function interp(text: string, ctx: unknown, vocab: Vocab): string {
       return fallback ?? "";
     }
     for (const op of ops) {
-      val = applyVerb(op.name, op.args, val, vocab);
+      val = applyVerb(op.name, op.args, val, vocab, ctx);
     }
-    return String(val);
+    // A verb may now legitimately return undefined (a threshold that did not
+    // hold). Narrow explicitly instead of String()-ing an unknown: stringifying
+    // an object here would put "[object Object]" in a footer, and oxlint’s
+    // no-base-to-string rejects it outright.
+    // The fallback above only saw the raw path value. Verbs can now yield
+    // nothing themselves -- a threshold that did not hold -- so the fallback has
+    // to be honoured here as well, or `{cost|gt:0.5||-}` renders empty instead
+    // of the text its author asked for.
+    if (val === null || val === undefined || val === "") {
+      return fallback ?? "";
+    }
+    if (typeof val === "string") {
+      return val;
+    }
+    if (typeof val === "number" || typeof val === "bigint" || typeof val === "boolean") {
+      return String(val);
+    }
+    // Not renderable as text (object, symbol, function). Never String() it: that
+    // puts "[object Object]" in a footer.
+    return fallback ?? "";
   });
 }
 
 type Segment = Record<string, unknown>;
 
+/**
+ * Evaluates a `when` expression, which may carry verbs (e.g. `cost.turn_usd|gt:0.5`).
+ * A plain path keeps its previous behaviour, so existing templates are unaffected.
+ */
+function evalCondition(expr: string, ctx: unknown, vocab: Vocab): unknown {
+  const parts = expr.split("|");
+  const path = (parts[0] ?? "").trim();
+  let val = getPath(ctx, path);
+  for (const segRaw of parts.slice(1)) {
+    const seg = segRaw.trim();
+    const name = expectDefined(seg.split(":")[0], 'seg.split(":") entry at 0');
+    if (!VERB_NAMES.has(name)) {
+      return undefined;
+    }
+    if (val === null || val === undefined || val === "") {
+      return undefined;
+    }
+    val = applyVerb(name, seg.split(":").slice(1), val, vocab, ctx);
+  }
+  return val;
+}
+
 function renderSegment(seg: Segment, ctx: unknown, vocab: Vocab): string | null {
   if ("when" in seg) {
-    const v = getPath(ctx, String(seg.when));
+    const v = evalCondition(String(seg.when), ctx, vocab);
     if (v === null || v === undefined || v === false || v === "") {
       return null;
     }

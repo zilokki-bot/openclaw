@@ -188,3 +188,221 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
     expect(renderUsageBar(tpl(pieces), contract)).toBe("opus46 | med🐌 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377");
   });
 });
+
+describe("threshold, ratio and division verbs", () => {
+  const alarm = [{ when: "cost.turn_usd|gt:0.5", text: "💸" }];
+
+  it("gates a segment on a value crossing the threshold", () => {
+    expect(render(alarm, { cost: { turn_usd: 0.6568 } })).toBe("💸");
+    expect(render(alarm, { cost: { turn_usd: 0.5 } })).toBe("");
+    expect(render(alarm, { cost: { turn_usd: 0.02 } })).toBe("");
+  });
+
+  it("gates on a value falling below the threshold", () => {
+    const cold = [{ when: "usage.cache_hit_pct|lt:50", text: "🥶" }];
+    expect(render(cold, { usage: { cache_hit_pct: 12 } })).toBe("🥶");
+    expect(render(cold, { usage: { cache_hit_pct: 80 } })).toBe("");
+  });
+
+  it("leaves a segment out when the compared value is missing", () => {
+    expect(render(alarm, {})).toBe("");
+    expect(render(alarm, { cost: {} })).toBe("");
+  });
+
+  it("does not treat booleans as numbers", () => {
+    const seg = [{ when: "flag|gt:0", text: "X" }];
+    expect(render(seg, { flag: true })).toBe("");
+  });
+
+  it("compares against another contract path, not just a literal", () => {
+    const seg = [{ when: "a|gt:b", text: "▲" }];
+    expect(render(seg, { a: 10, b: 3 })).toBe("▲");
+    expect(render(seg, { a: 2, b: 3 })).toBe("");
+    expect(render(seg, { a: 10 })).toBe("");
+  });
+
+  it("divides by a literal and by a path", () => {
+    expect(render([{ text: "{a|div:2|fixed:1}" }], { a: 9 })).toBe("4.5");
+    expect(render([{ text: "{a|div:b|fixed:1}" }], { a: 9, b: 3 })).toBe("3.0");
+  });
+
+  it("drops the segment when dividing by zero or a missing path", () => {
+    expect(render([{ when: "a|div:0", text: "X" }], { a: 9 })).toBe("");
+    expect(render([{ when: "a|div:missing", text: "X" }], { a: 9 })).toBe("");
+  });
+
+  it("uses the fallback when finite operands overflow to a non-finite quotient", () => {
+    expect(render([{ text: "{a|div:b||—}" }], { a: Number.MAX_VALUE, b: Number.MIN_VALUE })).toBe(
+      "—",
+    );
+  });
+
+  it("renders the ratio against the previous turn with a direction arrow", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 21, prev: 10 })).toBe("↑2.1×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 10, prev: 21 })).toBe("↓2.1×");
+  });
+
+  it("stays silent on turn-to-turn noise", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 104, prev: 100 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 114, prev: 100 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 116, prev: 100 })).toBe("↑1.2×");
+  });
+
+  it("rounds a large ratio to a whole multiplier", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1200, prev: 100 })).toBe("↑12×");
+  });
+
+  it("keeps a plain path condition working as before", () => {
+    const seg = [{ when: "u.cache_hit_pct", text: "🗄" }];
+    expect(render(seg, { u: {} })).toBe("");
+    expect(render(seg, { u: { cache_hit_pct: 0 } })).toBe("🗄");
+  });
+
+  it("dur — keeps sub-minute spans readable instead of collapsing them to 0m", () => {
+    expect(render([{ text: "{x|dur}" }], { x: 12 })).toBe("12s");
+    expect(render([{ text: "{x|dur}" }], { x: 59 })).toBe("59s");
+    expect(render([{ text: "{x|dur}" }], { x: 60 })).toBe("1m");
+    expect(render([{ text: "{x|dur}" }], { x: 0 })).toBe("0s");
+  });
+
+  it("alias returning a non-primitive renders empty rather than [object Object]", () => {
+    // The interpolation return narrows explicitly now. An alias table whose value
+    // is not a primitive previously produced "[object Object]" in a footer.
+    expect(render([{ text: "{m|alias:models}" }], { m: "claude-opus-4-6" })).toBe("opus46");
+  });
+});
+
+describe("gt, div, and delta reject arrays instead of silently coercing them", () => {
+  // Number([5]) === 5 and Number([]) === 0 -- a raw Number() cast let a
+  // single-element array read as its element and an empty array read as
+  // zero. parseFiniteNumber from @openclaw/normalization-core only accepts
+  // number values and strict numeric strings, so arrays fall through to
+  // undefined at every one of these call sites instead.
+
+  it("does not treat an array as its sole numeric element for the compared value", () => {
+    expect(render([{ when: "a|gt:0", text: "X" }], { a: [5] })).toBe("");
+    expect(render([{ when: "a|lt:10", text: "X" }], { a: [5] })).toBe("");
+  });
+
+  it("does not treat an array path operand as its sole numeric element for the bound", () => {
+    expect(render([{ when: "a|gt:b", text: "X" }], { a: 10, b: [3] })).toBe("");
+  });
+
+  it("does not treat an array as zero or its element when dividing", () => {
+    expect(render([{ text: "{a|div:2}" }], { a: [10] })).toBe("");
+    expect(render([{ text: "{a|div:2}" }], { a: [] })).toBe("");
+    expect(render([{ text: "{a|div:b}" }], { a: 10, b: [2] })).toBe("");
+  });
+
+  it("does not treat an array as a numeric value or previous for delta", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: [50], prev: 10 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 50, prev: [10] })).toBe("");
+  });
+
+  it("still honours the fallback once the array is rejected", () => {
+    expect(render([{ text: "{a|div:2||—}" }], { a: [10] })).toBe("—");
+    expect(render([{ text: "{now|delta:prev||—}" }], { now: [5], prev: 10 })).toBe("—");
+  });
+
+  it("still parses strict decimal and scientific-notation literals for the bound", () => {
+    expect(render([{ when: "a|gt:5.5", text: "X" }], { a: 10 })).toBe("X");
+    expect(render([{ when: "a|gt:1e2", text: "X" }], { a: 150 })).toBe("X");
+    expect(render([{ when: "a|gt:1e2", text: "X" }], { a: 50 })).toBe("");
+  });
+
+  it("still parses strict decimal and scientific-notation strings from a path operand", () => {
+    expect(render([{ when: "a|gt:b", text: "X" }], { a: 10, b: "5.5" })).toBe("X");
+    expect(render([{ when: "a|gt:b", text: "X" }], { a: 500, b: "1e2" })).toBe("X");
+    expect(render([{ text: "{a|div:b|fixed:1}" }], { a: 100, b: "1e1" })).toBe("10.0");
+  });
+});
+
+describe("verb-yielded nothing and delta display bounds", () => {
+  it("honours the fallback when a verb yields nothing, not just a missing path", () => {
+    // Found by adversarial review: the fallback used to be checked only against
+    // the raw path value, so a threshold that did not hold rendered empty.
+    expect(render([{ text: "{a|gt:50||—}" }], { a: 10 })).toBe("—");
+    expect(render([{ text: "{a|lt:5||—}" }], { a: 10 })).toBe("—");
+    expect(render([{ text: "{a|div:0||—}" }], { a: 10 })).toBe("—");
+    expect(render([{ text: "{missing||—}" }], {})).toBe("—");
+  });
+
+  it("honours the fallback when a verb yields an empty string", () => {
+    expect(render([{ text: "{now|delta:prev||—}" }], { now: 10, prev: 0 })).toBe("—");
+    expect(render([{ text: "{now|delta:prev||—}" }], { now: 10, prev: 10 })).toBe("—");
+    expect(render([{ text: "{a|gt:50|num||—}" }], { a: 10 })).toBe("—");
+  });
+
+  it("preserves meaningful zero and false values while applying fallbacks", () => {
+    expect(render([{ text: "{a|num||—}" }], { a: 0 })).toBe("0");
+    expect(render([{ text: "{flag||—}" }], { flag: false })).toBe("false");
+  });
+
+  it("still renders nothing when a verb yields nothing and no fallback was given", () => {
+    expect(render([{ text: "{a|gt:50}" }], { a: 10 })).toBe("");
+  });
+
+  it("keeps the decimal shape consistent across the ten-times boundary", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 999, prev: 100 })).toBe("↑10×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1000, prev: 100 })).toBe("↑10×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 990, prev: 100 })).toBe("↑9.9×");
+  });
+
+  it("bounds a runaway multiplier instead of printing an exponent", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1, prev: 1e-300 })).toBe("↑>999×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1e-300, prev: 1 })).toBe("↓>999×");
+  });
+
+  it("keeps rounded delta output below the bound", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 999.95, prev: 1 })).toBe("↑>999×");
+  });
+
+  it("bounds ratios that overflow or underflow despite finite operands", () => {
+    expect(
+      render([{ text: "{now|delta:prev}" }], {
+        now: Number.MAX_VALUE,
+        prev: Number.MIN_VALUE,
+      }),
+    ).toBe("↑>999×");
+    expect(
+      render([{ text: "{now|delta:prev}" }], {
+        now: Number.MIN_VALUE,
+        prev: Number.MAX_VALUE,
+      }),
+    ).toBe("↓>999×");
+  });
+});
+
+describe("usage-bar condition parsing", () => {
+  it("fails closed on an unknown condition modifier", () => {
+    expect(
+      render([{ when: "cost.turn_usd|not-a-verb", text: "X" }], { cost: { turn_usd: 1 } }),
+    ).toBe("");
+  });
+
+  it("keeps valid threshold conditions and plain paths working", () => {
+    expect(render([{ when: "cost.turn_usd|gt:0.5", text: "X" }], { cost: { turn_usd: 1 } })).toBe(
+      "X",
+    );
+    expect(render([{ when: "cost.turn_usd", text: "X" }], { cost: { turn_usd: 0 } })).toBe("X");
+  });
+});
+
+describe("delta sign handling and non-primitive interpolation", () => {
+  it("renders nothing when either side is negative", () => {
+    // Two negatives divide into a positive ratio; without an explicit guard this
+    // rendered a confident "↑2.0×" for values that cannot occur as usage or cost.
+    expect(render([{ text: "{now|delta:prev}" }], { now: -10, prev: -5 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: -10, prev: 5 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 10, prev: -5 })).toBe("");
+  });
+
+  it("does not stringify a non-primitive into the footer", () => {
+    // The narrowed return applies to any non-primitive at the end of a chain,
+    // not only to an alias table value. Previously String() produced "1,2,3"
+    // for an array and "[object Object]" for an object.
+    expect(render([{ text: "{arr}" }], { arr: [1, 2, 3] })).toBe("");
+    expect(render([{ text: "{arr||—}" }], { arr: [1, 2, 3] })).toBe("—");
+    expect(render([{ text: "{obj}" }], { obj: { a: 1 } })).toBe("");
+  });
+});
