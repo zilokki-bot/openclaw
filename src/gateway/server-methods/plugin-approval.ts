@@ -2,6 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
+  ErrorCodes,
+  errorShape,
   validatePluginApprovalRequestParams,
   validatePluginApprovalResolveParams,
 } from "../../../packages/gateway-protocol/src/index.js";
@@ -13,6 +15,7 @@ import type {
   PluginApprovalResolved,
 } from "../../infra/plugin-approvals.js";
 import { resolvePluginApprovalTimeoutMs } from "../../infra/plugin-approvals.js";
+import { getActivePluginRegistry } from "../../plugins/runtime.js";
 import type { ExecApprovalManager } from "../exec-approval-manager.js";
 import { runApprovalRequestDeliveries } from "./approval-request-delivery.js";
 import {
@@ -78,12 +81,30 @@ export function createPluginApprovalHandlers(
         turnSourceThreadId?: string | number | null;
         timeoutMs?: number;
         twoPhase?: boolean;
+        approvalBoundMutation?: PluginApprovalRequestPayload["approvalBoundMutation"];
       };
       const twoPhase = p.twoPhase === true;
       const timeoutMs = resolvePluginApprovalTimeoutMs(p.timeoutMs);
 
       const normalizeTrimmedString = (value?: string | null): string | null =>
         normalizeOptionalString(value) || null;
+
+      if (p.approvalBoundMutation) {
+        const ownerId = normalizeOptionalString(client?.internal?.pluginRuntimeOwnerId);
+        const pluginId = normalizeOptionalString(p.pluginId);
+        const record = getActivePluginRegistry()?.plugins.find((entry) => entry.id === ownerId);
+        if (!ownerId || ownerId !== pluginId || record?.origin !== "bundled") {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              "approvalBoundMutation is only available to its bundled plugin owner",
+            ),
+          );
+          return;
+        }
+      }
 
       const request: PluginApprovalRequestPayload = {
         pluginId: p.pluginId ?? null,
@@ -106,6 +127,7 @@ export function createPluginApprovalHandlers(
         turnSourceTo: normalizeTrimmedString(p.turnSourceTo),
         turnSourceAccountId: normalizeTrimmedString(p.turnSourceAccountId),
         turnSourceThreadId: p.turnSourceThreadId ?? null,
+        ...(p.approvalBoundMutation ? { approvalBoundMutation: p.approvalBoundMutation } : {}),
       };
 
       // Always server-generate the ID — never accept plugin-provided IDs.

@@ -114,6 +114,15 @@ parameters. Choosing **All boards** returns to `/workboard`.
 Cards are stored in the plugin's own Gateway state and move with the rest of
 that Gateway's OpenClaw state (see [Storage](#storage)).
 
+Revision-sensitive operator updates use a two-step Gateway contract. First,
+`workboard.cards.approvalBoundRequest` creates an approval bound to the exact
+card id, current revision, authenticated requester, and a server-derived digest
+of the patch. After `allow-once`, `workboard.cards.approvalBoundUpdate` reserves
+that same binding and atomically writes both the card revision and a recovery
+receipt. A stale revision, different patch/card/client, or unrelated plugin
+approval fails closed. If finalization is interrupted after the card commit,
+an exact retry uses the receipt instead of applying the patch twice.
+
 ## Starting work from a card
 
 Unlinked cards can start work directly:

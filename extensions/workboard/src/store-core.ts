@@ -3,6 +3,8 @@ import type {
   WorkboardBoardMetadata,
   WorkboardChange,
   WorkboardCard,
+  WorkboardApprovalBoundUpdateResult,
+  WorkboardApprovalMutationReceipt,
   WorkboardLink,
   WorkboardMetadata,
   WorkboardStatus,
@@ -13,7 +15,9 @@ import type {
   PersistedWorkboardCard,
   PersistedWorkboardNotificationSubscription,
   WorkboardKeyedStore,
+  WorkboardRevisionStore,
 } from "./persistence-types.js";
+import { WorkboardMutationNotCommittedError } from "./persistence-types.js";
 import { normalizeAutomationPatch, normalizeCardAutomation } from "./store-automation.js";
 import {
   assertCanMutateClaimedCard,
@@ -67,11 +71,23 @@ import {
   trimMetadataToBudget,
 } from "./store-normalizers.js";
 
+type WorkboardUpdateOptions = {
+  allowMetadataDependencyLinks?: boolean;
+  enforceStatusHolds?: boolean;
+  preserveProofId?: string;
+  expectedRevision?: number;
+  approvalMutationReceipt?: Omit<
+    WorkboardApprovalMutationReceipt,
+    "cardId" | "oldRevision" | "newRevision"
+  >;
+};
+
 export class WorkboardCoreStore {
   private mutationQueue: Promise<unknown> = Promise.resolve();
   private lastNotificationSequence = 0;
   private readonly changes: WorkboardChangeTracker;
   protected readonly store: WorkboardKeyedStore;
+  private readonly revisionStore?: WorkboardRevisionStore;
   protected readonly boardStore: WorkboardKeyedStore<PersistedWorkboardBoard>;
   protected readonly subscriptionStore: WorkboardKeyedStore<PersistedWorkboardNotificationSubscription>;
   protected readonly attachmentStore: WorkboardKeyedStore<PersistedWorkboardAttachment>;
@@ -86,6 +102,13 @@ export class WorkboardCoreStore {
     } = {},
   ) {
     this.changes = new WorkboardChangeTracker(stores.dataVersion);
+    const revisionStore = store as Partial<WorkboardRevisionStore>;
+    if (
+      typeof revisionStore.lookupApprovalMutationReceipt === "function" &&
+      typeof revisionStore.updateIfRevision === "function"
+    ) {
+      this.revisionStore = revisionStore as WorkboardRevisionStore;
+    }
     this.store = this.changes.track(store);
     this.boardStore = this.changes.track(
       stores.boards ?? (store as unknown as WorkboardKeyedStore<PersistedWorkboardBoard>),
@@ -292,6 +315,15 @@ export class WorkboardCoreStore {
     return entry?.version === 1 ? entry.card : undefined;
   }
 
+  async lookupApprovalMutationReceipt(
+    approvalId: string,
+  ): Promise<WorkboardApprovalMutationReceipt | undefined> {
+    if (!this.revisionStore) {
+      throw new Error("workboard store does not support approval mutation receipts");
+    }
+    return await this.revisionStore.lookupApprovalMutationReceipt(approvalId.trim());
+  }
+
   private async removeReferencesToCard(cardId: string): Promise<void> {
     for (const card of await this.list()) {
       const links = card.metadata?.links;
@@ -405,6 +437,7 @@ export class WorkboardCoreStore {
         ) + POSITION_STEP;
     let card: WorkboardCard = {
       id: randomUUID(),
+      revision: 0,
       title: normalizeTitle(input.title),
       status,
       priority: normalizePriority(input.priority, "normal"),
@@ -459,172 +492,258 @@ export class WorkboardCoreStore {
     );
   }
 
+  async updateIfRevision(params: {
+    id: string;
+    expectedRevision: number;
+    patch: WorkboardCardPatch;
+    receipt: Omit<WorkboardApprovalMutationReceipt, "cardId" | "oldRevision" | "newRevision">;
+  }): Promise<WorkboardApprovalBoundUpdateResult> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateCard(params.id, params.patch, {
+        allowMetadataDependencyLinks: false,
+        enforceStatusHolds: true,
+        expectedRevision: params.expectedRevision,
+        approvalMutationReceipt: params.receipt,
+      });
+      return result;
+    });
+  }
+
   protected async updateCard(
     id: string,
     patch: WorkboardCardPatch,
-    options: {
-      allowMetadataDependencyLinks?: boolean;
-      enforceStatusHolds?: boolean;
-      preserveProofId?: string;
-    } = {},
-  ): Promise<WorkboardCard> {
-    const existing = await this.get(id);
-    if (!existing) {
-      throw new Error(`card not found: ${id}`);
-    }
-    const lifecycleStatusSourceUpdatedAt = lifecycleStatusSourceUpdatedAtFromPatch(patch.metadata);
-    const existingLifecycleStatusSourceUpdatedAt =
-      existing.metadata?.lifecycleStatusSourceUpdatedAt;
-    const hasFreshLifecycleStatusSource =
-      lifecycleStatusSourceUpdatedAt !== undefined &&
-      lifecycleStatusSourceUpdatedAt !== existingLifecycleStatusSourceUpdatedAt;
-    let effectivePatch = patch;
-    if (
-      patch.status !== undefined &&
-      lifecycleStatusSourceUpdatedAt !== undefined &&
-      shouldSkipPersistedLifecycleStatusUpdate(existing, lifecycleStatusSourceUpdatedAt)
-    ) {
-      // Ignore stale lifecycle status writes, but still accept any non-status updates in the patch.
-      effectivePatch = { ...patch, status: undefined };
-      if (patch.metadata && typeof patch.metadata === "object" && !Array.isArray(patch.metadata)) {
-        const metadataPatch = patch.metadata as Record<string, unknown>;
-        const { lifecycleStatusSourceUpdatedAt: _ignored, ...rest } = metadataPatch;
-        effectivePatch.metadata = Object.keys(rest).length > 0 ? rest : undefined;
+    options: WorkboardUpdateOptions & {
+      expectedRevision: number;
+      approvalMutationReceipt: NonNullable<WorkboardUpdateOptions["approvalMutationReceipt"]>;
+    },
+  ): Promise<WorkboardApprovalBoundUpdateResult>;
+  protected async updateCard(
+    id: string,
+    patch: WorkboardCardPatch,
+    options?: WorkboardUpdateOptions & { approvalMutationReceipt?: undefined },
+  ): Promise<WorkboardCard>;
+  protected async updateCard(
+    id: string,
+    patch: WorkboardCardPatch,
+    options: WorkboardUpdateOptions = {},
+  ): Promise<WorkboardCard | WorkboardApprovalBoundUpdateResult> {
+    let approvalPersistenceStarted = false;
+    try {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new Error(`card not found: ${id}`);
       }
-      const hasSemanticPatch = Object.entries(effectivePatch).some(
-        ([key, value]) => key !== "status" && key !== "metadata" && value !== undefined,
+      const existingRevision = existing.revision ?? 0;
+      if (options.expectedRevision !== undefined && options.expectedRevision !== existingRevision) {
+        throw new WorkboardMutationNotCommittedError(
+          `workboard revision conflict: expected ${options.expectedRevision}, current ${existingRevision}`,
+        );
+      }
+      const lifecycleStatusSourceUpdatedAt = lifecycleStatusSourceUpdatedAtFromPatch(
+        patch.metadata,
       );
-      if (!hasSemanticPatch && effectivePatch.metadata === undefined) {
-        return existing;
+      const existingLifecycleStatusSourceUpdatedAt =
+        existing.metadata?.lifecycleStatusSourceUpdatedAt;
+      const hasFreshLifecycleStatusSource =
+        lifecycleStatusSourceUpdatedAt !== undefined &&
+        lifecycleStatusSourceUpdatedAt !== existingLifecycleStatusSourceUpdatedAt;
+      let effectivePatch = patch;
+      if (
+        patch.status !== undefined &&
+        lifecycleStatusSourceUpdatedAt !== undefined &&
+        shouldSkipPersistedLifecycleStatusUpdate(existing, lifecycleStatusSourceUpdatedAt)
+      ) {
+        // Ignore stale lifecycle status writes, but still accept any non-status updates in the patch.
+        effectivePatch = { ...patch, status: undefined };
+        if (
+          patch.metadata &&
+          typeof patch.metadata === "object" &&
+          !Array.isArray(patch.metadata)
+        ) {
+          const metadataPatch = patch.metadata as Record<string, unknown>;
+          const { lifecycleStatusSourceUpdatedAt: _ignored, ...rest } = metadataPatch;
+          effectivePatch.metadata = Object.keys(rest).length > 0 ? rest : undefined;
+        }
+        const hasSemanticPatch = Object.entries(effectivePatch).some(
+          ([key, value]) => key !== "status" && key !== "metadata" && value !== undefined,
+        );
+        if (
+          !hasSemanticPatch &&
+          effectivePatch.metadata === undefined &&
+          !options.approvalMutationReceipt
+        ) {
+          return existing;
+        }
       }
-    }
-    const status = normalizeStatus(effectivePatch.status, existing.status);
-    const now = Date.now();
-    const startedAt =
-      effectivePatch.startedAt === undefined
-        ? status === "running"
-          ? (existing.startedAt ?? now)
-          : existing.startedAt
-        : normalizeTimestamp(effectivePatch.startedAt, 0) || undefined;
-    const completedAt =
-      effectivePatch.completedAt === undefined
-        ? status === "done"
-          ? (existing.completedAt ?? now)
-          : undefined
-        : normalizeTimestamp(effectivePatch.completedAt, 0) || undefined;
-    const sessionKey =
-      effectivePatch.sessionKey === undefined
-        ? existing.sessionKey
-        : normalizeOptionalString(effectivePatch.sessionKey);
-    const execution =
-      effectivePatch.execution === undefined
-        ? effectivePatch.sessionKey === undefined
-          ? existing.execution
-          : syncExecutionSessionKey(existing.execution, sessionKey)
-        : normalizeExecution(effectivePatch.execution);
-    let metadata = normalizeMetadata(effectivePatch.metadata, existing.metadata, {
-      allowDependencyLinks: options.allowMetadataDependencyLinks !== false,
-      preserveProofId: options.preserveProofId,
-    });
-    if (status !== existing.status && !hasFreshLifecycleStatusSource) {
-      // Status patches often spread existing metadata. Only a newly supplied
-      // lifecycle source is provenance; copied markers must not survive a manual transition.
-      metadata = { ...metadata, lifecycleStatusSourceUpdatedAt: undefined };
-    }
-    const automationPatch: Record<string, unknown> = {};
-    for (const key of [
-      "tenant",
-      "boardId",
-      "createdByCardId",
-      "idempotencyKey",
-      "skills",
-      "workspace",
-      "workspaceAccess",
-      "maxRuntimeSeconds",
-      "maxRetries",
-      "scheduledAt",
-    ] as const) {
-      if (Object.hasOwn(effectivePatch, key) && effectivePatch[key] !== undefined) {
-        automationPatch[key] = effectivePatch[key];
+      const status = normalizeStatus(effectivePatch.status, existing.status);
+      const now = Date.now();
+      const startedAt =
+        effectivePatch.startedAt === undefined
+          ? status === "running"
+            ? (existing.startedAt ?? now)
+            : existing.startedAt
+          : normalizeTimestamp(effectivePatch.startedAt, 0) || undefined;
+      const completedAt =
+        effectivePatch.completedAt === undefined
+          ? status === "done"
+            ? (existing.completedAt ?? now)
+            : undefined
+          : normalizeTimestamp(effectivePatch.completedAt, 0) || undefined;
+      const sessionKey =
+        effectivePatch.sessionKey === undefined
+          ? existing.sessionKey
+          : normalizeOptionalString(effectivePatch.sessionKey);
+      const execution =
+        effectivePatch.execution === undefined
+          ? effectivePatch.sessionKey === undefined
+            ? existing.execution
+            : syncExecutionSessionKey(existing.execution, sessionKey)
+          : normalizeExecution(effectivePatch.execution);
+      let metadata = normalizeMetadata(effectivePatch.metadata, existing.metadata, {
+        allowDependencyLinks: options.allowMetadataDependencyLinks !== false,
+        preserveProofId: options.preserveProofId,
+      });
+      if (status !== existing.status && !hasFreshLifecycleStatusSource) {
+        // Status patches often spread existing metadata. Only a newly supplied
+        // lifecycle source is provenance; copied markers must not survive a manual transition.
+        metadata = { ...metadata, lifecycleStatusSourceUpdatedAt: undefined };
       }
-    }
-    if (Object.keys(automationPatch).length > 0) {
-      metadata = trimMetadataToBudget(
-        {
-          ...metadata,
-          automation: normalizeAutomationPatch(automationPatch, metadata.automation),
-        },
+      const automationPatch: Record<string, unknown> = {};
+      for (const key of [
+        "tenant",
+        "boardId",
+        "createdByCardId",
+        "idempotencyKey",
+        "skills",
+        "workspace",
+        "workspaceAccess",
+        "maxRuntimeSeconds",
+        "maxRetries",
+        "scheduledAt",
+      ] as const) {
+        if (Object.hasOwn(effectivePatch, key) && effectivePatch[key] !== undefined) {
+          automationPatch[key] = effectivePatch[key];
+        }
+      }
+      if (Object.keys(automationPatch).length > 0) {
+        metadata = trimMetadataToBudget(
+          {
+            ...metadata,
+            automation: normalizeAutomationPatch(automationPatch, metadata.automation),
+          },
+          options,
+        );
+      }
+      const next = removeUndefinedCardFields({
+        ...existing,
+        revision: existingRevision + 1,
+        title:
+          effectivePatch.title === undefined
+            ? existing.title
+            : normalizeTitle(effectivePatch.title),
+        notes:
+          effectivePatch.notes === undefined
+            ? existing.notes
+            : normalizeNotes(effectivePatch.notes),
+        status,
+        priority:
+          effectivePatch.priority === undefined
+            ? existing.priority
+            : normalizePriority(effectivePatch.priority, existing.priority),
+        labels:
+          effectivePatch.labels === undefined
+            ? existing.labels
+            : normalizeLabels(effectivePatch.labels),
+        agentId:
+          effectivePatch.agentId === undefined
+            ? existing.agentId
+            : normalizeOptionalString(effectivePatch.agentId),
+        sessionKey,
+        runId:
+          effectivePatch.runId === undefined
+            ? existing.runId
+            : normalizeOptionalString(effectivePatch.runId),
+        taskId:
+          effectivePatch.taskId === undefined
+            ? existing.taskId
+            : normalizeOptionalString(effectivePatch.taskId),
+        sourceUrl:
+          effectivePatch.sourceUrl === undefined
+            ? existing.sourceUrl
+            : normalizeOptionalString(effectivePatch.sourceUrl),
+        execution,
+        metadata:
+          effectivePatch.templateId === undefined
+            ? metadata
+            : { ...metadata, templateId: normalizeTemplateId(effectivePatch.templateId) },
+        position:
+          effectivePatch.position === undefined
+            ? existing.position
+            : normalizePosition(effectivePatch.position, existing.position),
+        updatedAt: now,
+        ...(startedAt ? { startedAt } : {}),
+        ...(completedAt ? { completedAt } : {}),
+      });
+      next.metadata = trimMetadataToBudget(
+        syncExecutionAttemptMetadata(next.metadata ?? {}, execution, now),
         options,
       );
+      next.events = appendEvent(next, updateEvent(existing, next), now);
+      if (options.enforceStatusHolds && effectivePatch.status !== undefined) {
+        await this.assertActiveStatusAllowed(existing, next, now);
+      }
+      if (status !== "done") {
+        delete next.completedAt;
+      }
+      if (effectivePatch.startedAt !== undefined && !startedAt) {
+        delete next.startedAt;
+      }
+      if (effectivePatch.completedAt !== undefined && !completedAt) {
+        delete next.completedAt;
+      }
+      if (metadataIsEmpty(next.metadata)) {
+        delete next.metadata;
+      }
+      if (options.approvalMutationReceipt) {
+        if (!this.revisionStore) {
+          throw new WorkboardMutationNotCommittedError(
+            "workboard store does not support approval-bound revision updates",
+          );
+        }
+        const receipt: WorkboardApprovalMutationReceipt = {
+          ...options.approvalMutationReceipt,
+          cardId: next.id,
+          oldRevision: existingRevision,
+          newRevision: existingRevision + 1,
+        };
+        approvalPersistenceStarted = true;
+        const persisted = await this.revisionStore.updateIfRevision({
+          key: next.id,
+          expectedRevision: existingRevision,
+          value: { version: 1, card: next },
+          receipt,
+        });
+        if (!persisted.replayed) {
+          this.changes.markMutation();
+        }
+        await this.deleteDetachedAttachments(existing, persisted.value.card);
+        return { card: persisted.value.card, receipt, replayed: persisted.replayed };
+      }
+      await this.store.register(next.id, { version: 1, card: next });
+      await this.deleteDetachedAttachments(existing, next);
+      return next;
+    } catch (error) {
+      if (
+        options.approvalMutationReceipt &&
+        !approvalPersistenceStarted &&
+        !(error instanceof WorkboardMutationNotCommittedError)
+      ) {
+        throw new WorkboardMutationNotCommittedError(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      throw error;
     }
-    const next = removeUndefinedCardFields({
-      ...existing,
-      title:
-        effectivePatch.title === undefined ? existing.title : normalizeTitle(effectivePatch.title),
-      notes:
-        effectivePatch.notes === undefined ? existing.notes : normalizeNotes(effectivePatch.notes),
-      status,
-      priority:
-        effectivePatch.priority === undefined
-          ? existing.priority
-          : normalizePriority(effectivePatch.priority, existing.priority),
-      labels:
-        effectivePatch.labels === undefined
-          ? existing.labels
-          : normalizeLabels(effectivePatch.labels),
-      agentId:
-        effectivePatch.agentId === undefined
-          ? existing.agentId
-          : normalizeOptionalString(effectivePatch.agentId),
-      sessionKey,
-      runId:
-        effectivePatch.runId === undefined
-          ? existing.runId
-          : normalizeOptionalString(effectivePatch.runId),
-      taskId:
-        effectivePatch.taskId === undefined
-          ? existing.taskId
-          : normalizeOptionalString(effectivePatch.taskId),
-      sourceUrl:
-        effectivePatch.sourceUrl === undefined
-          ? existing.sourceUrl
-          : normalizeOptionalString(effectivePatch.sourceUrl),
-      execution,
-      metadata:
-        effectivePatch.templateId === undefined
-          ? metadata
-          : { ...metadata, templateId: normalizeTemplateId(effectivePatch.templateId) },
-      position:
-        effectivePatch.position === undefined
-          ? existing.position
-          : normalizePosition(effectivePatch.position, existing.position),
-      updatedAt: now,
-      ...(startedAt ? { startedAt } : {}),
-      ...(completedAt ? { completedAt } : {}),
-    });
-    next.metadata = trimMetadataToBudget(
-      syncExecutionAttemptMetadata(next.metadata ?? {}, execution, now),
-      options,
-    );
-    next.events = appendEvent(next, updateEvent(existing, next), now);
-    if (options.enforceStatusHolds && effectivePatch.status !== undefined) {
-      await this.assertActiveStatusAllowed(existing, next, now);
-    }
-    if (status !== "done") {
-      delete next.completedAt;
-    }
-    if (effectivePatch.startedAt !== undefined && !startedAt) {
-      delete next.startedAt;
-    }
-    if (effectivePatch.completedAt !== undefined && !completedAt) {
-      delete next.completedAt;
-    }
-    if (metadataIsEmpty(next.metadata)) {
-      delete next.metadata;
-    }
-    await this.store.register(next.id, { version: 1, card: next });
-    await this.deleteDetachedAttachments(existing, next);
-    return next;
   }
 
   private async assertActiveStatusAllowed(

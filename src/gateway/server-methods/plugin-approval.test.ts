@@ -553,6 +553,32 @@ describe("createPluginApprovalHandlers", () => {
       expect(responseError(opts.respond).message).toContain("unexpected property");
     });
 
+    it("rejects caller-supplied mutation binding without bundled plugin ownership", async () => {
+      const handlers = createPluginApprovalHandlers(manager);
+      const createSpy = vi.spyOn(manager, "create");
+      const opts = createMockOptions("plugin.approval.request", {
+        pluginId: "workboard",
+        title: "Update Workboard card",
+        description: "Apply one exact update.",
+        approvalBoundMutation: {
+          mutationId: "workboard-card-update:digest-a",
+          resourceKind: "workboard-card",
+          resourceId: "card-a",
+          expectedRevision: 0,
+        },
+      });
+
+      await expectDefined(
+        handlers["plugin.approval.request"],
+        'handlers["plugin.approval.request"] test invariant',
+      )(opts);
+
+      expect(responseError(opts.respond).message).toContain(
+        "only available to its bundled plugin owner",
+      );
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
     it("stores scoped allowed decisions on plugin approval requests", async () => {
       const handlers = createPluginApprovalHandlers(manager);
       const respond = vi.fn();

@@ -40,6 +40,10 @@ export class WorkboardChangeTracker {
     this.emit();
   }
 
+  markMutation(): void {
+    this.mutationRevision += 1;
+  }
+
   reconcileExternalChanges(): boolean {
     if (!this.readDataVersion) {
       return false;

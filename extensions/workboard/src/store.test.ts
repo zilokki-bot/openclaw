@@ -303,7 +303,7 @@ describe("WorkboardStore", () => {
         );
         INSERT INTO workboard_boards SELECT * FROM workboard_boards_strict;
         DROP TABLE workboard_boards_strict;
-        DELETE FROM workboard_schema_migrations WHERE id = 'schema-3';
+        DELETE FROM workboard_schema_migrations WHERE id IN ('schema-3', 'schema-4');
         INSERT OR IGNORE INTO workboard_schema_migrations (id, applied_at)
         VALUES ('schema-2', 1);
       `);
@@ -329,7 +329,7 @@ describe("WorkboardStore", () => {
         ).toEqual({ strict: 1 });
         expect(
           migrated
-            .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = 'schema-3'")
+            .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = 'schema-4'")
             .get(),
         ).toEqual({ found: 1 });
       } finally {

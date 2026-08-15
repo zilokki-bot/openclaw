@@ -1,6 +1,7 @@
 // Workboard plugin module implements gateway behavior.
 import type { OpenClawPluginApi } from "../api.js";
 import { redactClaimToken } from "./card-redaction.js";
+import { registerWorkboardApprovalBoundMethods } from "./gateway-approval-bound-methods.js";
 import {
   assertNoCursorAdvance,
   createWorkboardDispatchHandler,
@@ -54,6 +55,7 @@ export function registerWorkboardGatewayMethods(params: {
   );
 
   registerWorkboardWorkspaceCardMethods({ api, store, redactCard: redactClaimToken });
+  registerWorkboardApprovalBoundMethods({ api, store });
 
   api.registerGatewayMethod(
     "workboard.cards.move",

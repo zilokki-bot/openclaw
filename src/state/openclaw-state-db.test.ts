@@ -3078,6 +3078,86 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
     );
   });
 
+  it("migrates release schema v6 approval rows to approval-bound mutation schema v7", () => {
+    const stateDir = createTempStateDir();
+    const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
+    const database = openOpenClawStateDatabase(options);
+    const databasePath = database.path;
+    const approvalId = "approval/release-v6";
+    const expectedRef = buildApprovalResolutionRef({ approvalId, approvalKind: "plugin" });
+    database.db
+      .prepare(
+        `INSERT INTO operator_approvals (
+          approval_id,
+          resolution_ref,
+          kind,
+          status,
+          presentation_json,
+          requested_by_device_id,
+          requested_by_client_id,
+          requested_by_device_token_auth,
+          reviewer_device_ids_json,
+          audience_session_keys_json,
+          runtime_epoch,
+          created_at_ms,
+          expires_at_ms,
+          updated_at_ms
+        ) VALUES (?, ?, 'plugin', 'pending', ?, 'device-1', 'client-1', 1, '[]', '[]',
+          'release-v6-runtime', 1, 1000, 1)`,
+      )
+      .run(
+        approvalId,
+        expectedRef,
+        JSON.stringify({
+          kind: "plugin",
+          pluginId: "workboard",
+          actionId: "workboard.cards.update",
+          title: "Update Workboard card",
+          detail: "release migration fixture",
+          allowedDecisions: ["allow-once", "deny"],
+        }),
+      );
+    closeOpenClawStateDatabaseForTest();
+
+    const { DatabaseSync } = requireNodeSqlite();
+    const releaseV6 = new DatabaseSync(databasePath);
+    releaseV6.exec(`
+      DROP TABLE approval_bound_mutations;
+      ALTER TABLE operator_approvals DROP COLUMN approval_mutation_binding_json;
+      PRAGMA user_version = 6;
+      UPDATE schema_meta SET schema_version = 6 WHERE meta_key = 'primary';
+    `);
+    releaseV6.close();
+
+    const reopened = openOpenClawStateDatabase(options);
+    expect(readSqliteNumberPragma(reopened.db, "user_version")).toBe(7);
+    expect(
+      reopened.db
+        .prepare(
+          `SELECT approval_id, resolution_ref, requested_by_device_id,
+             requested_by_client_id, requested_by_device_token_auth,
+             approval_mutation_binding_json
+           FROM operator_approvals WHERE approval_id = ?`,
+        )
+        .get(approvalId),
+    ).toEqual({
+      approval_id: approvalId,
+      resolution_ref: expectedRef,
+      requested_by_device_id: "device-1",
+      requested_by_client_id: "client-1",
+      requested_by_device_token_auth: 1,
+      approval_mutation_binding_json: null,
+    });
+    expect(
+      reopened.db
+        .prepare("SELECT strict FROM pragma_table_list WHERE name = 'approval_bound_mutations'")
+        .get(),
+    ).toEqual({ strict: 1 });
+    expect(collectSqliteSchemaShape(reopened.db)).toEqual(
+      createSqliteSchemaShapeFromSql(new URL("./openclaw-state-schema.sql", import.meta.url)),
+    );
+  });
+
   it("migrates operator approvals to accept system-agent records", () => {
     const stateDir = createTempStateDir();
     const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
@@ -3094,9 +3174,22 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
         )
         .get() as { sql: string }
     ).sql;
+    // This fixture models the pre-system-agent release, which also predates
+    // approval-bound mutations. Drop the newer dependent table before
+    // replacing its parent so SQLite does not rewrite the simulated FK target.
+    legacyDb.exec("DROP TABLE approval_bound_mutations");
+    legacyDb.exec("ALTER TABLE operator_approvals DROP COLUMN approval_mutation_binding_json");
     legacyDb.exec("ALTER TABLE operator_approvals RENAME TO operator_approvals_current");
-    legacyDb.exec(currentSql.replace("'exec', 'plugin', 'system-agent'", "'exec', 'plugin'"));
+    legacyDb.exec(
+      currentSql
+        .replace("\n  approval_mutation_binding_json TEXT,", "")
+        .replace("'exec', 'plugin', 'system-agent'", "'exec', 'plugin'"),
+    );
     legacyDb.exec("DROP TABLE operator_approvals_current");
+    legacyDb.exec(`
+      PRAGMA user_version = 6;
+      UPDATE schema_meta SET schema_version = 6 WHERE meta_key = 'primary';
+    `);
     legacyDb.close();
 
     expect(detectOpenClawStateDatabaseSchemaMigrations(options)).toContainEqual({
@@ -3104,10 +3197,7 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
       path: databasePath,
     });
     expect(repairOpenClawStateDatabaseSchema(options)).toEqual({
-      changes: [
-        "Migrated shared state operator approvals → OpenClaw system changes",
-        expect.stringMatching(/^Rebuilt canonical shared-state SQLite indexes \(\d+\)$/u),
-      ],
+      changes: ["Migrated shared state operator approvals → OpenClaw system changes"],
       warnings: [],
     });
 
@@ -3134,11 +3224,19 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
         )
         .get() as { sql: string }
     ).sql;
+    customizedDb.exec("DROP TABLE approval_bound_mutations");
+    customizedDb.exec("ALTER TABLE operator_approvals DROP COLUMN approval_mutation_binding_json");
     customizedDb.exec("ALTER TABLE operator_approvals RENAME TO operator_approvals_current");
     customizedDb.exec(
-      currentSql.replace("'exec', 'plugin', 'system-agent'", "'exec', 'plugin', 'custom-thing'"),
+      currentSql
+        .replace("\n  approval_mutation_binding_json TEXT,", "")
+        .replace("'exec', 'plugin', 'system-agent'", "'exec', 'plugin', 'custom-thing'"),
     );
     customizedDb.exec("DROP TABLE operator_approvals_current");
+    customizedDb.exec(`
+      PRAGMA user_version = 6;
+      UPDATE schema_meta SET schema_version = 6 WHERE meta_key = 'primary';
+    `);
     customizedDb.close();
 
     const result = repairOpenClawStateDatabaseSchema(options);
