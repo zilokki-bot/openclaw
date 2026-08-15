@@ -149,11 +149,14 @@ const {
   refreshPreparedModelRuntimeSnapshots,
 } = await import("../agents/prepared-model-runtime.js");
 const { writePersistedAuthProfileStoreRaw } = await import("../agents/auth-profiles/sqlite.js");
+const { clearRuntimeAuthProfileStoreSnapshots, replaceRuntimeAuthProfileStoreSnapshots } =
+  await import("../agents/auth-profiles/store.js");
 const { resolveAgentDir, resolveAgentWorkspaceDir } = await import("../agents/agent-scope.js");
 const { startGatewaySidecars } = await import("./server-startup-post-attach.js");
 
 beforeEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
+  clearRuntimeAuthProfileStoreSnapshots();
   vi.clearAllMocks();
   firstUseAttribution.metadataSnapshotCalls = 0;
   firstUseAttribution.metadataSnapshots.length = 0;
@@ -203,6 +206,7 @@ async function requestAfter(port: number, pathname: string, delayMs: number) {
 
 afterEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
+  clearRuntimeAuthProfileStoreSnapshots();
   closeOpenClawAgentDatabasesForTest();
   vi.clearAllMocks();
 });
@@ -584,6 +588,17 @@ describe("Gateway prepared model runtime startup", () => {
       await withEnvAsync(
         { OPENCLAW_SKIP_CHANNELS: "1", OPENCLAW_STATE_DIR: stateDir },
         async () => {
+          replaceRuntimeAuthProfileStoreSnapshots([
+            {
+              agentDir: resolveAgentDir(cfg, "developer"),
+              store: {
+                version: 1,
+                profiles: {},
+                runtimeExternalProfileIds: [],
+                runtimeExternalProfileIdsAuthoritative: true,
+              },
+            },
+          ]);
           const sidecars = await startGatewaySidecars({
             cfg,
             pluginRegistry: { plugins: [], typedHooks: [] } as never,

@@ -20,10 +20,12 @@ import type { ProviderPlugin } from "../plugins/types.js";
 import type { AgentCredentialMap } from "./agent-auth-credentials.js";
 import { resolveAmbientAgentCredentialsForDiscovery } from "./agent-auth-discovery.js";
 import {
-  discoverAuthStorage,
+  discoverAuthStorageFacts,
   discoverModels,
   discoverModelsFromCapturedSources,
 } from "./agent-model-discovery.js";
+import { getPreparedRuntimeAuthProfileStoreSnapshot } from "./auth-profiles/store.js";
+import type { AuthProfileStore } from "./auth-profiles/types.js";
 import {
   buildInlineProviderModels,
   type InlineModelEntry,
@@ -159,6 +161,7 @@ function materializeSharedStaticWorkspaceBuild(
 type PreparedModelRuntimeAgentBaseFacts = {
   input: PreparedModelRuntimeInput;
   env: NodeJS.ProcessEnv;
+  authStore: AuthProfileStore;
   templateAuthStorage: AuthStorage;
   credentials: Readonly<AuthStorageData>;
   providerIds: string[];
@@ -206,18 +209,32 @@ function prepareAgentFacts(
   ambientCredentials: Readonly<AgentCredentialMap>,
 ): PreparedModelRuntimeAgentBaseFacts {
   const env = input.env ?? process.env;
-  const templateAuthStorage = discoverAuthStorage(input.agentDir, {
+  const publishedStore = getPreparedRuntimeAuthProfileStoreSnapshot(
+    input.agentDir,
+    input.inheritedAuthDir,
+  );
+  // Runtime-only external profiles exist only in the published auth generation. Re-reading the
+  // durable store here would erase startup hydration before this owner can carry it forward.
+  const preparedStore =
+    publishedStore &&
+    (publishedStore.runtimeExternalProfileIds !== undefined ||
+      publishedStore.runtimeExternalProfileIdsAuthoritative === true)
+      ? publishedStore
+      : undefined;
+  const authFacts = discoverAuthStorageFacts(input.agentDir, {
     config: input.config,
     // Snapshot construction never initializes, migrates, or externally syncs auth. ModelRegistry
     // discovery only parses the credential generation captured here.
     readOnly: true,
     ambientCredentials,
+    ...(preparedStore ? { preparedStore } : {}),
     ...(input.skipCredentials ? { skipCredentials: true } : {}),
     ...(input.inheritedAuthDir ? { inheritedAuthDir: input.inheritedAuthDir } : {}),
     ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
     ...(input.env ? { env } : {}),
   });
-  const credentials = templateAuthStorage.getAll();
+  const credentials = authFacts.credentials;
+  const templateAuthStorage = authFacts.authStorage;
   const configuredModelRefs = collectPreparedModelRuntimeConfiguredRefs(
     input.config,
     input.agentId,
@@ -225,6 +242,7 @@ function prepareAgentFacts(
   return {
     input,
     env,
+    authStore: authFacts.store,
     templateAuthStorage,
     credentials,
     configuredModelRefs,
