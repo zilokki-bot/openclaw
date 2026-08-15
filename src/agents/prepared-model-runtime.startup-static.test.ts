@@ -101,7 +101,8 @@ vi.mock("../plugins/plugin-metadata-snapshot.js", () => ({
   resolvePluginMetadataSnapshot: () => mocks.metadataSnapshot,
 }));
 
-vi.mock("./agent-auth-discovery.js", () => ({
+vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: mocks.resolveAmbientCredentials,
 }));
 

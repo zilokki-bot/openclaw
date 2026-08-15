@@ -49,7 +49,8 @@ vi.mock("./model-catalog.js", () => ({
     mocks.buildPreparedModelCatalogSnapshot(...args),
 }));
 
-vi.mock("./agent-auth-discovery.js", () => ({
+vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: (...args: unknown[]) =>
     mocks.resolveAmbientCredentials(...args),
 }));
