@@ -1864,7 +1864,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     expect(fallbackParams.model).toBe("explicit-model");
   });
 
-  it("uses rotated session identity for all post-run session persistence", async () => {
+  it("uses rotated session identity for CLI post-run session persistence", async () => {
     setupSingleAttemptFallback();
     setupStoredSession();
     const rotatedEntry: SessionEntry = {
@@ -1879,7 +1879,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       meta: Record<string, unknown> & { agentMeta: Record<string, unknown> };
     };
     result.meta.executionTrace = {
-      runner: "embedded",
+      runner: "cli",
       fallbackUsed: false,
       winnerProvider: "openai",
       winnerModel: "gpt-5.4",
@@ -3164,7 +3164,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     expect(state.runAgentAttemptMock).not.toHaveBeenCalled();
   });
 
-  it("removes the one-shot internal model-run SQLite session after success", async () => {
+  it("removes the one-shot internal model-run SQLite session after CLI success", async () => {
     setupSingleAttemptFallback();
     const result = makeSuccessResult("openai", "gpt-5.4");
     state.runAgentAttemptMock.mockResolvedValue({
@@ -3172,7 +3172,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       meta: {
         ...result.meta,
         executionTrace: {
-          runner: "embedded",
+          runner: "cli",
           fallbackUsed: false,
           winnerProvider: "openai",
           winnerModel: "gpt-5.4",
