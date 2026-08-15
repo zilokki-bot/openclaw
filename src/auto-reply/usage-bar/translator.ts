@@ -62,7 +62,10 @@ function dur(value: unknown): string {
     const m = Math.floor((s % 3600) / 60);
     return `${Math.floor(s / 3600)}h${String(m).padStart(2, "0")}m`;
   }
-  return `${Math.floor(s / 60)}m`;
+  if (s >= 60) {
+    return `${Math.floor(s / 60)}m`;
+  }
+  return `${s}s`;
 }
 
 function pct(value: unknown): string {
@@ -119,7 +122,78 @@ function meter(value: unknown, width: number, scale: unknown): string {
   return cells.slice(0, width).join("");
 }
 
-const VERB_NAMES = new Set(["num", "fixed", "dur", "pct", "inv", "alias", "meter"]);
+function toFiniteNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") {
+    return undefined;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Resolves a verb argument that is either a literal number or a contract path. */
+function resolveNumericArg(raw: string | undefined, ctx: unknown): number | undefined {
+  const arg = raw?.trim();
+  if (!arg) {
+    return undefined;
+  }
+  const literal = toFiniteNumber(arg);
+  return literal === undefined ? toFiniteNumber(getPath(ctx, arg)) : literal;
+}
+
+/** Threshold verbs return true when the comparison holds so `when` can gate on them. */
+function compare(value: unknown, bound: number | undefined, want: "gt" | "lt"): true | undefined {
+  const n = toFiniteNumber(value);
+  if (n === undefined || bound === undefined) {
+    return undefined;
+  }
+  const holds = want === "gt" ? n > bound : n < bound;
+  return holds ? true : undefined;
+}
+
+function div(value: unknown, by: number | undefined): number | undefined {
+  const n = toFiniteNumber(value);
+  if (n === undefined || by === undefined || by === 0) {
+    return undefined;
+  }
+  return n / by;
+}
+
+/**
+ * Renders the ratio against a previous value as an arrow plus multiplier, e.g. `↑2.1×`.
+ * Turn-to-turn noise is suppressed: a swing under DELTA_MIN_RATIO reads as "unchanged",
+ * otherwise every footer would carry a meaningless `↑1.0×`.
+ */
+const DELTA_MIN_RATIO = 1.15;
+
+function delta(value: unknown, previous: number | undefined): string {
+  const n = toFiniteNumber(value);
+  if (n === undefined || previous === undefined || previous === 0) {
+    return "";
+  }
+  const ratio = n / previous;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return "";
+  }
+  const magnitude = ratio > 1 ? ratio : 1 / ratio;
+  if (magnitude < DELTA_MIN_RATIO) {
+    return "";
+  }
+  return `${ratio > 1 ? "↑" : "↓"}${magnitude < 10 ? magnitude.toFixed(1) : Math.round(magnitude)}×`;
+}
+
+const VERB_NAMES = new Set([
+  "num",
+  "fixed",
+  "dur",
+  "pct",
+  "inv",
+  "alias",
+  "meter",
+  "gt",
+  "lt",
+  "div",
+  "delta",
+]);
 
 function parseBoundedIntegerArg(
   raw: string | undefined,
@@ -129,7 +203,13 @@ function parseBoundedIntegerArg(
   return asSafeIntegerInRange(value, options);
 }
 
-function applyVerb(name: string, args: string[], value: unknown, vocab: Vocab): unknown {
+function applyVerb(
+  name: string,
+  args: string[],
+  value: unknown,
+  vocab: Vocab,
+  ctx: unknown,
+): unknown {
   switch (name) {
     case "num":
       return num(value);
@@ -160,6 +240,14 @@ function applyVerb(name: string, args: string[], value: unknown, vocab: Vocab): 
       const scale = args.length > 1 ? vocab[expectDefined(args[1], "args entry at 1")] : undefined;
       return width === undefined ? "" : meter(value, width, scale);
     }
+    case "gt":
+      return compare(value, resolveNumericArg(args[0], ctx), "gt");
+    case "lt":
+      return compare(value, resolveNumericArg(args[0], ctx), "lt");
+    case "div":
+      return div(value, resolveNumericArg(args[0], ctx));
+    case "delta":
+      return delta(value, resolveNumericArg(args[0], ctx));
     default:
       return String(value);
   }
@@ -200,17 +288,52 @@ function interp(text: string, ctx: unknown, vocab: Vocab): string {
       return fallback ?? "";
     }
     for (const op of ops) {
-      val = applyVerb(op.name, op.args, val, vocab);
+      val = applyVerb(op.name, op.args, val, vocab, ctx);
     }
-    return String(val);
+    // A verb may now legitimately return undefined (a threshold that did not
+    // hold). Narrow explicitly instead of String()-ing an unknown: stringifying
+    // an object here would put "[object Object]" in a footer, and oxlint’s
+    // no-base-to-string rejects it outright.
+    if (val === null || val === undefined) {
+      return "";
+    }
+    if (typeof val === "string") {
+      return val;
+    }
+    if (typeof val === "number" || typeof val === "bigint" || typeof val === "boolean") {
+      return String(val);
+    }
+    return "";
   });
 }
 
 type Segment = Record<string, unknown>;
 
+/**
+ * Evaluates a `when` expression, which may carry verbs (e.g. `cost.turn_usd|gt:0.5`).
+ * A plain path keeps its previous behaviour, so existing templates are unaffected.
+ */
+function evalCondition(expr: string, ctx: unknown, vocab: Vocab): unknown {
+  const parts = expr.split("|");
+  const path = (parts[0] ?? "").trim();
+  let val = getPath(ctx, path);
+  for (const segRaw of parts.slice(1)) {
+    const seg = segRaw.trim();
+    const name = expectDefined(seg.split(":")[0], 'seg.split(":") entry at 0');
+    if (!VERB_NAMES.has(name)) {
+      continue;
+    }
+    if (val === null || val === undefined || val === "") {
+      return undefined;
+    }
+    val = applyVerb(name, seg.split(":").slice(1), val, vocab, ctx);
+  }
+  return val;
+}
+
 function renderSegment(seg: Segment, ctx: unknown, vocab: Vocab): string | null {
   if ("when" in seg) {
-    const v = getPath(ctx, String(seg.when));
+    const v = evalCondition(String(seg.when), ctx, vocab);
     if (v === null || v === undefined || v === false || v === "") {
       return null;
     }

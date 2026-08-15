@@ -188,3 +188,80 @@ describe("usage-bar end-to-end with buildUsageContract", () => {
     expect(renderUsageBar(tpl(pieces), contract)).toBe("opus46 | med🐌 | 📚 [⣿⣿⣿⣧⠐]272k | $0.0377");
   });
 });
+
+describe("threshold, ratio and division verbs", () => {
+  const alarm = [{ when: "cost.turn_usd|gt:0.5", text: "💸" }];
+
+  it("gates a segment on a value crossing the threshold", () => {
+    expect(render(alarm, { cost: { turn_usd: 0.6568 } })).toBe("💸");
+    expect(render(alarm, { cost: { turn_usd: 0.5 } })).toBe("");
+    expect(render(alarm, { cost: { turn_usd: 0.02 } })).toBe("");
+  });
+
+  it("gates on a value falling below the threshold", () => {
+    const cold = [{ when: "usage.cache_hit_pct|lt:50", text: "🥶" }];
+    expect(render(cold, { usage: { cache_hit_pct: 12 } })).toBe("🥶");
+    expect(render(cold, { usage: { cache_hit_pct: 80 } })).toBe("");
+  });
+
+  it("leaves a segment out when the compared value is missing", () => {
+    expect(render(alarm, {})).toBe("");
+    expect(render(alarm, { cost: {} })).toBe("");
+  });
+
+  it("does not treat booleans as numbers", () => {
+    const seg = [{ when: "flag|gt:0", text: "X" }];
+    expect(render(seg, { flag: true })).toBe("");
+  });
+
+  it("compares against another contract path, not just a literal", () => {
+    const seg = [{ when: "a|gt:b", text: "▲" }];
+    expect(render(seg, { a: 10, b: 3 })).toBe("▲");
+    expect(render(seg, { a: 2, b: 3 })).toBe("");
+    expect(render(seg, { a: 10 })).toBe("");
+  });
+
+  it("divides by a literal and by a path", () => {
+    expect(render([{ text: "{a|div:2|fixed:1}" }], { a: 9 })).toBe("4.5");
+    expect(render([{ text: "{a|div:b|fixed:1}" }], { a: 9, b: 3 })).toBe("3.0");
+  });
+
+  it("drops the segment when dividing by zero or a missing path", () => {
+    expect(render([{ when: "a|div:0", text: "X" }], { a: 9 })).toBe("");
+    expect(render([{ when: "a|div:missing", text: "X" }], { a: 9 })).toBe("");
+  });
+
+  it("renders the ratio against the previous turn with a direction arrow", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 21, prev: 10 })).toBe("↑2.1×");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 10, prev: 21 })).toBe("↓2.1×");
+  });
+
+  it("stays silent on turn-to-turn noise", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 104, prev: 100 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 114, prev: 100 })).toBe("");
+    expect(render([{ text: "{now|delta:prev}" }], { now: 116, prev: 100 })).toBe("↑1.2×");
+  });
+
+  it("rounds a large ratio to a whole multiplier", () => {
+    expect(render([{ text: "{now|delta:prev}" }], { now: 1200, prev: 100 })).toBe("↑12×");
+  });
+
+  it("keeps a plain path condition working as before", () => {
+    const seg = [{ when: "u.cache_hit_pct", text: "🗄" }];
+    expect(render(seg, { u: {} })).toBe("");
+    expect(render(seg, { u: { cache_hit_pct: 0 } })).toBe("🗄");
+  });
+
+  it("dur — keeps sub-minute spans readable instead of collapsing them to 0m", () => {
+    expect(render([{ text: "{x|dur}" }], { x: 12 })).toBe("12s");
+    expect(render([{ text: "{x|dur}" }], { x: 59 })).toBe("59s");
+    expect(render([{ text: "{x|dur}" }], { x: 60 })).toBe("1m");
+    expect(render([{ text: "{x|dur}" }], { x: 0 })).toBe("0s");
+  });
+
+  it("alias returning a non-primitive renders empty rather than [object Object]", () => {
+    // The interpolation return narrows explicitly now. An alias table whose value
+    // is not a primitive previously produced "[object Object]" in a footer.
+    expect(render([{ text: "{m|alias:models}" }], { m: "claude-opus-4-6" })).toBe("opus46");
+  });
+});
