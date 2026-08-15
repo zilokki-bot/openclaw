@@ -63,6 +63,94 @@ import { stableStringify } from "./stable-stringify.js";
 
 const MODEL_RUNTIME_PROVIDER_DISCOVERY_TIMEOUT_MS = 5_000;
 
+type PreparedWorkspaceBuildStats = Pick<
+  PreparedModelRuntimeBuildStats,
+  | "runtimePluginMs"
+  | "pluginMetadataMs"
+  | "staticProviderPlanningMs"
+  | "staticProviderCatalogMs"
+  | "ambientCredentialsMs"
+  | "agentFactsMs"
+  | "configuredProjectionMs"
+>;
+
+type SharedStaticWorkspaceBuild = {
+  agentFacts: readonly PreparedModelRuntimeAgentFacts[];
+  workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
+  buildStats: PreparedWorkspaceBuildStats;
+};
+
+// Managed worktrees without a workspace extension root have the same static plugin/provider
+// graph as the configured workspace. Keep this cache deliberately narrower than the lifecycle
+// owner cache: dynamic worktree projections may share only the immutable static facts, and any
+// workspace-origin plugin opts out. Config/auth lifecycle invalidation clears it in the owner.
+const sharedStaticWorkspaceBuilds = new Map<string, SharedStaticWorkspaceBuild>();
+const sharedStaticConfiguredCatalogFacts = new Map<string, PreparedModelRuntimeCatalogFacts>();
+
+function sharedStaticWorkspaceBuildKey(
+  input: PreparedModelRuntimeInput,
+  catalogMode: PreparedModelRuntimeCatalogMode,
+): string | undefined {
+  if (catalogMode !== "static" || input.readOnly || input.workspacePluginRootPresent === true) {
+    return undefined;
+  }
+  return JSON.stringify({
+    config: hashRuntimeConfigValue(input.config),
+    env: hashRuntimeConfigValue(input.env ?? process.env),
+  });
+}
+
+function findSharedStaticAgentFacts(
+  facts: readonly PreparedModelRuntimeAgentFacts[],
+  input: PreparedModelRuntimeInput,
+): PreparedModelRuntimeAgentFacts | undefined {
+  return facts.find(
+    (candidate) =>
+      candidate.input.agentId === input.agentId && candidate.input.agentDir === input.agentDir,
+  );
+}
+
+function materializeSharedStaticWorkspaceBuild(
+  cached: SharedStaticWorkspaceBuild,
+  inputs: readonly PreparedModelRuntimeInput[],
+  key: string,
+):
+  | {
+      agentFacts: PreparedModelRuntimeAgentFacts[];
+      workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
+      buildStats: PreparedWorkspaceBuildStats;
+    }
+  | undefined {
+  const agentFacts: PreparedModelRuntimeAgentFacts[] = [];
+  for (const input of inputs) {
+    const cachedFacts = findSharedStaticAgentFacts(cached.agentFacts, input);
+    if (!cachedFacts) {
+      // The key is process/config scoped, but do not silently project facts for a new agent
+      // identity that the original group did not contain.
+      sharedStaticWorkspaceBuilds.delete(key);
+      return undefined;
+    }
+    agentFacts.push({
+      ...cachedFacts,
+      input,
+      env: input.env ?? process.env,
+      // AuthStorage instances are mutable per run. Rehydrate from the immutable lifecycle
+      // credential map without reopening the agent SQLite store for every child worktree.
+      templateAuthStorage: AuthStorage.inMemory(cachedFacts.credentials),
+    });
+  }
+  const buildStats: PreparedWorkspaceBuildStats = {
+    runtimePluginMs: 0,
+    pluginMetadataMs: 0,
+    staticProviderPlanningMs: 0,
+    staticProviderCatalogMs: 0,
+    ambientCredentialsMs: 0,
+    agentFactsMs: 0,
+    configuredProjectionMs: 0,
+  };
+  return { agentFacts, workspaceFacts: cached.workspaceFacts, buildStats };
+}
+
 type PreparedModelRuntimeAgentBaseFacts = {
   input: PreparedModelRuntimeInput;
   env: NodeJS.ProcessEnv;
@@ -211,6 +299,16 @@ export async function prepareWorkspaceBuildGroup(
   const input = inputs[0];
   if (!input) {
     throw new Error("prepared model runtime workspace group is empty");
+  }
+  const sharedBuildKey = sharedStaticWorkspaceBuildKey(input, catalogMode);
+  if (sharedBuildKey && input.workspacePluginRootPresent === false) {
+    const cached = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
+    if (cached) {
+      const materialized = materializeSharedStaticWorkspaceBuild(cached, inputs, sharedBuildKey);
+      if (materialized) {
+        return materialized;
+      }
+    }
   }
   const env = input.env ?? process.env;
   const runtimePluginStartedAt = performance.now();
@@ -388,7 +486,7 @@ export async function prepareWorkspaceBuildGroup(
     });
   }
   const configuredProjectionMs = performance.now() - configuredProjectionStartedAt;
-  return {
+  const result = {
     agentFacts,
     buildStats: {
       runtimePluginMs,
@@ -410,6 +508,23 @@ export async function prepareWorkspaceBuildGroup(
       ...(providerStaticModels ? { providerStaticModels } : {}),
     },
   };
+  if (
+    sharedBuildKey &&
+    !pluginMetadataSnapshot.plugins.some((plugin) => plugin.origin === "workspace")
+  ) {
+    sharedStaticWorkspaceBuilds.set(sharedBuildKey, {
+      agentFacts: result.agentFacts,
+      workspaceFacts: result.workspaceFacts,
+      buildStats: result.buildStats,
+    });
+  }
+  return result;
+}
+
+/** Clears request-shared static facts when the lifecycle owner is invalidated. */
+export function clearPreparedModelRuntimeSharedWorkspaceBuilds(): void {
+  sharedStaticWorkspaceBuilds.clear();
+  sharedStaticConfiguredCatalogFacts.clear();
 }
 
 export async function prepareFullCatalogFacts(
@@ -635,6 +750,27 @@ export function prepareConfiguredRuntimeFactsBatch(params: {
     if (!representative) {
       continue;
     }
+    const sourceKey = fingerprintPreparedRuntimeFacts({
+      config: hashRuntimeConfigValue(representative.input.config),
+      agentDir: representative.input.agentDir,
+      credentials: representative.credentials,
+      modelsJsonContents: group.modelsJsonContents,
+      pluginCatalogs: group.pluginCatalogs,
+      metadata: params.workspaceFacts.pluginMetadataSnapshot.configFingerprint,
+    });
+    const cachedCatalogs = group.agentFacts.map((facts) =>
+      sharedStaticConfiguredCatalogFacts.get(
+        `${sourceKey}\0${facts.input.agentId ?? ""}\0${fingerprintPreparedRuntimeFacts(
+          facts.configuredModelRefs,
+        )}`,
+      ),
+    );
+    if (cachedCatalogs.every((catalog): catalog is PreparedModelRuntimeCatalogFacts => catalog)) {
+      for (const [index, facts] of group.agentFacts.entries()) {
+        catalogs.set(facts.input, cachedCatalogs[index]!);
+      }
+      continue;
+    }
     // Catalog bytes, credentials, and OAuth provider behavior are identical inside this group.
     // Parse once, then fork request auth without reopening filesystem or SQLite catalog sources.
     const templateModelRegistry = discoverModelsFromCapturedSources(
@@ -652,9 +788,17 @@ export function prepareConfiguredRuntimeFactsBatch(params: {
     );
     registryCount += 1;
     for (const facts of group.agentFacts) {
-      catalogs.set(
-        facts.input,
-        prepareConfiguredRuntimeFacts(facts, params.workspaceFacts, templateModelRegistry),
+      const catalogFacts = prepareConfiguredRuntimeFacts(
+        facts,
+        params.workspaceFacts,
+        templateModelRegistry,
+      );
+      catalogs.set(facts.input, catalogFacts);
+      sharedStaticConfiguredCatalogFacts.set(
+        `${sourceKey}\0${facts.input.agentId ?? ""}\0${fingerprintPreparedRuntimeFacts(
+          facts.configuredModelRefs,
+        )}`,
+        catalogFacts,
       );
     }
   }
