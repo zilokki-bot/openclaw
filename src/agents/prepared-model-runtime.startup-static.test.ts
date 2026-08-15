@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => {
     metadataSnapshot,
     resolveAmbientCredentials: vi.fn((..._args: unknown[]) => ({})),
     discoverAuthStorage: vi.fn(() => authStorage),
+    resolveAgentDiscoveryAuthFacts: vi.fn(),
     discoverModels: vi.fn(() => modelRegistry),
     ensureOpenClawModelsJson: vi.fn(
       async (_config: unknown, _agentDir: unknown, _options?: unknown) => ({
@@ -101,11 +102,16 @@ vi.mock("../plugins/plugin-metadata-snapshot.js", () => ({
   resolvePluginMetadataSnapshot: () => mocks.metadataSnapshot,
 }));
 
-vi.mock("./agent-auth-discovery.js", () => ({
+vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: mocks.resolveAmbientCredentials,
+  resolveAgentDiscoveryAuthFacts: (...args: unknown[]) =>
+    mocks.resolveAgentDiscoveryAuthFacts(...args),
 }));
 
-vi.mock("./agent-model-discovery.js", () => ({
+vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
+  discoverAuthStorageFacts: (...args: unknown[]) => mocks.resolveAgentDiscoveryAuthFacts(...args),
   discoverAuthStorage: mocks.discoverAuthStorage,
   discoverModels: mocks.discoverModels,
   discoverModelsFromCapturedSources: mocks.discoverModels,
@@ -123,7 +129,8 @@ vi.mock("./agent-scope.js", () => ({
   resolveDefaultAgentId: () => "default",
 }));
 
-vi.mock("./auth-profiles/runtime-snapshots.js", () => ({
+vi.mock("./auth-profiles/runtime-snapshots.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./auth-profiles/runtime-snapshots.js")>()),
   registerRuntimeAuthProfileStoreMutationListener: (
     listener: (event: { agentDir?: string; affectsInheritedStores: boolean }) => void,
   ) => {
@@ -166,6 +173,14 @@ const { resetPreparedModelRuntimeSnapshotsForTest } =
 beforeEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
   vi.clearAllMocks();
+  mocks.resolveAgentDiscoveryAuthFacts.mockImplementation((...args: unknown[]) => {
+    const authStorage = mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
+    return {
+      authStorage,
+      store: { version: 1, profiles: {} },
+      credentials: authStorage.getAll(),
+    };
+  });
   mocks.resolveStaticCatalogModel.mockReturnValue(undefined);
 });
 

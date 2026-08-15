@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   },
   resolveAmbientCredentials: vi.fn((..._args: unknown[]) => ({})),
   discoverAuthStorage: vi.fn((..._args: unknown[]) => undefined as unknown),
+  resolveAgentDiscoveryAuthFacts: vi.fn(),
   discoverModels: vi.fn(),
   ensureOpenClawModelsJson: vi.fn(async (..._args: unknown[]) => ({
     agentDir: "/tmp/agent",
@@ -47,12 +48,17 @@ vi.mock("./model-catalog.js", () => ({
     mocks.buildPreparedModelCatalogSnapshot(...args),
 }));
 
-vi.mock("./agent-auth-discovery.js", () => ({
+vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: (...args: unknown[]) =>
     mocks.resolveAmbientCredentials(...args),
+  resolveAgentDiscoveryAuthFacts: (...args: unknown[]) =>
+    mocks.resolveAgentDiscoveryAuthFacts(...args),
 }));
 
-vi.mock("./agent-model-discovery.js", () => ({
+vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
+  discoverAuthStorageFacts: (...args: unknown[]) => mocks.resolveAgentDiscoveryAuthFacts(...args),
   discoverAuthStorage: (...args: unknown[]) => {
     return mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
   },
@@ -82,7 +88,8 @@ vi.mock("./agent-scope.js", () => ({
   resolveDefaultAgentId: () => "default",
 }));
 
-vi.mock("./auth-profiles/runtime-snapshots.js", () => ({
+vi.mock("./auth-profiles/runtime-snapshots.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./auth-profiles/runtime-snapshots.js")>()),
   registerRuntimeAuthProfileStoreMutationListener: (
     listener: (event: { agentDir?: string; affectsInheritedStores: boolean }) => void,
   ) => {
@@ -140,6 +147,15 @@ describe("prepared model runtime snapshots", () => {
   beforeEach(() => {
     getTesting().resetPreparedModelRuntimeSnapshotsForTest();
     mocks.discoverAuthStorage.mockClear();
+    mocks.resolveAgentDiscoveryAuthFacts.mockReset();
+    mocks.resolveAgentDiscoveryAuthFacts.mockImplementation((...args: unknown[]) => {
+      const authStorage = mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
+      return {
+        authStorage,
+        store: { version: 1, profiles: {} },
+        credentials: authStorage.getAll(),
+      };
+    });
     mocks.resolveAmbientCredentials.mockClear();
     mocks.discoverAuthStorage.mockImplementation(() => mocks.authStorage);
     mocks.discoverModels.mockClear();
@@ -812,7 +828,7 @@ describe("prepared model runtime snapshots", () => {
     ).resolves.toBeUndefined();
     expect(mocks.ensureOpenClawModelsJson).not.toHaveBeenCalled();
     expect(mocks.ensureRuntimePluginsLoaded).not.toHaveBeenCalled();
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledOnce();
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledOnce();
     expect(mocks.discoverModels).toHaveBeenCalledOnce();
   });
 
@@ -865,7 +881,7 @@ describe("prepared model runtime snapshots", () => {
     await vi.waitFor(() => expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledTimes(2));
     const refreshed = await prepareModelRuntimeSnapshot({ config, agentDir });
     expect(refreshed).not.toBe(first);
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledTimes(2);
   });
 
   it("treats an auth refresh superseded by a newer mutation as control flow", async () => {
@@ -962,7 +978,7 @@ describe("prepared model runtime snapshots", () => {
     mocks.mutationListener?.({ agentDir: inheritedAuthDir, affectsInheritedStores: false });
 
     await vi.waitFor(() => expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledTimes(2));
-    expect(mocks.discoverAuthStorage).toHaveBeenLastCalledWith(
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenLastCalledWith(
       agentDir,
       expect.objectContaining({ inheritedAuthDir }),
     );
@@ -979,7 +995,7 @@ describe("prepared model runtime snapshots", () => {
     });
 
     await vi.waitFor(() => expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledTimes(2));
-    expect(mocks.discoverAuthStorage).toHaveBeenLastCalledWith(
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenLastCalledWith(
       agentDir,
       expect.objectContaining({ inheritedAuthDir: "/tmp/unused-agent" }),
     );
@@ -999,7 +1015,7 @@ describe("prepared model runtime snapshots", () => {
     await prepareModelRuntimeSnapshot({ config, agentDir: firstAgentDir });
 
     expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledTimes(70);
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledTimes(70);
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledTimes(70);
     expect(mocks.discoverModels).toHaveBeenCalledTimes(70);
   });
 

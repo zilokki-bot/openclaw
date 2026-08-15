@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   },
   resolveAmbientCredentials: vi.fn((..._args: unknown[]) => ({})),
   discoverAuthStorage: vi.fn(),
+  resolveAgentDiscoveryAuthFacts: vi.fn(),
   discoverModels: vi.fn(),
   ensureOpenClawModelsJson: vi.fn(async (..._args: unknown[]) => ({
     agentDir: "/tmp/agent",
@@ -47,12 +48,17 @@ vi.mock("./model-catalog.js", () => ({
     mocks.buildPreparedModelCatalogSnapshot(...args),
 }));
 
-vi.mock("./agent-auth-discovery.js", () => ({
+vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: (...args: unknown[]) =>
     mocks.resolveAmbientCredentials(...args),
+  resolveAgentDiscoveryAuthFacts: (...args: unknown[]) =>
+    mocks.resolveAgentDiscoveryAuthFacts(...args),
 }));
 
-vi.mock("./agent-model-discovery.js", () => ({
+vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
+  discoverAuthStorageFacts: (...args: unknown[]) => mocks.resolveAgentDiscoveryAuthFacts(...args),
   discoverAuthStorage: (...args: unknown[]) => {
     mocks.discoverAuthStorage(...args);
     return mocks.authStorage;
@@ -81,7 +87,8 @@ vi.mock("./agent-scope.js", () => ({
   resolveDefaultAgentId: () => "default",
 }));
 
-vi.mock("./auth-profiles/runtime-snapshots.js", () => ({
+vi.mock("./auth-profiles/runtime-snapshots.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./auth-profiles/runtime-snapshots.js")>()),
   registerRuntimeAuthProfileStoreMutationListener: (
     listener: (event: { agentDir?: string; affectsInheritedStores: boolean }) => void,
   ) => {
@@ -116,6 +123,10 @@ vi.mock("../logging/subsystem.js", () => ({
 
 import { startSerializedSnapshotBuild } from "./prepared-model-runtime.build.js";
 import {
+  prepareWorkspaceBuildGroup,
+  preparedModelRuntimeWorkspaceFactsKey,
+} from "./prepared-model-runtime.facts.js";
+import {
   acquireReadOnlyPreparedModelRuntime,
   activateStandalonePreparedModelRuntime,
   getPreparedModelRuntimeSnapshot,
@@ -139,6 +150,15 @@ describe("prepared model runtime snapshots", () => {
   beforeEach(() => {
     getTesting().resetPreparedModelRuntimeSnapshotsForTest();
     mocks.discoverAuthStorage.mockClear();
+    mocks.resolveAgentDiscoveryAuthFacts.mockReset();
+    mocks.resolveAgentDiscoveryAuthFacts.mockImplementation((...args: unknown[]) => {
+      const authStorage = mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
+      return {
+        authStorage,
+        store: { version: 1, profiles: {} },
+        credentials: authStorage.getAll(),
+      };
+    });
     mocks.resolveAmbientCredentials.mockClear();
     mocks.discoverModels.mockClear();
     mocks.ensureOpenClawModelsJson.mockClear();
@@ -165,6 +185,44 @@ describe("prepared model runtime snapshots", () => {
       config: input.config,
     });
     await expect(build.completion).resolves.toBeUndefined();
+  });
+
+  it("does not reuse static workspace facts across auth inheritance or credential mode", async () => {
+    const base = {
+      config: {},
+      env: { OPENCLAW_TEST_AUTH_GENERATION: "one" },
+      agentId: "shared-agent",
+      agentDir: "/tmp/shared-auth-agent",
+      inheritedAuthDir: "/tmp/auth-generation-a",
+      workspaceDir: "/tmp/shared-auth-workspace",
+      workspacePluginRootPresent: false,
+    };
+    const inherited = { ...base, inheritedAuthDir: "/tmp/auth-generation-b" };
+    const credentialful = { ...base, inheritedAuthDir: "/tmp/auth-generation-c" };
+    const credentialFree = { ...credentialful, skipCredentials: true };
+
+    expect(
+      preparedModelRuntimeWorkspaceFactsKey({
+        ...base,
+        inheritedAuthDir: "/tmp/./auth-generation-a",
+      }),
+    ).toBe(preparedModelRuntimeWorkspaceFactsKey(base));
+    expect(preparedModelRuntimeWorkspaceFactsKey({ ...base, skipCredentials: false })).toBe(
+      preparedModelRuntimeWorkspaceFactsKey(base),
+    );
+    expect(preparedModelRuntimeWorkspaceFactsKey(base)).not.toBe(
+      preparedModelRuntimeWorkspaceFactsKey(inherited),
+    );
+    expect(preparedModelRuntimeWorkspaceFactsKey(credentialful)).not.toBe(
+      preparedModelRuntimeWorkspaceFactsKey(credentialFree),
+    );
+
+    await prepareWorkspaceBuildGroup([base], "static");
+    await prepareWorkspaceBuildGroup([inherited], "static");
+    await prepareWorkspaceBuildGroup([credentialful], "static");
+    await prepareWorkspaceBuildGroup([credentialFree], "static");
+
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledTimes(4);
   });
 
   it("keeps an isolated setup probe exact after a gateway replacement", async () => {
@@ -211,7 +269,7 @@ describe("prepared model runtime snapshots", () => {
     await expect(loadPreparedModelRuntimeSnapshot(input)).resolves.toMatchObject({
       config: input.config,
     });
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledTimes(2);
     expect(mocks.ensureOpenClawModelsJson).not.toHaveBeenCalled();
   });
 
@@ -251,7 +309,7 @@ describe("prepared model runtime snapshots", () => {
       workspaceDir: "/tmp/prepared-model-runtime-plugin-workspace",
     });
     expect(mocks.ensureRuntimePluginsLoaded.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.discoverAuthStorage.mock.invocationCallOrder[0]!,
+      mocks.resolveAgentDiscoveryAuthFacts.mock.invocationCallOrder[0]!,
     );
   });
 
@@ -268,7 +326,7 @@ describe("prepared model runtime snapshots", () => {
       "/tmp/prepared-model-runtime-explicit-env",
       expect.objectContaining({ env }),
     );
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledWith(
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledWith(
       "/tmp/prepared-model-runtime-explicit-env",
       expect.objectContaining({ env }),
     );
@@ -620,7 +678,7 @@ describe("prepared model runtime snapshots", () => {
         readOnly: true,
       }),
     ).resolves.toMatchObject({ config: draftConfig });
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledWith(
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledWith(
       "/tmp/prepared-model-runtime-read-only-draft",
       expect.objectContaining({ readOnly: true }),
     );
@@ -642,7 +700,7 @@ describe("prepared model runtime snapshots", () => {
     });
 
     expect(credentialFree).not.toBe(await prepareModelRuntimeSnapshot({ config, agentDir }));
-    expect(mocks.discoverAuthStorage).toHaveBeenNthCalledWith(
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenNthCalledWith(
       2,
       agentDir,
       expect.objectContaining({ readOnly: true, skipCredentials: true }),
@@ -659,7 +717,7 @@ describe("prepared model runtime snapshots", () => {
     expect(second).toBe(first);
     expect(Object.isFrozen(first)).toBe(true);
     expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledTimes(1);
-    expect(mocks.discoverAuthStorage).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledTimes(1);
     expect(mocks.resolveAmbientCredentials).toHaveBeenCalledTimes(1);
     expect(mocks.discoverModels).toHaveBeenCalledTimes(1);
     expect(mocks.buildPreparedModelCatalogSnapshot).toHaveBeenCalledWith(

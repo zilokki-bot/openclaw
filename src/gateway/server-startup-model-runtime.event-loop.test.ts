@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { performance } from "node:perf_hooks";
+import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ProviderPlugin } from "../plugins/types.js";
@@ -15,6 +15,20 @@ const providerMocks = vi.hoisted(() => ({
 }));
 const manifestModelMocks = vi.hoisted(() => ({
   resolve: vi.fn(),
+}));
+const firstUseAttribution = vi.hoisted(() => ({
+  metadataSnapshotCalls: 0,
+  metadataSnapshots: [] as Array<{
+    workspaceDir?: string;
+    workspacePluginRootPresent?: boolean;
+    origins: string[];
+    stack?: string[];
+  }>,
+  authFactsCalls: 0,
+  capturedModelDiscoveryCalls: 0,
+  metadataSnapshotMs: 0,
+  authFactsMs: 0,
+  capturedModelDiscoveryMs: 0,
 }));
 
 const providerConfig = {
@@ -72,6 +86,62 @@ vi.mock("../agents/embedded-agent-runner/model.static-catalog.js", async (import
   };
 });
 
+vi.mock("../plugins/plugin-metadata-snapshot.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../plugins/plugin-metadata-snapshot.js")>();
+  return {
+    ...actual,
+    resolvePluginMetadataSnapshot: vi.fn(
+      (...args: Parameters<typeof actual.resolvePluginMetadataSnapshot>) => {
+        firstUseAttribution.metadataSnapshotCalls += 1;
+        const startedAt = performance.now();
+        try {
+          const snapshot = actual.resolvePluginMetadataSnapshot(...args);
+          firstUseAttribution.metadataSnapshots.push({
+            ...(args[0].workspaceDir ? { workspaceDir: args[0].workspaceDir } : {}),
+            ...(args[0].workspacePluginRootPresent !== undefined
+              ? { workspacePluginRootPresent: args[0].workspacePluginRootPresent }
+              : {}),
+            origins: snapshot.plugins.map((plugin) => plugin.origin),
+            stack: new Error().stack?.split("\n").slice(2, 8),
+          });
+          return snapshot;
+        } finally {
+          firstUseAttribution.metadataSnapshotMs += performance.now() - startedAt;
+        }
+      },
+    ),
+  };
+});
+
+vi.mock("../agents/agent-model-discovery.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agents/agent-model-discovery.js")>();
+  return {
+    ...actual,
+    discoverAuthStorageFacts: vi.fn(
+      (...args: Parameters<typeof actual.discoverAuthStorageFacts>) => {
+        firstUseAttribution.authFactsCalls += 1;
+        const startedAt = performance.now();
+        try {
+          return actual.discoverAuthStorageFacts(...args);
+        } finally {
+          firstUseAttribution.authFactsMs += performance.now() - startedAt;
+        }
+      },
+    ),
+    discoverModelsFromCapturedSources: vi.fn(
+      (...args: Parameters<typeof actual.discoverModelsFromCapturedSources>) => {
+        firstUseAttribution.capturedModelDiscoveryCalls += 1;
+        const startedAt = performance.now();
+        try {
+          return actual.discoverModelsFromCapturedSources(...args);
+        } finally {
+          firstUseAttribution.capturedModelDiscoveryMs += performance.now() - startedAt;
+        }
+      },
+    ),
+  };
+});
+
 const { resetPreparedModelRuntimeSnapshotsForTest } =
   await import("../agents/prepared-model-runtime.test-support.js");
 const {
@@ -81,12 +151,22 @@ const {
   refreshPreparedModelRuntimeSnapshots,
 } = await import("../agents/prepared-model-runtime.js");
 const { writePersistedAuthProfileStoreRaw } = await import("../agents/auth-profiles/sqlite.js");
+const { clearRuntimeAuthProfileStoreSnapshots, replaceRuntimeAuthProfileStoreSnapshots } =
+  await import("../agents/auth-profiles/store.js");
 const { resolveAgentDir, resolveAgentWorkspaceDir } = await import("../agents/agent-scope.js");
 const { startGatewaySidecars } = await import("./server-startup-post-attach.js");
 
 beforeEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
+  clearRuntimeAuthProfileStoreSnapshots();
   vi.clearAllMocks();
+  firstUseAttribution.metadataSnapshotCalls = 0;
+  firstUseAttribution.metadataSnapshots.length = 0;
+  firstUseAttribution.authFactsCalls = 0;
+  firstUseAttribution.capturedModelDiscoveryCalls = 0;
+  firstUseAttribution.metadataSnapshotMs = 0;
+  firstUseAttribution.authFactsMs = 0;
+  firstUseAttribution.capturedModelDiscoveryMs = 0;
 });
 
 async function listenGatewayProbe(): Promise<{ port: number; close: () => Promise<void> }> {
@@ -128,6 +208,7 @@ async function requestAfter(port: number, pathname: string, delayMs: number) {
 
 afterEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
+  clearRuntimeAuthProfileStoreSnapshots();
   closeOpenClawAgentDatabasesForTest();
   vi.clearAllMocks();
 });
@@ -234,6 +315,7 @@ describe("Gateway prepared model runtime startup", () => {
       0,
     );
     expect(configuredProjectionCount).toBe(168);
+    expect(new Set(agents.map((agent) => agent.workspace)).size).toBe(19);
     const staticModels = Array.from({ length: 8 }, (_, index) => ({
       id: `fleet-${index}`,
       name: `Fleet ${index}`,
@@ -429,7 +511,10 @@ describe("Gateway prepared model runtime startup", () => {
   it("keeps two concurrent managed-worktree first turns on one configured generation", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "openclaw-model-runtime-children-"));
     const stateDir = path.join(root, "state");
-    const configuredWorkspace = path.join(root, "workspace-configured");
+    const configuredWorkspaces = Array.from({ length: 19 }, (_, index) =>
+      path.join(root, `workspace-configured-${index}`),
+    );
+    const configuredWorkspace = configuredWorkspaces[0]!;
     const childWorkspaces = [
       path.join(root, "workspace-child-a"),
       path.join(root, "workspace-child-b"),
@@ -449,18 +534,20 @@ describe("Gateway prepared model runtime startup", () => {
       contextWindow: 32_000,
       maxTokens: 4_096,
     }));
+    const agents = Array.from({ length: 21 }, (_, index) => ({
+      id: index === 0 ? "developer" : `agent-${index}`,
+      ...(index === 0 ? { default: true } : {}),
+      workspace: configuredWorkspaces[Math.min(index, configuredWorkspaces.length - 1)]!,
+      model: { primary: "openai/fleet-0" },
+      models: modelEntries,
+    }));
+    const configuredProjectionCount = agents.reduce(
+      (count, agent) => count + Object.keys(agent.models).length,
+      0,
+    );
+    expect(configuredProjectionCount).toBe(168);
     const cfg = {
-      agents: {
-        list: [
-          {
-            id: "developer",
-            default: true,
-            workspace: configuredWorkspace,
-            model: { primary: "openai/fleet-0" },
-            models: modelEntries,
-          },
-        ],
-      },
+      agents: { list: agents },
       gateway: { mode: "local", bind: "loopback", auth: { mode: "none" } },
       models: {
         providers: {
@@ -503,6 +590,17 @@ describe("Gateway prepared model runtime startup", () => {
       await withEnvAsync(
         { OPENCLAW_SKIP_CHANNELS: "1", OPENCLAW_STATE_DIR: stateDir },
         async () => {
+          replaceRuntimeAuthProfileStoreSnapshots([
+            {
+              agentDir: resolveAgentDir(cfg, "developer"),
+              store: {
+                version: 1,
+                profiles: {},
+                runtimeExternalProfileIds: [],
+                runtimeExternalProfileIdsAuthoritative: true,
+              },
+            },
+          ]);
           const sidecars = await startGatewaySidecars({
             cfg,
             pluginRegistry: { plugins: [], typedHooks: [] } as never,
@@ -518,24 +616,33 @@ describe("Gateway prepared model runtime startup", () => {
           const probes = ["/healthz", "/readyz", "/rpc/ping"].map((pathname) =>
             requestAfter(gatewayProbe.port, pathname, 25),
           );
+          const heartbeatDelay = monitorEventLoopDelay({ resolution: 10 });
+          heartbeatDelay.enable();
           const startedAt = performance.now();
-          const [leases, probeResults] = await Promise.all([
-            Promise.all(
-              childWorkspaces.map((workspaceDir) =>
-                acquireAgentRunPreparedModelRuntime(
-                  {
-                    agentId: "developer",
-                    agentDir: resolveAgentDir(cfg, "developer"),
-                    workspaceDir,
-                    config: cfg,
-                  },
-                  { catalogMode: "static" },
+          let leases: Awaited<ReturnType<typeof acquireAgentRunPreparedModelRuntime>>[];
+          let probeResults: Awaited<ReturnType<typeof requestAfter>>[];
+          try {
+            [leases, probeResults] = await Promise.all([
+              Promise.all(
+                childWorkspaces.map((workspaceDir) =>
+                  acquireAgentRunPreparedModelRuntime(
+                    {
+                      agentId: "developer",
+                      agentDir: resolveAgentDir(cfg, "developer"),
+                      workspaceDir,
+                      config: cfg,
+                    },
+                    { catalogMode: "static" },
+                  ),
                 ),
               ),
-            ),
-            Promise.all(probes),
-          ]);
+              Promise.all(probes),
+            ]);
+          } finally {
+            heartbeatDelay.disable();
+          }
           const elapsedMs = performance.now() - startedAt;
+          const heartbeatMaxMs = heartbeatDelay.max / 1_000_000;
           const afterRssBytes = process.memoryUsage().rss;
           if (process.env.OPENCLAW_BENCHMARK_OUTPUT === "1") {
             process.stdout.write(
@@ -551,7 +658,13 @@ describe("Gateway prepared model runtime startup", () => {
                 liveCatalogCalls: providerMocks.liveCatalog.mock.calls.length,
                 staticCatalogCalls: providerMocks.staticCatalog.mock.calls.length,
                 elapsedMs,
+                heartbeatMaxMs,
                 maxProbeMs: Math.max(...probeResults.map((result) => result.elapsedMs)),
+                stageMs: {
+                  metadataSnapshot: firstUseAttribution.metadataSnapshotMs,
+                  authFacts: firstUseAttribution.authFactsMs,
+                  capturedModelDiscovery: firstUseAttribution.capturedModelDiscoveryMs,
+                },
                 beforeRssBytes,
                 afterRssBytes,
                 rssDeltaBytes: afterRssBytes - beforeRssBytes,
@@ -559,6 +672,18 @@ describe("Gateway prepared model runtime startup", () => {
             );
           }
           expect(leases).toHaveLength(2);
+          expect(heartbeatMaxMs).toBeLessThan(1_000);
+          expect(afterRssBytes - beforeRssBytes).toBeLessThan(512 * 1024 * 1024);
+          // Both visible isolated child worktrees inherit one configured agent generation. The
+          // static metadata/auth discovery must therefore happen once, not once per child.
+          expect(
+            firstUseAttribution.metadataSnapshotCalls,
+            JSON.stringify(firstUseAttribution.metadataSnapshots),
+          ).toBe(1);
+          // A published auth generation still crosses the facts seam once, but must not
+          // re-enter external CLI/plugin hydration (covered by the prepared-store test).
+          expect(firstUseAttribution.authFactsCalls).toBe(1);
+          expect(firstUseAttribution.capturedModelDiscoveryCalls).toBe(1);
           expect(leases.map(({ snapshot }) => snapshot.workspaceDir)).toEqual(childWorkspaces);
           expect(
             leases.every(({ snapshot }) => snapshot.configuredRuntimeModels.length === 8),

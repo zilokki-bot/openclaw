@@ -5,6 +5,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { registerRuntimeAuthProfileStoreMutationListener } from "./auth-profiles/runtime-snapshots.js";
+import { clearPreparedModelRuntimeSharedWorkspaceBuilds } from "./prepared-model-runtime.facts.js";
 import { createGatewayPreparedModelRuntimeLifecycle } from "./prepared-model-runtime.gateway-lifecycle.js";
 import { loadPreparedModelRuntimeSnapshotWithLifecycle } from "./prepared-model-runtime.load.js";
 import {
@@ -510,6 +511,7 @@ export function markPreparedModelRuntimeSnapshotsStale(
   reason = "prepared model runtime owner is stale after config publication",
   options: { waitForReplacement?: boolean; preserveReplacementWait?: boolean } = {},
 ): PreparedModelRuntimeReplacementGateId | undefined {
+  clearPreparedModelRuntimeSharedWorkspaceBuilds();
   if (options.waitForReplacement) {
     const superseded = pendingModelRuntimeReplacement;
     pendingModelRuntimeReplacement = createPreparedModelRuntimeReplacement();
@@ -780,6 +782,7 @@ async function drainPendingAuthMutations(): Promise<void> {
 }
 
 function invalidateForAuthMutation(event: AuthMutationEvent): void {
+  clearPreparedModelRuntimeSharedWorkspaceBuilds();
   const normalizedEvent = {
     ...event,
     agentDir: normalizeOptionalDir(event.agentDir),
@@ -827,6 +830,7 @@ function resetPreparedModelRuntimeSnapshotsForTest(): void {
   refreshTail = Promise.resolve();
   refreshRequestEpoch = 0;
   pendingAuthMutations.length = 0;
+  clearPreparedModelRuntimeSharedWorkspaceBuilds();
   modelRuntimeBuildTimeoutMs = DEFAULT_MODEL_RUNTIME_BUILD_TIMEOUT_MS;
 }
 

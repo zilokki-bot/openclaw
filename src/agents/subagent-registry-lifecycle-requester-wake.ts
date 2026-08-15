@@ -1,3 +1,4 @@
+import { runWithoutOwnedSessionTranscriptWrites } from "../config/sessions/transcript-write-context.js";
 import { runWithGatewayIndependentRootWorkContinuation } from "../process/gateway-work-admission.js";
 import type { createSubagentRegistryLifecycleCommon } from "./subagent-registry-lifecycle-common.js";
 import type {
@@ -101,7 +102,7 @@ export function createSubagentRegistryLifecycleRequesterWake(
     for (const [runId, entry] of entries) {
       const retryTimer = scheduledRequesterSettleWakeTimers.get(runId);
       if (retryTimer) {
-        clearTimeout(retryTimer);
+        clearTimeout(retryTimer.timer);
         scheduledRequesterSettleWakeTimers.delete(runId);
       }
       if (entry.requesterSettleWake === undefined || !params.runs.has(runId)) {
@@ -165,17 +166,40 @@ export function createSubagentRegistryLifecycleRequesterWake(
   // cleanup parent reserves the root synchronously, so restart or suspend
   // cannot reach quiescence between scheduling and the wake's gateway turn.
   // Failures are logged only.
+  function retainScheduledRequesterSettleWakeTimer(
+    runId: string,
+    deadline: number,
+    rearmGeneration?: number,
+  ): boolean {
+    const scheduled = scheduledRequesterSettleWakeTimers.get(runId);
+    if (!scheduled) {
+      return false;
+    }
+    const hasNewerGeneration =
+      rearmGeneration !== undefined &&
+      (scheduled.rearmGeneration === undefined || rearmGeneration > scheduled.rearmGeneration);
+    if (!hasNewerGeneration && deadline >= scheduled.deadline) {
+      return true;
+    }
+    clearTimeout(scheduled.timer);
+    scheduledRequesterSettleWakeTimers.delete(runId);
+    return false;
+  }
+
   function scheduleRequesterSettleWakeRetry(runId: string, entry: SubagentRunRecord): void {
     const nextAttemptAt = entry.requesterSettleWake?.nextAttemptAt;
-    if (
-      nextAttemptAt === undefined ||
-      nextAttemptAt <= Date.now() ||
-      scheduledRequesterSettleWakeTimers.has(runId)
-    ) {
+    if (nextAttemptAt === undefined || nextAttemptAt <= Date.now()) {
+      return;
+    }
+    const rearmGeneration = entry.requesterSettleWake?.rearmGeneration;
+    if (retainScheduledRequesterSettleWakeTimer(runId, nextAttemptAt, rearmGeneration)) {
       return;
     }
     const timer = setTimeout(
       () => {
+        if (scheduledRequesterSettleWakeTimers.get(runId)?.timer !== timer) {
+          return;
+        }
         scheduledRequesterSettleWakeTimers.delete(runId);
         const current = params.runs.get(runId);
         if (current === entry && current.requesterSettleWake) {
@@ -185,55 +209,69 @@ export function createSubagentRegistryLifecycleRequesterWake(
       Math.max(0, nextAttemptAt - Date.now()),
     );
     timer.unref?.();
-    scheduledRequesterSettleWakeTimers.set(runId, timer);
+    scheduledRequesterSettleWakeTimers.set(runId, {
+      timer,
+      deadline: nextAttemptAt,
+      rearmGeneration,
+    });
   }
 
   function scheduleRequesterSettleWake(runId: string, entry: SubagentRunRecord): void {
     const requesterSessionKey = entry.requesterSessionKey?.trim();
+    if (entry.collect || !requesterSessionKey || scheduledRequesterSettleWakeRuns.has(runId)) {
+      return;
+    }
+    const now = Date.now();
+    const nextAttemptAt = entry.requesterSettleWake?.nextAttemptAt;
+    const deadline = nextAttemptAt !== undefined && nextAttemptAt > now ? nextAttemptAt : now;
     if (
-      entry.collect ||
-      !requesterSessionKey ||
-      (entry.requesterTurnRunId && entry.requesterTurnYielded === true) ||
-      scheduledRequesterSettleWakeRuns.has(runId) ||
-      scheduledRequesterSettleWakeTimers.has(runId)
+      retainScheduledRequesterSettleWakeTimer(
+        runId,
+        deadline,
+        entry.requesterSettleWake?.rearmGeneration,
+      )
     ) {
       return;
     }
-    if ((entry.requesterSettleWake?.nextAttemptAt ?? 0) > Date.now()) {
+    if (nextAttemptAt !== undefined && nextAttemptAt > now) {
       scheduleRequesterSettleWakeRetry(runId, entry);
       return;
     }
     scheduledRequesterSettleWakeRuns.add(runId);
-    void runWithGatewayIndependentRootWorkContinuation(() =>
-      params.maybeWakeRequesterAfterAllChildrenSettled({
-        requesterSessionKey,
-        requesterOrigin: entry.requesterOrigin,
-        settledEntry: entry,
-        transitionBatch: transitionRequesterSettleWakeBatch,
-        completeBatch: completeRequesterSettleWakeBatch,
-      }),
-    )
-      .catch((error: unknown) => {
-        params.warn("requester settle wake failed", {
-          error: buildSafeLifecycleErrorMeta(error),
-          runId: maskRunId(runId),
-          requesterSessionKey: maskSessionKey(requesterSessionKey),
-        });
-      })
-      .finally(() => {
-        scheduledRequesterSettleWakeRuns.delete(runId);
-        const wasRearmedWhileRunning = pendingRequesterSettleWakeRearms.delete(runId);
-        const current = params.runs.get(runId);
-        if (current === entry && current.requesterSettleWake) {
-          if (wasRearmedWhileRunning) {
-            // A requester yield can freeze a delivered batch while this run is
-            // resolving its earlier no-wake decision. Admit that durable update now.
-            scheduleRequesterSettleWake(runId, current);
-          } else {
-            scheduleRequesterSettleWakeRetry(runId, current);
+    // Wake turns outlive their spawning attempt. Clear its transcript owner
+    // before dispatch so a delayed resume cannot write through a disposed lock.
+    runWithoutOwnedSessionTranscriptWrites(() => {
+      void runWithGatewayIndependentRootWorkContinuation(() =>
+        params.maybeWakeRequesterAfterAllChildrenSettled({
+          requesterSessionKey,
+          requesterOrigin: entry.requesterOrigin,
+          settledEntry: entry,
+          transitionBatch: transitionRequesterSettleWakeBatch,
+          completeBatch: completeRequesterSettleWakeBatch,
+        }),
+      )
+        .catch((error: unknown) => {
+          params.warn("requester settle wake failed", {
+            error: buildSafeLifecycleErrorMeta(error),
+            runId: maskRunId(runId),
+            requesterSessionKey: maskSessionKey(requesterSessionKey),
+          });
+        })
+        .finally(() => {
+          scheduledRequesterSettleWakeRuns.delete(runId);
+          const wasRearmedWhileRunning = pendingRequesterSettleWakeRearms.delete(runId);
+          const current = params.runs.get(runId);
+          if (current === entry && current.requesterSettleWake) {
+            if (wasRearmedWhileRunning) {
+              // A requester yield can freeze a delivered batch while this run is
+              // resolving its earlier no-wake decision. Admit that durable update now.
+              scheduleRequesterSettleWake(runId, current);
+            } else {
+              scheduleRequesterSettleWakeRetry(runId, current);
+            }
           }
-        }
-      });
+        });
+    });
   }
 
   return {
