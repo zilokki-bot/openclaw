@@ -124,7 +124,36 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
       requesterYieldBatch: true,
       afterRequesterYield: true,
     });
-    expect(schedule).not.toHaveBeenCalled();
+    expect(entry.delivery?.disposition).toBe("intentional_non_delivery");
+    expect(schedule).toHaveBeenCalledExactlyOnceWith(entry.runId, entry);
+  });
+
+  it("transfers a mixed delivered and in-progress batch to one settle wake", () => {
+    const first = makeRun("run-first");
+    const second = makeRun("run-second");
+    second.delivery = { status: "in_progress" };
+    const calls: string[] = [];
+    const schedule = vi.fn(() => calls.push("schedule"));
+
+    expect(
+      settleRequesterTurnAfterSessionSpawns({
+        requesterSessionKey: REQUESTER,
+        requesterTurnRunId: REQUESTER_TURN,
+        requesterYielded: true,
+        acceptedSessionSpawns: [accepted(first), accepted(second)],
+        runs: new Map([
+          [first.runId, first],
+          [second.runId, second],
+        ]),
+        persistOrThrow: () => calls.push("persist"),
+        schedule,
+      }),
+    ).toBe(true);
+    expect(second.delivery?.disposition).toBe("intentional_non_delivery");
+    expect(first.requesterSettleWake?.batchRunIds).toEqual(["run-first", "run-second"]);
+    expect(second.requesterSettleWake).toEqual(first.requesterSettleWake);
+    expect(calls).toEqual(["persist", "schedule"]);
+    expect(schedule).toHaveBeenCalledExactlyOnceWith(first.runId, first);
   });
 
   it("ignores accepted spawns that do not produce completion messages", () => {
@@ -171,6 +200,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
       }),
     ).toBe(true);
     expect(runs.get(entry.runId)).toBe(entry);
+    expect(entry.delivery).toEqual({ status: "delivered" });
     expect(entry.requesterSettleWake).toMatchObject({
       afterRequesterYield: true,
       retireAfterSettle: true,
@@ -219,5 +249,28 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
     expect(runs.get(entry.runId)).toBe(entry);
     expect(entry.requesterTurnRunId).toBe(REQUESTER_TURN);
     expect(entry.retireAfterRequesterTurn).toBe(true);
+  });
+
+  it("restores per-child delivery ownership when yielded settlement persistence fails", () => {
+    const entry = makeRun("run-delivery-rollback");
+    entry.delivery = { status: "in_progress" };
+    const failure = new Error("sqlite unavailable");
+
+    expect(() =>
+      settleRequesterTurnAfterSessionSpawns({
+        requesterSessionKey: REQUESTER,
+        requesterTurnRunId: REQUESTER_TURN,
+        requesterYielded: true,
+        acceptedSessionSpawns: [accepted(entry)],
+        runs: new Map([[entry.runId, entry]]),
+        persistOrThrow: () => {
+          throw failure;
+        },
+        schedule: vi.fn(),
+      }),
+    ).toThrow(failure);
+    expect(entry.delivery).toEqual({ status: "in_progress" });
+    expect(entry.requesterTurnRunId).toBe(REQUESTER_TURN);
+    expect(entry.requesterTurnYielded).toBe(true);
   });
 });

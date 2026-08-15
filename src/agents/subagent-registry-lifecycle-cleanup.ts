@@ -221,10 +221,16 @@ export function createSubagentRegistryLifecycleCleanup(
     }
     if (didAnnounce) {
       const delivery = ensureDeliveryState(entry);
+      const requesterYieldOwnsDelivery =
+        delivery.disposition === "intentional_non_delivery" &&
+        delivery.status !== "delivered" &&
+        typeof delivery.deliveredAt !== "number" &&
+        typeof delivery.announcedAt !== "number";
       const shouldCreditDelivery =
-        !options?.skipAnnounce ||
-        delivery.status === "delivered" ||
-        typeof delivery.announcedAt === "number";
+        !requesterYieldOwnsDelivery &&
+        (!options?.skipAnnounce ||
+          delivery.status === "delivered" ||
+          typeof delivery.announcedAt === "number");
       if (shouldCreditDelivery) {
         const deliveredAt = delivery.deliveredAt ?? delivery.announcedAt ?? Date.now();
         delivery.status = "delivered";
@@ -235,7 +241,21 @@ export function createSubagentRegistryLifecycleCleanup(
           params.persist(runId);
         }
       }
-      clearPendingFinalDelivery(entry);
+      if (requesterYieldOwnsDelivery) {
+        // The frozen yielded batch owns the visible completion. Retire only
+        // this child's attempt while preserving its durable non-delivery
+        // disposition for the batch settle owner.
+        delivery.status = "pending";
+        delivery.payload = undefined;
+        delivery.createdAt = undefined;
+        delivery.lastAttemptAt = undefined;
+        delivery.attemptCount = undefined;
+        delivery.lastError = undefined;
+        delivery.suspendedAt = undefined;
+        delivery.suspendedReason = undefined;
+      } else {
+        clearPendingFinalDelivery(entry);
+      }
       const finalDelivery = ensureDeliveryState(entry);
       if (shouldCreditDelivery) {
         finalDelivery.status = "delivered";
@@ -516,6 +536,14 @@ export function createSubagentRegistryLifecycleCleanup(
             params.persist(runId);
           }
           latestDeliveryError = undefined;
+          return;
+        }
+        if (delivery.disposition === "intentional_non_delivery") {
+          const deliveryState = ensureDeliveryState(entry);
+          deliveryState.lastError = undefined;
+          deliveryState.lastDropReason = undefined;
+          latestDeliveryError = undefined;
+          params.persist(runId);
           return;
         }
         if (delivery.path === "none") {

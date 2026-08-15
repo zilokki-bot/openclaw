@@ -131,7 +131,7 @@ type QueueEmbeddedAgentMessageWithOutcome = (
   sessionId: string,
   message: string,
   options?: EmbeddedAgentQueueMessageOptions,
-) => EmbeddedAgentQueueMessageOutcome;
+) => EmbeddedAgentQueueMessageOutcome | Promise<EmbeddedAgentQueueMessageOutcome>;
 
 function createQueueOutcomeMock(
   queued: boolean,
@@ -278,6 +278,7 @@ async function deliverSlackThreadAnnouncement(params: {
   internalEvents?: AgentInternalEvent[];
   sourceTool?: string;
   requesterAbandoned?: boolean;
+  isCompletionOwnedByRequesterYield?: () => boolean;
 }) {
   // Slack thread delivery exercises all origins because direct, session, and
   // completion routing can differ after a child run outlives its requester.
@@ -310,6 +311,7 @@ async function deliverSlackThreadAnnouncement(params: {
     directIdempotencyKey: params.directIdempotencyKey,
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+    isCompletionOwnedByRequesterYield: params.isCompletionOwnedByRequesterYield,
   });
 }
 
@@ -372,6 +374,7 @@ async function deliverTelegramDirectMessageCompletion(params: {
   sourceTool?: string;
   runtimeConfig?: Record<string, unknown>;
   requesterAbandoned?: boolean;
+  isCompletionOwnedByRequesterYield?: () => boolean;
   origin?: {
     channel: "telegram";
     to: string;
@@ -417,6 +420,7 @@ async function deliverTelegramDirectMessageCompletion(params: {
     directIdempotencyKey: "announce-telegram-dm-fallback",
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+    isCompletionOwnedByRequesterYield: params.isCompletionOwnedByRequesterYield,
   });
 }
 
@@ -2097,6 +2101,71 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     );
     expect(callGateway).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("fences both native Telegram child completions after a yielded fanout owns the final", async () => {
+    let requesterYielded = false;
+    let wakeCount = 0;
+    let markBothWakesStarted: () => void = () => undefined;
+    const bothWakesStarted = new Promise<void>((resolve) => {
+      markBothWakesStarted = resolve;
+    });
+    let releaseWakes: () => void = () => undefined;
+    const wakeGate = new Promise<void>((resolve) => {
+      releaseWakes = resolve;
+    });
+    const queueEmbeddedAgentMessageWithOutcome = vi.fn(async (sessionId: string) => {
+      wakeCount += 1;
+      if (wakeCount === 2) {
+        markBothWakesStarted();
+      }
+      await wakeGate;
+      return {
+        queued: true as const,
+        sessionId,
+        target: "embedded_run" as const,
+        gatewayHealth: "live" as const,
+        enqueuedAtMs: 4_100,
+        deliveredAtMs: 4_200,
+      };
+    });
+    const callGateway = createGatewayMock();
+    const common = {
+      callGateway,
+      isActive: true,
+      queueEmbeddedAgentMessageWithOutcome,
+      requesterSessionKey: "agent:developer:telegram:developer:direct:163844254",
+      origin: {
+        channel: "telegram" as const,
+        to: "direct:163844254",
+        accountId: "developer",
+      },
+      internalEvents: taskCompletionEvents({
+        childSessionId: "managed-child",
+        taskLabel: "two-child yielded fanout",
+      }),
+      sourceTool: "subagent_announce",
+      isCompletionOwnedByRequesterYield: () => requesterYielded,
+    };
+
+    const childA = deliverTelegramDirectMessageCompletion(common);
+    const childB = deliverTelegramDirectMessageCompletion(common);
+    await bothWakesStarted;
+    requesterYielded = true;
+    releaseWakes();
+
+    const results = await Promise.all([childA, childB]);
+    for (const result of results) {
+      expect(result).toMatchObject({
+        delivered: false,
+        path: "none",
+        reason: "source_owner_changed",
+        terminal: true,
+        disposition: "intentional_non_delivery",
+      });
+    }
+    expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledTimes(2);
+    expect(callGateway).not.toHaveBeenCalled();
   });
 
   it("does not restart an abandoned requester session for late completion delivery", async () => {

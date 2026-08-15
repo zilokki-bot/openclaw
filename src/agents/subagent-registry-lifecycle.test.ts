@@ -22,6 +22,7 @@ import {
   SUBAGENT_ENDED_REASON_KILLED,
 } from "./subagent-lifecycle-events.js";
 import { createSubagentRegistryLifecycleController } from "./subagent-registry-lifecycle.js";
+import { settleRequesterTurnAfterSessionSpawns } from "./subagent-registry-requester-yield.js";
 import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-manager.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { createStructuredOutputTool } from "./tools/structured-output-tool.js";
@@ -2298,6 +2299,89 @@ describe("subagent registry lifecycle hardening", () => {
       runId: entry.runId,
       deliveryStatus: "delivered",
     });
+  });
+
+  it("preserves requester-yield batch ownership through cleanup without crediting child delivery", async () => {
+    const persist = vi.fn();
+    const persistOrThrow = vi.fn();
+    const scheduleRequesterSettleWake = vi.fn();
+    const entry = createRunEntry({
+      endedAt: 4_000,
+      expectsCompletionMessage: true,
+      retainAttachmentsOnKeep: true,
+      requesterTurnRunId: "requester-turn",
+      requesterTurnYielded: true,
+      delivery: { status: "in_progress" },
+    });
+    const runs = new Map([[entry.runId, entry]]);
+
+    expect(
+      settleRequesterTurnAfterSessionSpawns({
+        requesterSessionKey: entry.requesterSessionKey,
+        requesterTurnRunId: "requester-turn",
+        requesterYielded: true,
+        acceptedSessionSpawns: [
+          {
+            runId: entry.runId,
+            childSessionKey: entry.childSessionKey,
+          },
+        ],
+        runs,
+        persistOrThrow,
+        schedule: scheduleRequesterSettleWake,
+      }),
+    ).toBe(true);
+    expect(entry).toMatchObject({
+      requesterSettleWake: {
+        status: "pending",
+        requesterYieldBatch: true,
+        afterRequesterYield: true,
+        batchRunIds: [entry.runId],
+      },
+    });
+
+    const runSubagentAnnounceFlow: LifecycleControllerParams["runSubagentAnnounceFlow"] = vi.fn(
+      async (announceParams) => {
+        expect(announceParams.isCompletionOwnedByRequesterYield?.()).toBe(true);
+        announceParams.onDeliveryResult?.({
+          delivered: false,
+          path: "none",
+          reason: "source_owner_changed",
+          error: "requester yield now owns delivery",
+          terminal: true,
+          disposition: "intentional_non_delivery",
+        });
+        return true;
+      },
+    );
+    const maybeWakeRequesterAfterAllChildrenSettled = vi.fn(async () => false);
+    const controller = createLifecycleController({
+      entry,
+      runs,
+      persist,
+      runSubagentAnnounceFlow,
+      maybeWakeRequesterAfterAllChildrenSettled,
+    });
+
+    await expect(completeRun(controller, entry, { triggerCleanup: true })).resolves.toBeUndefined();
+
+    await waitForLifecycleState(() => expect(entry.cleanupCompletedAt).toBeTypeOf("number"));
+    expect(entry.delivery).toMatchObject({
+      status: "pending",
+      disposition: "intentional_non_delivery",
+    });
+    expect(entry.delivery?.announcedAt).toBeUndefined();
+    expect(entry.delivery?.deliveredAt).toBeUndefined();
+    expect(entry.delivery?.lastError).toBeUndefined();
+    expect(entry.requesterSettleWake).toMatchObject({
+      requesterYieldBatch: true,
+      afterRequesterYield: true,
+      batchRunIds: [entry.runId],
+    });
+    expect(hasDeliveredTaskStatusUpdate(entry.runId)).toBe(false);
+    expect(maybeWakeRequesterAfterAllChildrenSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ settledEntry: entry }),
+    );
   });
 
   it("persists collector completion and skips announce delivery", async () => {

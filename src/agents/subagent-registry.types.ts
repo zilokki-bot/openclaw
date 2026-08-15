@@ -89,6 +89,14 @@ export type SwarmStructuredOutputState = {
   invalidAttempts: number;
 };
 
+type SubagentDeliveryDisposition =
+  | "delivered"
+  | "session_queued"
+  | "intentional_non_delivery"
+  | "retryable"
+  | "ambiguous"
+  | "permanent_failure";
+
 export type SwarmQueuedLaunch = {
   request: Record<string, unknown>;
   /** Exact trusted launch capability, persisted so restart replay cannot lose it. */
@@ -115,6 +123,8 @@ export type SubagentCompletionDeliveryState = {
   lastAttemptAt?: number;
   attemptCount?: number;
   lastError?: string | null;
+  /** Closed result of the latest transport attempt; never doubles as delivery success. */
+  disposition?: SubagentDeliveryDisposition;
   steeringLeaseId?: string;
   steeringLeasedAt?: number;
   steeringInjectedAt?: number;

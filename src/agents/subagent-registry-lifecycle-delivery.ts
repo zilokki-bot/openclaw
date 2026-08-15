@@ -66,6 +66,9 @@ export function createSubagentRegistryLifecycleDelivery(
     delivery: SubagentAnnounceDeliveryResult,
   ) => {
     const deliveryState = ensureDeliveryState(entry);
+    if (delivery.disposition !== undefined) {
+      deliveryState.disposition = delivery.disposition;
+    }
     if (typeof delivery.enqueuedAt === "number") {
       deliveryState.enqueuedAt ??= delivery.enqueuedAt;
     }

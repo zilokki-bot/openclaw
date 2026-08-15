@@ -5,6 +5,7 @@ import {
   ensureContextEnginesInitialized,
   forkSessionEntryFromParent,
   getGlobalHookRunner,
+  getPreparedModelCatalogSnapshot,
   getRuntimeConfig,
   hasInProcessGatewayContext,
   loadPreparedModelCatalog,
@@ -19,6 +20,7 @@ type SubagentSpawnDeps = {
   getRuntimeConfig: typeof getRuntimeConfig;
   hasInProcessGatewayContext: typeof hasInProcessGatewayContext;
   ensureContextEnginesInitialized: typeof ensureContextEnginesInitialized;
+  getPreparedModelCatalogSnapshot: typeof getPreparedModelCatalogSnapshot;
   loadPreparedModelCatalog: typeof loadPreparedModelCatalog;
   resolveContextEngine: typeof resolveContextEngine;
 };
@@ -31,6 +33,7 @@ const defaultSubagentSpawnDeps: SubagentSpawnDeps = {
   getRuntimeConfig,
   hasInProcessGatewayContext,
   ensureContextEnginesInitialized,
+  getPreparedModelCatalogSnapshot,
   loadPreparedModelCatalog,
   resolveContextEngine,
 };
