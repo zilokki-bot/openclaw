@@ -52,7 +52,8 @@ vi.mock("./agent-auth-discovery.js", () => ({
     mocks.resolveAmbientCredentials(...args),
 }));
 
-vi.mock("./agent-model-discovery.js", () => ({
+vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
   discoverAuthStorage: (...args: unknown[]) => {
     return mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
   },

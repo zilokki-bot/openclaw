@@ -105,7 +105,8 @@ vi.mock("./agent-auth-discovery.js", () => ({
   resolveAmbientAgentCredentialsForDiscovery: mocks.resolveAmbientCredentials,
 }));
 
-vi.mock("./agent-model-discovery.js", () => ({
+vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
   discoverAuthStorage: mocks.discoverAuthStorage,
   discoverModels: mocks.discoverModels,
   discoverModelsFromCapturedSources: mocks.discoverModels,
