@@ -83,7 +83,8 @@ vi.mock("./agent-scope.js", () => ({
   resolveDefaultAgentId: () => "default",
 }));
 
-vi.mock("./auth-profiles/runtime-snapshots.js", () => ({
+vi.mock("./auth-profiles/runtime-snapshots.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./auth-profiles/runtime-snapshots.js")>()),
   registerRuntimeAuthProfileStoreMutationListener: (
     listener: (event: { agentDir?: string; affectsInheritedStores: boolean }) => void,
   ) => {
