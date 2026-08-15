@@ -838,7 +838,11 @@ export function prepareConfiguredRuntimeFactsBatch(params: {
         )}`,
       ),
     );
-    if (cachedCatalogs.every((catalog): catalog is PreparedModelRuntimeCatalogFacts => catalog)) {
+    if (
+      cachedCatalogs.every(
+        (catalog): catalog is PreparedModelRuntimeCatalogFacts => catalog !== undefined,
+      )
+    ) {
       for (const [index, facts] of group.agentFacts.entries()) {
         catalogs.set(facts.input, cachedCatalogs[index]!);
       }
