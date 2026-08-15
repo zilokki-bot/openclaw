@@ -123,6 +123,10 @@ vi.mock("../logging/subsystem.js", () => ({
 
 import { startSerializedSnapshotBuild } from "./prepared-model-runtime.build.js";
 import {
+  prepareWorkspaceBuildGroup,
+  preparedModelRuntimeWorkspaceFactsKey,
+} from "./prepared-model-runtime.facts.js";
+import {
   acquireReadOnlyPreparedModelRuntime,
   activateStandalonePreparedModelRuntime,
   getPreparedModelRuntimeSnapshot,
@@ -181,6 +185,44 @@ describe("prepared model runtime snapshots", () => {
       config: input.config,
     });
     await expect(build.completion).resolves.toBeUndefined();
+  });
+
+  it("does not reuse static workspace facts across auth inheritance or credential mode", async () => {
+    const base = {
+      config: {},
+      env: { OPENCLAW_TEST_AUTH_GENERATION: "one" },
+      agentId: "shared-agent",
+      agentDir: "/tmp/shared-auth-agent",
+      inheritedAuthDir: "/tmp/auth-generation-a",
+      workspaceDir: "/tmp/shared-auth-workspace",
+      workspacePluginRootPresent: false,
+    };
+    const inherited = { ...base, inheritedAuthDir: "/tmp/auth-generation-b" };
+    const credentialful = { ...base, inheritedAuthDir: "/tmp/auth-generation-c" };
+    const credentialFree = { ...credentialful, skipCredentials: true };
+
+    expect(
+      preparedModelRuntimeWorkspaceFactsKey({
+        ...base,
+        inheritedAuthDir: "/tmp/./auth-generation-a",
+      }),
+    ).toBe(preparedModelRuntimeWorkspaceFactsKey(base));
+    expect(preparedModelRuntimeWorkspaceFactsKey({ ...base, skipCredentials: false })).toBe(
+      preparedModelRuntimeWorkspaceFactsKey(base),
+    );
+    expect(preparedModelRuntimeWorkspaceFactsKey(base)).not.toBe(
+      preparedModelRuntimeWorkspaceFactsKey(inherited),
+    );
+    expect(preparedModelRuntimeWorkspaceFactsKey(credentialful)).not.toBe(
+      preparedModelRuntimeWorkspaceFactsKey(credentialFree),
+    );
+
+    await prepareWorkspaceBuildGroup([base], "static");
+    await prepareWorkspaceBuildGroup([inherited], "static");
+    await prepareWorkspaceBuildGroup([credentialful], "static");
+    await prepareWorkspaceBuildGroup([credentialFree], "static");
+
+    expect(mocks.resolveAgentDiscoveryAuthFacts).toHaveBeenCalledTimes(4);
   });
 
   it("keeps an isolated setup probe exact after a gateway replacement", async () => {

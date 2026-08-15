@@ -91,6 +91,10 @@ const sharedStaticWorkspaceBuildInflight = new Map<string, Promise<void>>();
 const sharedStaticConfiguredCatalogFacts = new Map<string, PreparedModelRuntimeCatalogFacts>();
 let sharedStaticWorkspaceBuildEpoch = 0;
 
+function normalizedInheritedAuthDir(input: PreparedModelRuntimeInput): string | undefined {
+  return input.inheritedAuthDir ? path.resolve(input.inheritedAuthDir) : undefined;
+}
+
 function sharedStaticWorkspaceBuildKey(
   input: PreparedModelRuntimeInput,
   catalogMode: PreparedModelRuntimeCatalogMode,
@@ -101,6 +105,8 @@ function sharedStaticWorkspaceBuildKey(
   return JSON.stringify({
     config: hashRuntimeConfigValue(input.config),
     env: hashRuntimeConfigValue(input.env ?? process.env),
+    inheritedAuthDir: normalizedInheritedAuthDir(input),
+    skipCredentials: input.skipCredentials === true,
   });
 }
 
@@ -112,6 +118,8 @@ function findSharedStaticAgentFacts(
     (candidate) =>
       candidate.input.agentId === input.agentId &&
       candidate.input.agentDir === input.agentDir &&
+      normalizedInheritedAuthDir(candidate.input) === normalizedInheritedAuthDir(input) &&
+      (candidate.input.skipCredentials === true) === (input.skipCredentials === true) &&
       (input.workspacePluginRootPresent === false ||
         candidate.input.workspaceDir === input.workspaceDir),
   );
@@ -298,6 +306,8 @@ export function preparedModelRuntimeWorkspaceFactsKey(input: PreparedModelRuntim
     config: hashRuntimeConfigValue(input.config),
     env: hashRuntimeConfigValue(input.env ?? process.env),
     readOnly: input.readOnly === true,
+    inheritedAuthDir: normalizedInheritedAuthDir(input),
+    skipCredentials: input.skipCredentials === true,
     workspaceDir: input.workspaceDir,
   });
 }
