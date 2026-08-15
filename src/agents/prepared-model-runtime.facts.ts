@@ -109,7 +109,9 @@ function findSharedStaticAgentFacts(
   return facts.find(
     (candidate) =>
       candidate.input.agentId === input.agentId &&
-      candidate.input.agentDir === input.agentDir,
+      candidate.input.agentDir === input.agentDir &&
+      (input.workspacePluginRootPresent === false ||
+        candidate.input.workspaceDir === input.workspaceDir),
   );
 }
 
