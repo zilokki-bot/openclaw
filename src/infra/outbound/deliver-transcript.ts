@@ -1,5 +1,6 @@
 // Mirrors successful outbound payloads into the configured session transcript.
 import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-mirror.js";
+import { runWithoutOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { formatErrorMessage } from "../errors.js";
@@ -40,15 +41,17 @@ export async function mirrorDeliveredPayloads(params: {
   // Keep mirror failures non-fatal so callers do not retry an already-sent payload.
   try {
     const { appendAssistantMessageToSessionTranscript } = await loadTranscriptRuntime();
-    const mirrorResult = await appendAssistantMessageToSessionTranscript({
-      agentId: mirror.agentId,
-      sessionKey: mirror.sessionKey,
-      expectedSessionId: mirror.expectedSessionId,
-      text: mirrorText,
-      idempotencyKey: mirror.idempotencyKey,
-      deliveryMirror: mirror.deliveryMirror,
-      config: params.delivery.cfg,
-    });
+    const mirrorResult = await runWithoutOwnedSessionTranscriptWrites(() =>
+      appendAssistantMessageToSessionTranscript({
+        agentId: mirror.agentId,
+        sessionKey: mirror.sessionKey,
+        expectedSessionId: mirror.expectedSessionId,
+        text: mirrorText,
+        idempotencyKey: mirror.idempotencyKey,
+        deliveryMirror: mirror.deliveryMirror,
+        config: params.delivery.cfg,
+      }),
+    );
     if (!mirrorResult.ok) {
       log.warn(
         `failed to mirror outbound delivery into session transcript; channel send already succeeded: ${mirrorResult.reason}`,

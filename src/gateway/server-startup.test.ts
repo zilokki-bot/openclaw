@@ -15,6 +15,7 @@ const refreshPreparedModelRuntimeSnapshotsMock = vi.fn(
     },
   ) => {},
 );
+const activateGatewayPreparedModelRuntimeStartupMock = refreshPreparedModelRuntimeSnapshotsMock;
 
 vi.mock("../agents/agent-scope.js", () => ({
   resolveDefaultAgentDir: () => "/tmp/agent",
@@ -32,6 +33,14 @@ vi.mock("../agents/prepared-model-runtime.js", () => ({
       catalogMode?: "live" | "static";
     },
   ) => refreshPreparedModelRuntimeSnapshotsMock(cfg, options),
+  activateGatewayPreparedModelRuntimeStartup: (
+    cfg: OpenClawConfig,
+    options?: {
+      gatewayLifecycle?: boolean;
+      defaultWorkspaceDir?: string;
+      catalogMode?: "live" | "static";
+    },
+  ) => activateGatewayPreparedModelRuntimeStartupMock(cfg, options),
 }));
 
 let prewarmConfiguredPrimaryModel: typeof import("./server-startup-post-attach.js").testing.prewarmConfiguredPrimaryModel;

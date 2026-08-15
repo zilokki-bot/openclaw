@@ -1454,6 +1454,150 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     });
   });
 
+  const requesterSettleSourceTarget = {
+    tool: "message",
+    provider: "discord",
+    accountId: "acct-1",
+    to: "dm:U123",
+    text: "the consolidated answer",
+  } as const;
+
+  it.each([
+    {
+      name: "preserves an ordinary non-yielded direct settle turn",
+      response: {},
+      requireVisibleReply: false,
+      expectedDelivered: true,
+    },
+    {
+      name: "accepts a yielded requester's visible final answer",
+      response: { result: { payloads: [{ text: "The consolidated answer." }] } },
+      requireVisibleReply: true,
+      expectedDelivered: true,
+    },
+    {
+      name: "rejects a yielded turn without a result",
+      response: {},
+      requireVisibleReply: true,
+      expectedDelivered: false,
+    },
+    {
+      name: "rejects pre-tool commentary instead of a final answer",
+      response: { result: { payloads: [{ text: "working on it", isCommentary: true }] } },
+      requireVisibleReply: true,
+      expectedDelivered: false,
+    },
+    {
+      name: "rejects a yielded turn that emits only the silent reply token",
+      response: { result: { payloads: [{ text: "NO_REPLY" }] } },
+      requireVisibleReply: true,
+      expectedDelivered: false,
+    },
+    {
+      name: "rejects a visible final whose external delivery was suppressed",
+      response: {
+        result: {
+          payloads: [{ text: "never delivered" }],
+          deliveryStatus: { status: "suppressed", succeeded: true, resultCount: 0 },
+        },
+      },
+      requireVisibleReply: true,
+      expectedDelivered: false,
+    },
+    {
+      name: "rejects a source-matched messaging progress update",
+      response: {
+        result: {
+          payloads: [],
+          didSendViaMessagingTool: true,
+          messagingToolSentTargets: [{ ...requesterSettleSourceTarget, sourceReplyFinal: false }],
+        },
+      },
+      requireVisibleReply: true,
+      expectedDelivered: false,
+    },
+    {
+      name: "does not let an off-target final upgrade source progress",
+      response: {
+        result: {
+          payloads: [],
+          didSendViaMessagingTool: true,
+          messagingToolSentTargets: [
+            { ...requesterSettleSourceTarget, sourceReplyFinal: false },
+            { ...requesterSettleSourceTarget, to: "dm:OTHER", sourceReplyFinal: true },
+          ],
+        },
+      },
+      requireVisibleReply: true,
+      expectedDelivered: false,
+    },
+    {
+      name: "accepts an explicit source-matched final messaging delivery",
+      response: {
+        result: {
+          payloads: [{ text: "NO_REPLY" }],
+          didSendViaMessagingTool: true,
+          messagingToolSentTargets: [{ ...requesterSettleSourceTarget, sourceReplyFinal: true }],
+        },
+      },
+      requireVisibleReply: true,
+      expectedDelivered: true,
+    },
+    {
+      name: "accepts a source final after source progress in the same turn",
+      response: {
+        result: {
+          payloads: [],
+          didSendViaMessagingTool: true,
+          messagingToolSentTargets: [
+            { ...requesterSettleSourceTarget, sourceReplyFinal: false },
+            { ...requesterSettleSourceTarget, sourceReplyFinal: true },
+          ],
+        },
+      },
+      requireVisibleReply: true,
+      expectedDelivered: true,
+    },
+  ])("$name", async ({ response, requireVisibleReply, expectedDelivered }) => {
+    const callGateway = createGatewayMock(response);
+    const origin = {
+      channel: "discord",
+      to: "dm:U123",
+      accountId: "acct-1",
+    };
+    testing.setDepsForTest({
+      callGateway,
+      getRequesterSessionActivity: () => ({
+        sessionId: "requester-session-dm",
+        isActive: false,
+      }),
+      getRuntimeConfig: () => ({}) as never,
+    });
+
+    const result = await deliverSubagentAnnouncement({
+      requesterSessionKey: "agent:main:discord:dm:U123",
+      targetRequesterSessionKey: "agent:main:discord:dm:U123",
+      triggerMessage: "all spawned subagents settled",
+      steerMessage: "all spawned subagents settled",
+      requesterOrigin: origin,
+      requesterSessionOrigin: origin,
+      directOrigin: origin,
+      requesterIsSubagent: false,
+      expectsCompletionMessage: false,
+      ...(requireVisibleReply ? { requireVisibleReply: true } : {}),
+      directIdempotencyKey: "announce-requester-settle-direct",
+      sourceTool: "subagent_announce",
+    });
+
+    expect(result.delivered).toBe(expectedDelivered);
+    if (!expectedDelivered) {
+      expect(result).toMatchObject({
+        path: "direct",
+        reason: "visible_reply_missing",
+      });
+    }
+  });
+
   it.each([
     {
       name: "accepted session spawn",

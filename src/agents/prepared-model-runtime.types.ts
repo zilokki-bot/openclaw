@@ -49,6 +49,8 @@ export type PreparedModelRuntimeInput = {
   agentDir: string;
   inheritedAuthDir?: string;
   workspaceDir?: string;
+  /** Admission-owned fact; plugin root changes require the normal reload/restart lifecycle. */
+  workspacePluginRootPresent?: boolean;
   preserveWorkspaceDirOnRefresh?: boolean;
   readOnly?: boolean;
   skipCredentials?: boolean;
@@ -65,6 +67,7 @@ export type PreparedModelRuntimePublicationOptions = {
   force?: boolean;
   provenance?: PreparedModelRuntimeOwner["provenance"];
   catalogMode?: PreparedModelRuntimeCatalogMode;
+  onBuildStats?: (stats: PreparedModelRuntimeBuildStats) => void;
 };
 
 export type PreparedModelRuntimeRefreshOptions = {
@@ -82,16 +85,19 @@ export type PreparedModelRuntimeBuildStats = Readonly<{
   credentialGroupCount: number;
   catalogGroupCount: number;
   runtimeRegistryCount: number;
+  configuredModelRefCount: number;
   configuredRuntimeModelCount: number;
   generatedCatalogPluginCount: number;
   generatedCatalogReadCount: number;
   workspaceFactsMs: number;
   runtimePluginMs: number;
   pluginMetadataMs: number;
+  staticProviderPlanningMs: number;
   staticProviderCatalogMs: number;
   ambientCredentialsMs: number;
   agentFactsMs: number;
   configuredProjectionMs: number;
+  workspaceUnattributedMs: number;
   catalogSourceMs: number;
   registryMs: number;
   sourceConcurrencyLimit: number;

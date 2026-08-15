@@ -20,6 +20,7 @@ import {
 } from "./prepared-model-runtime.errors.js";
 import type {
   PreparedModelRuntimeCatalogMode,
+  PreparedModelRuntimeBuildStats,
   PreparedModelRuntimeInput,
   PreparedModelRuntimeOwner,
   PreparedModelRuntimeReplacement,
@@ -415,6 +416,7 @@ export async function publishModelRuntimeSnapshot(
   existing?: PreparedModelRuntimeOwner,
   provenance: PreparedModelRuntimeOwner["provenance"] = "explicit",
   catalogMode: PreparedModelRuntimeCatalogMode = existing?.catalogMode ?? "live",
+  onBuildStats?: (stats: PreparedModelRuntimeBuildStats) => void,
 ): Promise<PreparedModelRuntimeSnapshot> {
   const key = ownerKey(input);
   const owner = existing ?? createPreparedModelRuntimeOwner(input, provenance, catalogMode);
@@ -432,6 +434,7 @@ export async function publishModelRuntimeSnapshot(
     buildTimeoutMs,
     catalogMode,
     () => owner.generation === generation && owners.get(key) === owner,
+    onBuildStats,
   );
   owner.buildCompletion = build.completion;
   void build.completion.then(() => {

@@ -5,6 +5,7 @@
  */
 import { expectDefined } from "@openclaw/normalization-core";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
 import {
   loadRunOverflowCompactionHarness,
@@ -125,7 +126,7 @@ describe("sessions_yield orchestration", () => {
       mockedRunEmbeddedAttempt.mockResolvedValueOnce(
         makeAttemptResult({
           yieldDetected: true,
-          assistantTexts: [],
+          assistantTexts: ["Waiting for children"],
           acceptedSessionSpawns: [{ runId: "child-run", childSessionKey: "child-key" }],
         }),
       );
@@ -135,10 +136,12 @@ describe("sessions_yield orchestration", () => {
         runId: "run-yield-accepted-spawn-suppressed",
       });
 
-      // Accepted spawn is continuation evidence → no diagnostic payload
-      expect(result.payloads).toBeUndefined();
+      // Accepted spawn is continuation evidence → the current turn parks silently
+      // and waits for the descendant wake instead of finalizing visible text.
+      expect(result.payloads).toEqual([{ text: SILENT_REPLY_TOKEN }]);
       expect(result.meta.stopReason).toBe("end_turn");
       expect(result.meta.yielded).toBe(true);
+      expect(result.meta.livenessState).toBe("paused");
     });
 
     it("yield with async started tool — diagnostic suppressed", async () => {
@@ -155,8 +158,8 @@ describe("sessions_yield orchestration", () => {
         runId: "run-yield-async-tool-suppressed",
       });
 
-      // Async tool activity is continuation evidence → no diagnostic payload
-      expect(result.payloads).toBeUndefined();
+      // Async tool activity is continuation evidence → park silently until its wake.
+      expect(result.payloads).toEqual([{ text: SILENT_REPLY_TOKEN }]);
       expect(result.meta.stopReason).toBe("end_turn");
       expect(result.meta.yielded).toBe(true);
     });

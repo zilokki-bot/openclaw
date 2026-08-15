@@ -262,6 +262,7 @@ export async function runSubagentAnnounceFlow(params: {
   wakeOnDescendantSettle?: boolean;
   signal?: AbortSignal;
   bestEffortDeliver?: boolean;
+  isCompletionOwnedByRequesterYield?: () => boolean;
   onDeliveryResult?: (delivery: SubagentAnnounceDeliveryResult) => void;
   onBeforeDeleteChildSession?: () => boolean;
 }): Promise<boolean> {
@@ -317,6 +318,7 @@ export async function runSubagentAnnounceFlow(params: {
     let requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
     const requesterIsInternalSession = () =>
       requesterDepth >= 1 || isCronSessionKey(targetRequesterSessionKey);
+    let completionOwnedByRequesterYield = false;
 
     let childCompletionFindings: string | undefined;
     let subagentRegistryRuntime:
@@ -343,6 +345,14 @@ export async function runSubagentAnnounceFlow(params: {
       }
 
       if (typeof subagentRegistryRuntime.listSubagentRunsForRequester === "function") {
+        const requesterRuns = subagentRegistryRuntime.listSubagentRunsForRequester(
+          targetRequesterSessionKey,
+          { requesterRunId: params.childRunId },
+        );
+        const requesterRun = requesterRuns.find((run) => run.runId === params.childRunId);
+        completionOwnedByRequesterYield =
+          requesterRun?.requesterTurnYielded === true ||
+          requesterRun?.requesterSettleWake?.requesterYieldBatch === true;
         const directChildren = subagentRegistryRuntime.listSubagentRunsForRequester(
           params.childSessionKey,
           {
@@ -575,6 +585,11 @@ export async function runSubagentAnnounceFlow(params: {
           })
         : targetRequesterOrigin;
     const directIdempotencyKey = buildAnnounceIdempotencyKey(announceId);
+    if (expectsCompletionMessage && completionOwnedByRequesterYield) {
+      // A yielded requester owns synthesis for the whole frozen fanout batch.
+      // Do not start an individual requester turn from this child cleanup.
+      return true;
+    }
     const delivery = await deliverSubagentAnnouncement({
       requesterSessionKey: targetRequesterSessionKey,
       announceId,
@@ -592,6 +607,8 @@ export async function runSubagentAnnounceFlow(params: {
       sourceSessionKey: params.childSessionKey,
       sourceChannel: INTERNAL_MESSAGE_CHANNEL,
       sourceTool: "subagent_announce",
+      isCompletionOwnedByRequesterYield: () =>
+        completionOwnedByRequesterYield || params.isCompletionOwnedByRequesterYield?.() === true,
       targetRequesterSessionKey,
       requesterIsSubagent,
       expectsCompletionMessage,

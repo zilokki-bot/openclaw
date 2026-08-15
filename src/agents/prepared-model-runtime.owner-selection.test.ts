@@ -119,7 +119,9 @@ vi.mock("../logging/subsystem.js", () => ({
 }));
 
 import {
+  activateGatewayPreparedModelRuntimeStartup,
   getPreparedModelRuntimeSnapshot,
+  loadPreparedModelRuntimeSnapshot,
   prepareModelRuntimeSnapshot,
   publishPreparedModelRuntimeSnapshot,
   refreshPreparedModelRuntimeSnapshots,
@@ -225,6 +227,76 @@ describe("prepared model runtime owner selection", () => {
 
     expect(snapshot.workspaceDir).toBe("/tmp/gateway-launch-workspace");
     expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledOnce();
+  });
+
+  it("keeps fleet owners lazy and publishes request-time facts from the authoritative config", async () => {
+    mocks.configuredAgentIds = ["default", "research"];
+    mocks.configuredAgentDirs.set("default", "/tmp/configured-default");
+    mocks.configuredAgentDirs.set("research", "/tmp/configured-research");
+    mocks.configuredWorkspaces.set("default", "/tmp/workspace-default");
+    mocks.configuredWorkspaces.set("research", "/tmp/workspace-research");
+    mocks.resolveStaticCatalogModel.mockImplementation(
+      ({ provider, modelId }: { provider: string; modelId: string }) => ({
+        id: modelId,
+        name: modelId,
+        provider,
+        api: "openai-completions",
+        baseUrl: "https://models.example/v1",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128_000,
+        maxTokens: 8_192,
+      }),
+    );
+    const config = {
+      agents: {
+        list: [
+          { id: "default", default: true, model: "custom/default-model" },
+          { id: "research", model: "custom/research-model" },
+        ],
+      },
+    };
+
+    await activateGatewayPreparedModelRuntimeStartup(config, {
+      gatewayLifecycle: true,
+      catalogMode: "static",
+      defaultWorkspaceDir: "/tmp/workspace-default",
+    });
+
+    expect(mocks.prepareStaticCatalog).not.toHaveBeenCalled();
+    expect(
+      getPreparedModelRuntimeSnapshot({
+        agentId: "research",
+        config,
+        agentDir: "/tmp/configured-research",
+        inheritedAuthDir: "/tmp/unused-agent",
+        workspaceDir: "/tmp/workspace-research",
+      }),
+    ).toBeUndefined();
+
+    const snapshot = await loadPreparedModelRuntimeSnapshot({
+      agentId: "research",
+      config: { agents: { list: [{ id: "research", model: "custom/stale-model" }] } },
+      agentDir: "/tmp/configured-research",
+      inheritedAuthDir: "/tmp/unused-agent",
+      workspaceDir: "/tmp/workspace-research",
+    });
+
+    expect(snapshot.config).toBe(config);
+    expect(snapshot.configuredRuntimeModels.map(({ modelId }) => modelId)).toEqual([
+      "research-model",
+    ]);
+    expect(mocks.prepareStaticCatalog).toHaveBeenCalledOnce();
+    expect(
+      getPreparedModelRuntimeSnapshot({
+        agentId: "default",
+        config,
+        agentDir: "/tmp/configured-default",
+        inheritedAuthDir: "/tmp/unused-agent",
+        workspaceDir: "/tmp/workspace-default",
+      }),
+    ).toBeUndefined();
   });
 
   it("does not substitute a configured owner captured from another environment", async () => {

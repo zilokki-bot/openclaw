@@ -1700,6 +1700,7 @@ describe("agentLoop tool termination", () => {
       },
     };
 
+    const events: AgentEvent[] = [];
     const messages = await runAgentLoop(
       [{ role: "user", content: "yield during tool", timestamp: 1 }],
       {
@@ -1708,12 +1709,34 @@ describe("agentLoop tool termination", () => {
         tools: [yieldTool],
       },
       config,
-      () => {},
+      (event) => events.push(event),
       controller.signal,
       streamFn,
     );
 
     expect(streamCalls).toBe(1);
+    expect(messages.find((message) => message.role === "toolResult")).toMatchObject({
+      role: "toolResult",
+      toolCallId: "call-yield",
+      toolName: "yield_tool",
+      isError: false,
+      content: [{ type: "text", text: "yielded" }],
+      details: { yielded: true },
+    });
+    expect(
+      events.find(
+        (event) => event.type === "tool_execution_end" && event.toolCallId === "call-yield",
+      ),
+    ).toMatchObject({
+      type: "tool_execution_end",
+      toolCallId: "call-yield",
+      toolName: "yield_tool",
+      isError: false,
+      result: {
+        content: [{ type: "text", text: "yielded" }],
+        details: { yielded: true },
+      },
+    });
     expect(messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
     expect(messages.some((message) => message.role === "custom")).toBe(false);
   });

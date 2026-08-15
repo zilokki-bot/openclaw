@@ -81,4 +81,5 @@ export type LoadPluginMetadataSnapshotParams = {
 export type ResolvePluginMetadataSnapshotParams = LoadPluginMetadataSnapshotParams & {
   allowCurrent?: boolean;
   allowWorkspaceScopedCurrent?: boolean;
+  workspacePluginRootPresent?: boolean;
 };

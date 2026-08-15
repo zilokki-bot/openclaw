@@ -65,6 +65,9 @@ const hoisted = vi.hoisted(() => {
   const refreshPreparedModelRuntimeSnapshots = vi.fn(
     async (_cfg?: unknown, _options?: unknown) => {},
   );
+  const activateGatewayPreparedModelRuntimeStartup = vi.fn(
+    async (_cfg?: unknown, _options?: unknown) => {},
+  );
   const ensureRuntimePluginsLoaded = vi.fn();
   const ensureContextWindowCacheLoaded = vi.fn(async () => {});
   const scheduleGatewayHandlerPrewarm = vi.fn(() => ({ stop: vi.fn() }));
@@ -106,6 +109,7 @@ const hoisted = vi.hoisted(() => {
     getModelRefStatus,
     prepareModelRuntimeSnapshot,
     refreshPreparedModelRuntimeSnapshots,
+    activateGatewayPreparedModelRuntimeStartup,
     ensureRuntimePluginsLoaded,
     ensureContextWindowCacheLoaded,
     scheduleGatewayHandlerPrewarm,
@@ -212,6 +216,7 @@ vi.mock("../agents/model-selection.js", () => ({
 vi.mock("../agents/prepared-model-runtime.js", () => ({
   publishPreparedModelRuntimeSnapshot: hoisted.prepareModelRuntimeSnapshot,
   refreshPreparedModelRuntimeSnapshots: hoisted.refreshPreparedModelRuntimeSnapshots,
+  activateGatewayPreparedModelRuntimeStartup: hoisted.activateGatewayPreparedModelRuntimeStartup,
 }));
 
 vi.mock("../agents/runtime-plugins.js", () => ({
@@ -370,6 +375,8 @@ describe("startGatewayPostAttachRuntime", () => {
     hoisted.prepareModelRuntimeSnapshot.mockResolvedValue({});
     hoisted.refreshPreparedModelRuntimeSnapshots.mockReset();
     hoisted.refreshPreparedModelRuntimeSnapshots.mockResolvedValue(undefined);
+    hoisted.activateGatewayPreparedModelRuntimeStartup.mockReset();
+    hoisted.activateGatewayPreparedModelRuntimeStartup.mockResolvedValue(undefined);
     hoisted.ensureRuntimePluginsLoaded.mockReset();
     hoisted.ensureContextWindowCacheLoaded.mockReset();
     hoisted.ensureContextWindowCacheLoaded.mockResolvedValue(undefined);
@@ -1782,7 +1789,7 @@ describe("startGatewayPostAttachRuntime", () => {
       startupTrace: trace.startupTrace,
     });
 
-    const options = hoisted.refreshPreparedModelRuntimeSnapshots.mock.calls[0]?.[1] as
+    const options = hoisted.activateGatewayPreparedModelRuntimeStartup.mock.calls[0]?.[1] as
       | {
           onBuildStats?: (stats: {
             agentCount: number;
@@ -1792,16 +1799,19 @@ describe("startGatewayPostAttachRuntime", () => {
             credentialGroupCount: number;
             catalogGroupCount: number;
             runtimeRegistryCount: number;
+            configuredModelRefCount: number;
             configuredRuntimeModelCount: number;
             generatedCatalogPluginCount: number;
             generatedCatalogReadCount: number;
             workspaceFactsMs: number;
             runtimePluginMs: number;
             pluginMetadataMs: number;
+            staticProviderPlanningMs: number;
             staticProviderCatalogMs: number;
             ambientCredentialsMs: number;
             agentFactsMs: number;
             configuredProjectionMs: number;
+            workspaceUnattributedMs: number;
             catalogSourceMs: number;
             registryMs: number;
             sourceConcurrencyLimit: number;
@@ -1817,16 +1827,19 @@ describe("startGatewayPostAttachRuntime", () => {
       credentialGroupCount: 1,
       catalogGroupCount: 0,
       runtimeRegistryCount: 12,
+      configuredModelRefCount: 12,
       configuredRuntimeModelCount: 2,
       generatedCatalogPluginCount: 0,
       generatedCatalogReadCount: 0,
       workspaceFactsMs: 120,
       runtimePluginMs: 0,
-      pluginMetadataMs: 40,
+      pluginMetadataMs: 32,
+      staticProviderPlanningMs: 8,
       staticProviderCatalogMs: 50,
       ambientCredentialsMs: 10,
       agentFactsMs: 5,
       configuredProjectionMs: 15,
+      workspaceUnattributedMs: 0,
       catalogSourceMs: 0,
       registryMs: 30,
       sourceConcurrencyLimit: 2,
@@ -1843,16 +1856,19 @@ describe("startGatewayPostAttachRuntime", () => {
         ["credentialGroupCount", 1],
         ["catalogGroupCount", 0],
         ["runtimeRegistryCount", 12],
+        ["configuredModelRefCount", 12],
         ["configuredRuntimeModelCount", 2],
         ["generatedCatalogPluginCount", 0],
         ["generatedCatalogReadCount", 0],
         ["workspaceFactsMs", 120],
         ["runtimePluginMs", 0],
-        ["pluginMetadataMs", 40],
+        ["pluginMetadataMs", 32],
+        ["staticProviderPlanningMs", 8],
         ["staticProviderCatalogMs", 50],
         ["ambientCredentialsMs", 10],
         ["agentFactsMs", 5],
         ["configuredProjectionMs", 15],
+        ["workspaceUnattributedMs", 0],
         ["catalogSourceMs", 0],
         ["registryMs", 30],
         ["sourceConcurrencyLimitCount", 2],
