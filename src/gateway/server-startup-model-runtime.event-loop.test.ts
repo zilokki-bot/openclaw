@@ -24,10 +24,10 @@ const firstUseAttribution = vi.hoisted(() => ({
     origins: string[];
     stack?: string[];
   }>,
-  authDiscoveryCalls: 0,
+  authFactsCalls: 0,
   capturedModelDiscoveryCalls: 0,
   metadataSnapshotMs: 0,
-  authDiscoveryMs: 0,
+  authFactsMs: 0,
   capturedModelDiscoveryMs: 0,
 }));
 
@@ -117,15 +117,17 @@ vi.mock("../agents/agent-model-discovery.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../agents/agent-model-discovery.js")>();
   return {
     ...actual,
-    discoverAuthStorage: vi.fn((...args: Parameters<typeof actual.discoverAuthStorage>) => {
-      firstUseAttribution.authDiscoveryCalls += 1;
-      const startedAt = performance.now();
-      try {
-        return actual.discoverAuthStorage(...args);
-      } finally {
-        firstUseAttribution.authDiscoveryMs += performance.now() - startedAt;
-      }
-    }),
+    discoverAuthStorageFacts: vi.fn(
+      (...args: Parameters<typeof actual.discoverAuthStorageFacts>) => {
+        firstUseAttribution.authFactsCalls += 1;
+        const startedAt = performance.now();
+        try {
+          return actual.discoverAuthStorageFacts(...args);
+        } finally {
+          firstUseAttribution.authFactsMs += performance.now() - startedAt;
+        }
+      },
+    ),
     discoverModelsFromCapturedSources: vi.fn(
       (...args: Parameters<typeof actual.discoverModelsFromCapturedSources>) => {
         firstUseAttribution.capturedModelDiscoveryCalls += 1;
@@ -160,10 +162,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   firstUseAttribution.metadataSnapshotCalls = 0;
   firstUseAttribution.metadataSnapshots.length = 0;
-  firstUseAttribution.authDiscoveryCalls = 0;
+  firstUseAttribution.authFactsCalls = 0;
   firstUseAttribution.capturedModelDiscoveryCalls = 0;
   firstUseAttribution.metadataSnapshotMs = 0;
-  firstUseAttribution.authDiscoveryMs = 0;
+  firstUseAttribution.authFactsMs = 0;
   firstUseAttribution.capturedModelDiscoveryMs = 0;
 });
 
@@ -660,7 +662,7 @@ describe("Gateway prepared model runtime startup", () => {
                 maxProbeMs: Math.max(...probeResults.map((result) => result.elapsedMs)),
                 stageMs: {
                   metadataSnapshot: firstUseAttribution.metadataSnapshotMs,
-                  authDiscovery: firstUseAttribution.authDiscoveryMs,
+                  authFacts: firstUseAttribution.authFactsMs,
                   capturedModelDiscovery: firstUseAttribution.capturedModelDiscoveryMs,
                 },
                 beforeRssBytes,
@@ -678,7 +680,9 @@ describe("Gateway prepared model runtime startup", () => {
             firstUseAttribution.metadataSnapshotCalls,
             JSON.stringify(firstUseAttribution.metadataSnapshots),
           ).toBe(1);
-          expect(firstUseAttribution.authDiscoveryCalls).toBe(1);
+          // A published auth generation still crosses the facts seam once, but must not
+          // re-enter external CLI/plugin hydration (covered by the prepared-store test).
+          expect(firstUseAttribution.authFactsCalls).toBe(1);
           expect(firstUseAttribution.capturedModelDiscoveryCalls).toBe(1);
           expect(leases.map(({ snapshot }) => snapshot.workspaceDir)).toEqual(childWorkspaces);
           expect(
