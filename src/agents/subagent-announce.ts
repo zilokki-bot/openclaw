@@ -617,7 +617,13 @@ export async function runSubagentAnnounceFlow(params: {
       signal: params.signal,
     });
     params.onDeliveryResult?.(delivery);
-    didAnnounce = delivery.delivered || delivery.terminal === true;
+    const requesterYieldOwnsDelivery =
+      delivery.reason === "source_owner_changed" &&
+      delivery.disposition === "intentional_non_delivery";
+    didAnnounce =
+      delivery.delivered ||
+      requesterYieldOwnsDelivery ||
+      (delivery.terminal === true && delivery.reason !== "source_owner_changed");
     if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
       defaultRuntime.log(
         `[warn] Subagent completion direct announce failed for run ${params.childRunId}: ${delivery.error}`,

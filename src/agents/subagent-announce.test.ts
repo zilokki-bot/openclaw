@@ -6,7 +6,14 @@ import type { EmbeddedAgentQueueMessageOutcome } from "./embedded-agent-runner/r
 import { createSubagentAnnounceDeliveryRuntimeMock } from "./subagent-announce.test-support.js";
 
 type AgentCallRequest = { method?: string; params?: Record<string, unknown> };
-type AgentCallResponse = { runId?: string; status: string; error?: string; terminal?: boolean };
+type AgentCallResponse = {
+  runId?: string;
+  status: string;
+  error?: string;
+  terminal?: boolean;
+  reason?: "source_owner_changed";
+  disposition?: "intentional_non_delivery";
+};
 
 const agentSpy = vi.fn(
   async (_req: AgentCallRequest): Promise<AgentCallResponse> => ({
@@ -150,7 +157,13 @@ vi.mock("./subagent-announce-delivery.js", () => ({
               threadId: effectiveOrigin?.threadId,
             }),
       },
-    })) as { status?: string; error?: string; terminal?: boolean };
+    })) as {
+      status?: string;
+      error?: string;
+      terminal?: boolean;
+      reason?: "source_owner_changed";
+      disposition?: "intentional_non_delivery";
+    };
 
     if (response.status === "error") {
       return {
@@ -158,6 +171,8 @@ vi.mock("./subagent-announce-delivery.js", () => ({
         path: "direct",
         error: response.error ?? "agent delivery failed",
         ...(response.terminal === true ? { terminal: true } : {}),
+        ...(response.reason ? { reason: response.reason } : {}),
+        ...(response.disposition ? { disposition: response.disposition } : {}),
       };
     }
 
@@ -732,6 +747,45 @@ describe("subagent announce seam flow", () => {
       path: "direct",
       error: "prompt lock failed after visible send",
       terminal: true,
+    });
+  });
+
+  it("hands intentional requester-yield non-delivery to cleanup without crediting a send", async () => {
+    let deliveryResult: unknown;
+    agentSpy.mockResolvedValueOnce({
+      status: "error",
+      error: "subagent source lifecycle changed before completion delivery",
+      terminal: true,
+      reason: "source_owner_changed",
+      disposition: "intentional_non_delivery",
+    });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:yield-owned",
+      childRunId: "run-yield-owned",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "telegram", to: "123456789" },
+      task: "yield-owned completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      startedAt: 10,
+      endedAt: 20,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+      onDeliveryResult: (delivery) => {
+        deliveryResult = delivery;
+      },
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(deliveryResult).toMatchObject({
+      delivered: false,
+      terminal: true,
+      reason: "source_owner_changed",
+      disposition: "intentional_non_delivery",
     });
   });
 });

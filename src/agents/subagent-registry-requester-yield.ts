@@ -80,6 +80,7 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
   }
   const batchRunIds = entries.map((entry) => entry.runId).toSorted();
   const previousStates = entries.map((entry) => ({
+    delivery: structuredClone(entry.delivery),
     requesterSettleWake: structuredClone(entry.requesterSettleWake),
     requesterTurnRunId: entry.requesterTurnRunId,
     requesterTurnYielded: entry.requesterTurnYielded,
@@ -91,11 +92,18 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
       Math.max(0, ...entries.map((entry) => entry.requesterSettleWake?.rearmGeneration ?? 0)) + 1;
     for (const entry of entries) {
       const existing = entry.requesterSettleWake;
+      const completionEnded = typeof entry.endedAt === "number";
       // An in-progress delivery may already target the requester run being aborted.
       // Re-arm it like a delivered result so that completion cannot die with that turn.
-      const completionMayBeAttachedToYieldedTurn =
-        typeof entry.endedAt === "number" &&
-        (entry.delivery?.status === "delivered" || entry.delivery?.status === "in_progress");
+      const completionMayBeAttachedToYieldedTurn = completionEnded;
+      if (completionEnded && entry.delivery?.status !== "delivered") {
+        // The persisted yielded batch now owns terminal delivery. Mark the old
+        // per-child attempt terminal so it cannot keep the batch unsettled.
+        entry.delivery = {
+          ...(entry.delivery ?? { status: "pending" }),
+          disposition: "intentional_non_delivery",
+        };
+      }
       entry.requesterSettleWake = {
         status: "pending",
         attemptCount: 0,
@@ -131,6 +139,7 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
     entries.forEach((entry, index) => {
       const previous = previousStates[index];
       params.runs.set(entry.runId, entry);
+      entry.delivery = previous?.delivery;
       entry.requesterSettleWake = previous?.requesterSettleWake;
       entry.requesterTurnRunId = previous?.requesterTurnRunId;
       entry.requesterTurnYielded = previous?.requesterTurnYielded;
@@ -141,11 +150,9 @@ export function settleRequesterTurnAfterSessionSpawns(params: {
 
   if (
     rearmGeneration !== undefined &&
-    entries.every(
-      (entry) => typeof entry.endedAt === "number" && entry.delivery?.status === "delivered",
-    )
+    entries.every((entry) => typeof entry.endedAt === "number")
   ) {
-    // Active children keep the frozen batch but let their normal cleanup owner schedule it.
+    // Active children keep the frozen batch; their normal completion owner schedules it.
     params.schedule(firstEntry.runId, firstEntry);
   }
   return true;

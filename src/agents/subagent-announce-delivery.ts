@@ -227,6 +227,26 @@ function resolveCompactionSteerRetryDelaysMs() {
     : ([1_000, 2_000, 4_000, 8_000] as const);
 }
 
+const SOURCE_OWNER_CHANGED = Symbol("source_owner_changed");
+
+function sourceOwnerChangedResult(): SubagentAnnounceDeliveryResult {
+  return {
+    delivered: false,
+    path: "none",
+    reason: "source_owner_changed",
+    error: "subagent source lifecycle changed before completion delivery",
+    terminal: true,
+    disposition: "intentional_non_delivery",
+  };
+}
+
+class SourceOwnerChangedError extends Error {
+  constructor() {
+    super("subagent source lifecycle changed before completion delivery");
+    this.name = "SourceOwnerChangedError";
+  }
+}
+
 // Wake an active requester run through transient compacting and transcript-wait
 // outcomes. Both active-wake call sites use one loop so delivery deadlines and
 // best-effort transcript retry stay consistent.
@@ -235,7 +255,8 @@ async function resolveActiveWakeWithRetries(
   message: string,
   wakeOptions: EmbeddedAgentQueueMessageOptions,
   signal?: AbortSignal,
-): Promise<EmbeddedAgentQueueMessageOutcome> {
+  isAttemptAllowed?: () => boolean,
+): Promise<EmbeddedAgentQueueMessageOutcome | typeof SOURCE_OWNER_CHANGED> {
   // Bound the whole active wake by the caller's delivery window. Each retry
   // passes only the remaining window into transcript-commit waiting so a
   // near-deadline retry cannot add another full timeout.
@@ -257,11 +278,25 @@ async function resolveActiveWakeWithRetries(
       deliveryTimeoutMs: remainingDeliveryTimeoutMs,
     };
   };
-  let outcome = await resolveQueueEmbeddedAgentMessageOutcome(sessionId, message, currentOptions);
+  const attemptWake = async (options: EmbeddedAgentQueueMessageOptions) => {
+    if (isAttemptAllowed?.() === false) {
+      return SOURCE_OWNER_CHANGED;
+    }
+    const result = await resolveQueueEmbeddedAgentMessageOutcome(sessionId, message, options);
+    return isAttemptAllowed?.() === false ? SOURCE_OWNER_CHANGED : result;
+  };
+  let outcome = await attemptWake(currentOptions);
   const compactionRetryDelaysMs = resolveCompactionSteerRetryDelaysMs();
   let compactionRetryIndex = 0;
   for (;;) {
+    if (outcome === SOURCE_OWNER_CHANGED) {
+      break;
+    }
     if (outcome.queued || signal?.aborted) {
+      break;
+    }
+    if (isAttemptAllowed?.() === false) {
+      outcome = SOURCE_OWNER_CHANGED;
       break;
     }
     if (
@@ -271,7 +306,7 @@ async function resolveActiveWakeWithRetries(
       const bestEffortOptions = { ...currentOptions };
       delete bestEffortOptions.waitForTranscriptCommit;
       currentOptions = bestEffortOptions;
-      outcome = await resolveQueueEmbeddedAgentMessageOutcome(sessionId, message, currentOptions);
+      outcome = await attemptWake(currentOptions);
       continue;
     }
     if (
@@ -283,7 +318,7 @@ async function resolveActiveWakeWithRetries(
       const activeRunOptions = { ...currentOptions };
       delete activeRunOptions.sourceReplyDeliveryMode;
       currentOptions = activeRunOptions;
-      outcome = await resolveQueueEmbeddedAgentMessageOutcome(sessionId, message, currentOptions);
+      outcome = await attemptWake(currentOptions);
       continue;
     }
     if (outcome.reason === "compacting") {
@@ -321,7 +356,7 @@ async function resolveActiveWakeWithRetries(
       if (!retryOptions) {
         break;
       }
-      outcome = await resolveQueueEmbeddedAgentMessageOutcome(sessionId, message, retryOptions);
+      outcome = await attemptWake(retryOptions);
       continue;
     }
     break;
@@ -585,10 +620,14 @@ function isCronRunContinuationLostError(error: unknown): boolean {
 export async function runAnnounceDeliveryWithRetry<T>(params: {
   operation: string;
   signal?: AbortSignal;
+  isAttemptAllowed?: () => boolean;
   run: () => Promise<T>;
 }): Promise<T> {
   const retryDelaysMs = resolveDirectAnnounceTransientRetryDelaysMs();
   for (const [retryIndex, delayMs] of retryDelaysMs.entries()) {
+    if (params.isAttemptAllowed?.() === false) {
+      throw new SourceOwnerChangedError();
+    }
     if (params.signal?.aborted) {
       throw new Error("announce delivery aborted");
     }
@@ -597,6 +636,9 @@ export async function runAnnounceDeliveryWithRetry<T>(params: {
     } catch (err) {
       if (!isTransientAnnounceDeliveryError(err) || params.signal?.aborted) {
         throw err;
+      }
+      if (params.isAttemptAllowed?.() === false) {
+        throw new SourceOwnerChangedError();
       }
       const nextAttempt = retryIndex + 2;
       const maxAttempts = retryDelaysMs.length + 1;
@@ -608,6 +650,9 @@ export async function runAnnounceDeliveryWithRetry<T>(params: {
   }
   if (params.signal?.aborted) {
     throw new Error("announce delivery aborted");
+  }
+  if (params.isAttemptAllowed?.() === false) {
+    throw new SourceOwnerChangedError();
   }
   return await params.run();
 }
@@ -641,8 +686,10 @@ async function maybeSteerSubagentAnnounce(params: {
   requesterSessionKey: string;
   steerMessage: string;
   signal?: AbortSignal;
+  isAttemptAllowed?: () => boolean;
 }): Promise<
-  { status: "steered"; deliveredAt?: number; enqueuedAt?: number } | { status: "none" | "dropped" }
+  | { status: "steered"; deliveredAt?: number; enqueuedAt?: number }
+  | { status: "none" | "dropped" | "source_owner_changed" }
 > {
   if (params.signal?.aborted) {
     return { status: "none" };
@@ -676,7 +723,11 @@ async function maybeSteerSubagentAnnounce(params: {
     params.steerMessage,
     queueOptions,
     params.signal,
+    params.isAttemptAllowed,
   );
+  if (queueOutcome === SOURCE_OWNER_CHANGED) {
+    return { status: "source_owner_changed" };
+  }
   if (queueOutcome.queued) {
     return {
       status: "steered",
@@ -1266,7 +1317,9 @@ async function sendSubagentAnnounceDirectly(params: {
         error: "requester session abandoned after timeout",
       };
     }
-    if (params.expectsCompletionMessage && params.isCompletionOwnedByRequesterYield?.()) {
+    const isCompletionDeliveryAllowed = () =>
+      !(params.expectsCompletionMessage && params.isCompletionOwnedByRequesterYield?.());
+    if (!isCompletionDeliveryAllowed()) {
       // sessions_yield owns the post-turn synthesis. Starting or steering a
       // requester turn here would replay the original fanout during handoff.
       return {
@@ -1402,7 +1455,11 @@ async function sendSubagentAnnounceDirectly(params: {
         params.triggerMessage,
         wakeOptions,
         params.signal,
+        isCompletionDeliveryAllowed,
       );
+      if (wakeOutcome === SOURCE_OWNER_CHANGED) {
+        return sourceOwnerChangedResult();
+      }
       if (wakeOutcome.queued) {
         return {
           delivered: true,
@@ -1501,7 +1558,11 @@ async function sendSubagentAnnounceDirectly(params: {
           ? "completion direct announce agent call"
           : "direct announce agent call",
         signal: params.signal,
+        isAttemptAllowed: isCompletionDeliveryAllowed,
         run: async () => {
+          if (!isCompletionDeliveryAllowed()) {
+            throw new SourceOwnerChangedError();
+          }
           let agentParams = directAgentParams;
           if (cronContinuation) {
             const continuation = readCronRunContinuation({
@@ -1522,7 +1583,13 @@ async function sendSubagentAnnounceDirectly(params: {
           });
         },
       });
+      if (!isCompletionDeliveryAllowed()) {
+        return sourceOwnerChangedResult();
+      }
     } catch (err) {
+      if (err instanceof SourceOwnerChangedError) {
+        return sourceOwnerChangedResult();
+      }
       if (isPermanentAnnounceDeliveryError(err) && hasAnnounceSendEvidence(err)) {
         throw err;
       }
@@ -1938,6 +2005,9 @@ export async function deliverSubagentAnnouncement(params: {
       : { delivered: true, path: "queued" };
   }
 
+  const isCompletionDeliveryAllowed = () =>
+    !(params.expectsCompletionMessage && params.isCompletionOwnedByRequesterYield?.());
+
   return await runSubagentAnnounceDispatch({
     expectsCompletionMessage: params.expectsCompletionMessage,
     signal: params.signal,
@@ -1949,6 +2019,7 @@ export async function deliverSubagentAnnouncement(params: {
         requesterSessionKey: params.requesterSessionKey,
         steerMessage: params.steerMessage,
         signal: params.signal,
+        isAttemptAllowed: isCompletionDeliveryAllowed,
       }),
     direct: async () =>
       await sendSubagentAnnounceDirectly({
