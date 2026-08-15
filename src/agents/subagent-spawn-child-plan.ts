@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isIncognitoSessionKey } from "../routing/session-key.js";
@@ -47,7 +49,24 @@ function buildResolvedSubagentModelMetadata(resolvedModel?: string): {
   };
 }
 
-async function resolveCollectorOutputModelError(params: {
+async function hasWorkspacePluginRoot(workspaceDir?: string): Promise<boolean> {
+  if (!workspaceDir) {
+    return false;
+  }
+  try {
+    await stat(path.join(workspaceDir, ".openclaw", "extensions"));
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return false;
+    }
+    // An unreadable or otherwise indeterminate workspace must keep exact workspace discovery.
+    return true;
+  }
+}
+
+export async function resolveCollectorOutputModelError(params: {
   cfg: OpenClawConfig;
   targetAgentId: string;
   targetAgentDir: string;
@@ -55,14 +74,35 @@ async function resolveCollectorOutputModelError(params: {
   resolvedModel?: string;
 }): Promise<string | undefined> {
   const selected = splitModelRef(params.resolvedModel);
-  const fallback = resolveDefaultModelForAgent({
-    cfg: params.cfg,
-    agentId: params.targetAgentId,
-  });
-  const provider = selected.provider ?? fallback.provider;
-  const model = selected.model ?? fallback.model;
+  const fallback =
+    selected.provider && selected.model
+      ? undefined
+      : resolveDefaultModelForAgent({
+          cfg: params.cfg,
+          agentId: params.targetAgentId,
+        });
+  const provider = selected.provider ?? fallback?.provider;
+  const model = selected.model ?? fallback?.model;
   if (!provider || !model) {
     return undefined;
+  }
+  const configuredSnapshot = (await hasWorkspacePluginRoot(params.workspaceDir))
+    ? undefined
+    : getSubagentSpawnDeps().getPreparedModelCatalogSnapshot({
+        config: params.cfg,
+        agentId: params.targetAgentId,
+        agentDir: params.targetAgentDir,
+      });
+  const configuredEntry = configuredSnapshot
+    ? findModelCatalogEntry(
+        [...configuredSnapshot.entries, ...(configuredSnapshot.staticEntries ?? [])],
+        { provider, modelId: model },
+      )
+    : undefined;
+  if (configuredEntry) {
+    return supportsModelTools(configuredEntry)
+      ? undefined
+      : `sessions_spawn outputSchema requires a tool-capable target model; "${provider}/${model}" declares compat.supportsTools=false.`;
   }
   let catalog: Awaited<ReturnType<typeof loadPreparedModelCatalog>>;
   try {
@@ -70,6 +110,7 @@ async function resolveCollectorOutputModelError(params: {
       config: params.cfg,
       agentDir: params.targetAgentDir,
       workspaceDir: params.workspaceDir,
+      readOnly: true,
     });
   } catch (error) {
     return `sessions_spawn could not verify outputSchema model capabilities: ${summarizeSpawnError(error)}`;

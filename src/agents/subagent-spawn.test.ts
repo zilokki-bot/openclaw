@@ -1,6 +1,8 @@
 // Subagent spawn tests cover target policy, session patching, runtime model
 // persistence, registry registration, and lifecycle event emission.
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveIncognitoOpenClawAgentSqlitePath } from "../state/openclaw-agent-db.paths.js";
 import {
@@ -15,6 +17,7 @@ import { installAcceptedSubagentGatewayMock } from "./test-helpers/subagent-gate
 const hoisted = vi.hoisted(() => ({
   callGatewayMock: vi.fn(),
   loadSessionStoreMock: vi.fn(),
+  getPreparedModelCatalogSnapshotMock: vi.fn(),
   loadPreparedModelCatalogMock: vi.fn(),
   updateSessionStoreMock: vi.fn(),
   registerSubagentRunMock: vi.fn(),
@@ -163,6 +166,7 @@ describe("spawnSubagentDirect seam flow", () => {
       hasInProcessGatewayContextMock: hoisted.hasInProcessGatewayContextMock,
       getRuntimeConfig: () => hoisted.configOverride,
       loadSessionStoreMock: hoisted.loadSessionStoreMock,
+      getPreparedModelCatalogSnapshotMock: hoisted.getPreparedModelCatalogSnapshotMock,
       loadPreparedModelCatalogMock: hoisted.loadPreparedModelCatalogMock,
       updateSessionStoreMock: hoisted.updateSessionStoreMock,
       registerSubagentRunMock: hoisted.registerSubagentRunMock,
@@ -185,6 +189,7 @@ describe("spawnSubagentDirect seam flow", () => {
     resetSubagentRegistryForTests();
     hoisted.callGatewayMock.mockReset();
     hoisted.loadSessionStoreMock.mockReset();
+    hoisted.getPreparedModelCatalogSnapshotMock.mockReset().mockReturnValue(undefined);
     hoisted.loadPreparedModelCatalogMock.mockReset().mockResolvedValue([]);
     hoisted.updateSessionStoreMock.mockReset();
     hoisted.registerSubagentRunMock.mockReset();
@@ -891,9 +896,96 @@ describe("spawnSubagentDirect seam flow", () => {
       config: hoisted.configOverride,
       agentDir: expect.any(String),
       workspaceDir: "/tmp/workspace-main",
+      readOnly: true,
     });
     expect(hoisted.updateSessionStoreMock).not.toHaveBeenCalled();
     expect(hoisted.registerSubagentRunMock).not.toHaveBeenCalled();
+  });
+
+  it("reuses the configured generation for collector capability admission", async () => {
+    hoisted.configOverride = createConfigOverride({ tools: { swarm: true } });
+    hoisted.getPreparedModelCatalogSnapshotMock.mockReturnValue({
+      entries: [],
+      staticEntries: [
+        {
+          provider: "openai",
+          id: "no-tools",
+          name: "No tools",
+          compat: { supportsTools: false },
+        },
+      ],
+    });
+
+    const rejected = await spawnSubagentDirect(
+      {
+        task: "structured result from configured generation",
+        model: "openai/no-tools",
+        collect: true,
+        outputSchema: { type: "object" },
+      },
+      { agentSessionKey: "agent:main:main", requesterRunId: "parent-run" },
+    );
+
+    expect(rejected.status).toBe("error");
+    expect(rejected.error).toContain("requires a tool-capable target model");
+    expect(hoisted.getPreparedModelCatalogSnapshotMock).toHaveBeenCalledWith({
+      config: hoisted.configOverride,
+      agentId: "main",
+      agentDir: expect.any(String),
+    });
+    expect(hoisted.loadPreparedModelCatalogMock).not.toHaveBeenCalled();
+    expect(hoisted.updateSessionStoreMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps exact collector discovery for workspaces with local plugins", async () => {
+    const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-spawn-plugin-workspace-"));
+    try {
+      await mkdir(path.join(workspaceDir, ".openclaw", "extensions"), { recursive: true });
+      hoisted.configOverride = createConfigOverride({
+        agents: { list: [{ id: "main", workspace: workspaceDir }] },
+        tools: { swarm: true },
+      });
+      hoisted.getPreparedModelCatalogSnapshotMock.mockReturnValue({
+        entries: [],
+        staticEntries: [
+          {
+            provider: "openai",
+            id: "no-tools",
+            name: "Configured no tools",
+            compat: { supportsTools: false },
+          },
+        ],
+      });
+      hoisted.loadPreparedModelCatalogMock.mockResolvedValue([
+        {
+          provider: "openai",
+          id: "no-tools",
+          name: "Workspace no tools",
+          compat: { supportsTools: false },
+        },
+      ]);
+
+      const rejected = await spawnSubagentDirect(
+        {
+          task: "structured result from plugin workspace",
+          model: "openai/no-tools",
+          collect: true,
+          outputSchema: { type: "object" },
+        },
+        { agentSessionKey: "agent:main:main", requesterRunId: "parent-run" },
+      );
+
+      expect(rejected.status).toBe("error");
+      expect(hoisted.getPreparedModelCatalogSnapshotMock).not.toHaveBeenCalled();
+      expect(hoisted.loadPreparedModelCatalogMock).toHaveBeenCalledWith({
+        config: hoisted.configOverride,
+        agentDir: expect.any(String),
+        workspaceDir,
+        readOnly: true,
+      });
+    } finally {
+      await rm(workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects a group id outside collector mode", async () => {

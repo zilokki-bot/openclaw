@@ -155,6 +155,7 @@ const { clearRuntimeAuthProfileStoreSnapshots, replaceRuntimeAuthProfileStoreSna
   await import("../agents/auth-profiles/store.js");
 const { resolveAgentDir, resolveAgentWorkspaceDir } = await import("../agents/agent-scope.js");
 const { startGatewaySidecars } = await import("./server-startup-post-attach.js");
+const { resolveCollectorOutputModelError } = await import("../agents/subagent-spawn-child-plan.js");
 
 beforeEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
@@ -650,8 +651,19 @@ describe("Gateway prepared model runtime startup", () => {
           try {
             [leases, probeResults] = await Promise.all([
               Promise.all(
-                childWorkspaces.map((workspaceDir) =>
-                  acquireAgentRunPreparedModelRuntime(
+                childWorkspaces.map(async (workspaceDir) => {
+                  // Collector output-schema admission is part of sessions_spawn before the child
+                  // run lease. It must inspect configured capability facts without materializing
+                  // a full live provider catalog for every managed worktree.
+                  const capabilityError = await resolveCollectorOutputModelError({
+                    cfg,
+                    targetAgentId: "developer",
+                    targetAgentDir: resolveAgentDir(cfg, "developer"),
+                    workspaceDir,
+                    resolvedModel: "openai/fleet-0",
+                  });
+                  expect(capabilityError).toBeUndefined();
+                  return await acquireAgentRunPreparedModelRuntime(
                     {
                       agentId: "developer",
                       agentDir: resolveAgentDir(cfg, "developer"),
@@ -659,8 +671,8 @@ describe("Gateway prepared model runtime startup", () => {
                       config: cfg,
                     },
                     { catalogMode: "static" },
-                  ),
-                ),
+                  );
+                }),
               ),
               Promise.all(probes),
             ]);

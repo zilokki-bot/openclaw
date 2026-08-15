@@ -9,6 +9,7 @@ type SpawnDeps = Omit<
     | "ensureContextEnginesInitialized"
     | "forkSessionEntryFromParent"
     | "getGlobalHookRunner"
+    | "getPreparedModelCatalogSnapshot"
     | "getRuntimeConfig"
     | "hasInProcessGatewayContext"
     | "loadPreparedModelCatalog"
