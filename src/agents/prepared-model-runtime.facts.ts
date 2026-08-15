@@ -85,7 +85,9 @@ type SharedStaticWorkspaceBuild = {
 // owner cache: dynamic worktree projections may share only the immutable static facts, and any
 // workspace-origin plugin opts out. Config/auth lifecycle invalidation clears it in the owner.
 const sharedStaticWorkspaceBuilds = new Map<string, SharedStaticWorkspaceBuild>();
+const sharedStaticWorkspaceBuildInflight = new Map<string, Promise<void>>();
 const sharedStaticConfiguredCatalogFacts = new Map<string, PreparedModelRuntimeCatalogFacts>();
+let sharedStaticWorkspaceBuildEpoch = 0;
 
 function sharedStaticWorkspaceBuildKey(
   input: PreparedModelRuntimeInput,
@@ -282,6 +284,74 @@ export function preparedModelRuntimeWorkspaceFactsKey(input: PreparedModelRuntim
 export async function prepareWorkspaceBuildGroup(
   inputs: readonly PreparedModelRuntimeInput[],
   catalogMode: PreparedModelRuntimeCatalogMode,
+): Promise<Awaited<ReturnType<typeof prepareWorkspaceBuildGroupUnshared>>> {
+  const input = inputs[0];
+  if (!input) {
+    throw new Error("prepared model runtime workspace group is empty");
+  }
+  const sharedBuildKey = sharedStaticWorkspaceBuildKey(input, catalogMode);
+  if (!sharedBuildKey || input.workspacePluginRootPresent !== false) {
+    return await prepareWorkspaceBuildGroupUnshared(inputs, catalogMode);
+  }
+  const cached = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
+  if (cached) {
+    const materialized = materializeSharedStaticWorkspaceBuild(cached, inputs, sharedBuildKey);
+    if (materialized) {
+      return materialized;
+    }
+  }
+
+  const epoch = sharedStaticWorkspaceBuildEpoch;
+  const inflightKey = `${epoch}\0${sharedBuildKey}`;
+  const existing = sharedStaticWorkspaceBuildInflight.get(inflightKey);
+  if (existing) {
+    await existing.catch(() => undefined);
+    const published = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
+    if (published) {
+      const materialized = materializeSharedStaticWorkspaceBuild(published, inputs, sharedBuildKey);
+      if (materialized) {
+        return materialized;
+      }
+    }
+  }
+
+  let resolveInflight!: () => void;
+  let rejectInflight!: (error: unknown) => void;
+  const inflight = new Promise<void>((resolve, reject) => {
+    resolveInflight = resolve;
+    rejectInflight = reject;
+  });
+  sharedStaticWorkspaceBuildInflight.set(inflightKey, inflight);
+  void inflight.catch(() => undefined);
+  try {
+    const result = await prepareWorkspaceBuildGroupUnshared(inputs, catalogMode);
+    if (
+      sharedStaticWorkspaceBuildEpoch === epoch &&
+      !result.workspaceFacts.pluginMetadataSnapshot.plugins.some(
+        (plugin) => plugin.origin === "workspace",
+      )
+    ) {
+      sharedStaticWorkspaceBuilds.set(sharedBuildKey, {
+        agentFacts: result.agentFacts,
+        workspaceFacts: result.workspaceFacts,
+        buildStats: result.buildStats,
+      });
+    }
+    resolveInflight();
+    return result;
+  } catch (error) {
+    rejectInflight(error);
+    throw error;
+  } finally {
+    if (sharedStaticWorkspaceBuildInflight.get(inflightKey) === inflight) {
+      sharedStaticWorkspaceBuildInflight.delete(inflightKey);
+    }
+  }
+}
+
+async function prepareWorkspaceBuildGroupUnshared(
+  inputs: readonly PreparedModelRuntimeInput[],
+  catalogMode: PreparedModelRuntimeCatalogMode,
 ): Promise<{
   agentFacts: PreparedModelRuntimeAgentFacts[];
   workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
@@ -299,16 +369,6 @@ export async function prepareWorkspaceBuildGroup(
   const input = inputs[0];
   if (!input) {
     throw new Error("prepared model runtime workspace group is empty");
-  }
-  const sharedBuildKey = sharedStaticWorkspaceBuildKey(input, catalogMode);
-  if (sharedBuildKey && input.workspacePluginRootPresent === false) {
-    const cached = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
-    if (cached) {
-      const materialized = materializeSharedStaticWorkspaceBuild(cached, inputs, sharedBuildKey);
-      if (materialized) {
-        return materialized;
-      }
-    }
   }
   const env = input.env ?? process.env;
   const runtimePluginStartedAt = performance.now();
@@ -508,22 +568,14 @@ export async function prepareWorkspaceBuildGroup(
       ...(providerStaticModels ? { providerStaticModels } : {}),
     },
   };
-  if (
-    sharedBuildKey &&
-    !pluginMetadataSnapshot.plugins.some((plugin) => plugin.origin === "workspace")
-  ) {
-    sharedStaticWorkspaceBuilds.set(sharedBuildKey, {
-      agentFacts: result.agentFacts,
-      workspaceFacts: result.workspaceFacts,
-      buildStats: result.buildStats,
-    });
-  }
   return result;
 }
 
 /** Clears request-shared static facts when the lifecycle owner is invalidated. */
 export function clearPreparedModelRuntimeSharedWorkspaceBuilds(): void {
+  sharedStaticWorkspaceBuildEpoch += 1;
   sharedStaticWorkspaceBuilds.clear();
+  sharedStaticWorkspaceBuildInflight.clear();
   sharedStaticConfiguredCatalogFacts.clear();
 }
 
