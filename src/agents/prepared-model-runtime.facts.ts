@@ -1,11 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type { ConfiguredModelRef } from "@openclaw/model-catalog-core/configured-model-refs";
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import type { PreparedMessageToolCatalog } from "../channels/plugins/message-action-discovery.js";
-import { hashRuntimeConfigValue } from "../config/runtime-snapshot.js";
-import { sha256Base64Url } from "../infra/crypto-digest.js";
 import { prepareMediaCapabilityProviders } from "../plugins/capability-provider-runtime.js";
 import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
@@ -19,11 +15,7 @@ import { resolveRuntimeSyntheticAuthProviderRefs } from "../plugins/synthetic-au
 import type { ProviderPlugin } from "../plugins/types.js";
 import type { AgentCredentialMap } from "./agent-auth-credentials.js";
 import { resolveAmbientAgentCredentialsForDiscovery } from "./agent-auth-discovery.js";
-import {
-  discoverAuthStorageFacts,
-  discoverModels,
-  discoverModelsFromCapturedSources,
-} from "./agent-model-discovery.js";
+import { discoverAuthStorageFacts, discoverModels } from "./agent-model-discovery.js";
 import { getPreparedRuntimeAuthProfileStoreSnapshot } from "./auth-profiles/store.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import {
@@ -46,6 +38,10 @@ import {
   type PersistedPluginModelCatalog,
 } from "./plugin-model-catalog.js";
 import {
+  capturePreparedModelsJsonContents as captureModelsJsonContents,
+  clearSharedStaticConfiguredCatalogFacts,
+} from "./prepared-model-runtime.catalog-cache.js";
+import {
   collectPreparedModelRuntimeConfiguredRefs,
   collectConfiguredProviderIdsNeedingStaticCatalog,
   collectPreparedModelRuntimeProviderIds,
@@ -58,113 +54,21 @@ import type {
   PreparedModelRuntimeCatalogMode,
   PreparedModelRuntimeInput,
 } from "./prepared-model-runtime.types.js";
+import {
+  clearSharedStaticWorkspaceBuilds,
+  prepareSharedStaticWorkspaceBuildGroup,
+  preparedModelRuntimeWorkspaceFactsKey,
+} from "./prepared-model-runtime.workspace-cache.js";
 import { ensureRuntimePluginsLoaded } from "./runtime-plugins.js";
 import { AuthStorage, type AuthStorageData } from "./sessions/auth-storage.js";
 import type { ModelRegistry } from "./sessions/model-registry.js";
-import { stableStringify } from "./stable-stringify.js";
+
+export {
+  fingerprintPreparedRuntimeFacts,
+  prepareConfiguredRuntimeFactsBatch,
+} from "./prepared-model-runtime.catalog-cache.js";
 
 const MODEL_RUNTIME_PROVIDER_DISCOVERY_TIMEOUT_MS = 5_000;
-
-type PreparedWorkspaceBuildStats = Pick<
-  PreparedModelRuntimeBuildStats,
-  | "runtimePluginMs"
-  | "pluginMetadataMs"
-  | "staticProviderPlanningMs"
-  | "staticProviderCatalogMs"
-  | "ambientCredentialsMs"
-  | "agentFactsMs"
-  | "configuredProjectionMs"
->;
-
-type SharedStaticWorkspaceBuild = {
-  agentFacts: readonly PreparedModelRuntimeAgentFacts[];
-  workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
-  buildStats: PreparedWorkspaceBuildStats;
-};
-
-// Managed worktrees without a workspace extension root have the same static plugin/provider
-// graph as the configured workspace. Keep this cache deliberately narrower than the lifecycle
-// owner cache: dynamic worktree projections may share only the immutable static facts, and any
-// workspace-origin plugin opts out. Config/auth lifecycle invalidation clears it in the owner.
-const sharedStaticWorkspaceBuilds = new Map<string, SharedStaticWorkspaceBuild>();
-const sharedStaticWorkspaceBuildInflight = new Map<string, Promise<void>>();
-const sharedStaticConfiguredCatalogFacts = new Map<string, PreparedModelRuntimeCatalogFacts>();
-let sharedStaticWorkspaceBuildEpoch = 0;
-
-function normalizedInheritedAuthDir(input: PreparedModelRuntimeInput): string | undefined {
-  return input.inheritedAuthDir ? path.resolve(input.inheritedAuthDir) : undefined;
-}
-
-function sharedStaticWorkspaceBuildKey(
-  input: PreparedModelRuntimeInput,
-  catalogMode: PreparedModelRuntimeCatalogMode,
-): string | undefined {
-  if (catalogMode !== "static" || input.readOnly || input.workspacePluginRootPresent === true) {
-    return undefined;
-  }
-  return JSON.stringify({
-    config: hashRuntimeConfigValue(input.config),
-    env: hashRuntimeConfigValue(input.env ?? process.env),
-    inheritedAuthDir: normalizedInheritedAuthDir(input),
-    skipCredentials: input.skipCredentials === true,
-  });
-}
-
-function findSharedStaticAgentFacts(
-  facts: readonly PreparedModelRuntimeAgentFacts[],
-  input: PreparedModelRuntimeInput,
-): PreparedModelRuntimeAgentFacts | undefined {
-  return facts.find(
-    (candidate) =>
-      candidate.input.agentId === input.agentId &&
-      candidate.input.agentDir === input.agentDir &&
-      normalizedInheritedAuthDir(candidate.input) === normalizedInheritedAuthDir(input) &&
-      (candidate.input.skipCredentials === true) === (input.skipCredentials === true) &&
-      (input.workspacePluginRootPresent === false ||
-        candidate.input.workspaceDir === input.workspaceDir),
-  );
-}
-
-function materializeSharedStaticWorkspaceBuild(
-  cached: SharedStaticWorkspaceBuild,
-  inputs: readonly PreparedModelRuntimeInput[],
-  key: string,
-):
-  | {
-      agentFacts: PreparedModelRuntimeAgentFacts[];
-      workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
-      buildStats: PreparedWorkspaceBuildStats;
-    }
-  | undefined {
-  const agentFacts: PreparedModelRuntimeAgentFacts[] = [];
-  for (const input of inputs) {
-    const cachedFacts = findSharedStaticAgentFacts(cached.agentFacts, input);
-    if (!cachedFacts) {
-      // The key is process/config scoped, but do not silently project facts for a new agent
-      // identity that the original group did not contain.
-      sharedStaticWorkspaceBuilds.delete(key);
-      return undefined;
-    }
-    agentFacts.push({
-      ...cachedFacts,
-      input,
-      env: input.env ?? process.env,
-      // AuthStorage instances are mutable per run. Rehydrate from the immutable lifecycle
-      // credential map without reopening the agent SQLite store for every child worktree.
-      templateAuthStorage: AuthStorage.inMemory(cachedFacts.credentials),
-    });
-  }
-  const buildStats: PreparedWorkspaceBuildStats = {
-    runtimePluginMs: 0,
-    pluginMetadataMs: 0,
-    staticProviderPlanningMs: 0,
-    staticProviderCatalogMs: 0,
-    ambientCredentialsMs: 0,
-    agentFactsMs: 0,
-    configuredProjectionMs: 0,
-  };
-  return { agentFacts, workspaceFacts: cached.workspaceFacts, buildStats };
-}
 
 type PreparedModelRuntimeAgentBaseFacts = {
   input: PreparedModelRuntimeInput;
@@ -203,13 +107,6 @@ export type PreparedModelRuntimeCatalogSource = Readonly<{
   modelsJsonContents: string | null;
   pluginCatalogs: readonly PersistedPluginModelCatalog[];
 }>;
-
-type PreparedConfiguredRegistryGroup = {
-  agentFacts: PreparedModelRuntimeAgentFacts[];
-  modelsJsonContents: string | null;
-  oauthProviders: ReturnType<AuthStorage["getOAuthProviders"]>;
-  pluginCatalogs: readonly PersistedPluginModelCatalog[];
-};
 
 function prepareAgentFacts(
   input: PreparedModelRuntimeInput,
@@ -299,85 +196,17 @@ function resolvePreparedSyntheticAuth(params: {
   );
 }
 
-export function preparedModelRuntimeWorkspaceFactsKey(input: PreparedModelRuntimeInput): string {
-  return JSON.stringify({
-    // Config is the process generation. Agent-specific configured refs are projected after these
-    // workspace/plugin facts are shared.
-    config: hashRuntimeConfigValue(input.config),
-    env: hashRuntimeConfigValue(input.env ?? process.env),
-    readOnly: input.readOnly === true,
-    inheritedAuthDir: normalizedInheritedAuthDir(input),
-    skipCredentials: input.skipCredentials === true,
-    workspaceDir: input.workspaceDir,
-  });
-}
+export { preparedModelRuntimeWorkspaceFactsKey };
 
 export async function prepareWorkspaceBuildGroup(
   inputs: readonly PreparedModelRuntimeInput[],
   catalogMode: PreparedModelRuntimeCatalogMode,
 ): Promise<Awaited<ReturnType<typeof prepareWorkspaceBuildGroupUnshared>>> {
-  const input = inputs[0];
-  if (!input) {
-    throw new Error("prepared model runtime workspace group is empty");
-  }
-  const sharedBuildKey = sharedStaticWorkspaceBuildKey(input, catalogMode);
-  if (!sharedBuildKey || input.workspacePluginRootPresent === true) {
-    return await prepareWorkspaceBuildGroupUnshared(inputs, catalogMode);
-  }
-  const cached = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
-  if (cached) {
-    const materialized = materializeSharedStaticWorkspaceBuild(cached, inputs, sharedBuildKey);
-    if (materialized) {
-      return materialized;
-    }
-  }
-
-  const epoch = sharedStaticWorkspaceBuildEpoch;
-  const inflightKey = `${epoch}\0${sharedBuildKey}`;
-  const existing = sharedStaticWorkspaceBuildInflight.get(inflightKey);
-  if (existing) {
-    await existing.catch(() => undefined);
-    const published = sharedStaticWorkspaceBuilds.get(sharedBuildKey);
-    if (published) {
-      const materialized = materializeSharedStaticWorkspaceBuild(published, inputs, sharedBuildKey);
-      if (materialized) {
-        return materialized;
-      }
-    }
-  }
-
-  let resolveInflight!: () => void;
-  let rejectInflight!: (error: unknown) => void;
-  const inflight = new Promise<void>((resolve, reject) => {
-    resolveInflight = resolve;
-    rejectInflight = reject;
-  });
-  sharedStaticWorkspaceBuildInflight.set(inflightKey, inflight);
-  void inflight.catch(() => undefined);
-  try {
-    const result = await prepareWorkspaceBuildGroupUnshared(inputs, catalogMode);
-    if (
-      sharedStaticWorkspaceBuildEpoch === epoch &&
-      !result.workspaceFacts.pluginMetadataSnapshot.plugins.some(
-        (plugin) => plugin.origin === "workspace",
-      )
-    ) {
-      sharedStaticWorkspaceBuilds.set(sharedBuildKey, {
-        agentFacts: result.agentFacts,
-        workspaceFacts: result.workspaceFacts,
-        buildStats: result.buildStats,
-      });
-    }
-    resolveInflight();
-    return result;
-  } catch (error) {
-    rejectInflight(error);
-    throw error;
-  } finally {
-    if (sharedStaticWorkspaceBuildInflight.get(inflightKey) === inflight) {
-      sharedStaticWorkspaceBuildInflight.delete(inflightKey);
-    }
-  }
+  return prepareSharedStaticWorkspaceBuildGroup(
+    inputs,
+    catalogMode,
+    prepareWorkspaceBuildGroupUnshared,
+  );
 }
 
 async function prepareWorkspaceBuildGroupUnshared(
@@ -604,10 +433,8 @@ async function prepareWorkspaceBuildGroupUnshared(
 
 /** Clears request-shared static facts when the lifecycle owner is invalidated. */
 export function clearPreparedModelRuntimeSharedWorkspaceBuilds(): void {
-  sharedStaticWorkspaceBuildEpoch += 1;
-  sharedStaticWorkspaceBuilds.clear();
-  sharedStaticWorkspaceBuildInflight.clear();
-  sharedStaticConfiguredCatalogFacts.clear();
+  clearSharedStaticWorkspaceBuilds();
+  clearSharedStaticConfiguredCatalogFacts();
 }
 
 export async function prepareFullCatalogFacts(
@@ -675,221 +502,6 @@ export async function prepareFullCatalogFacts(
 
 function modelCatalogEntryKey(entry: Pick<ModelCatalogEntry, "id" | "provider">): string {
   return `${normalizeProviderId(entry.provider)}\0${entry.id.trim().toLowerCase()}`;
-}
-
-function createConfiguredModelCatalogSnapshot(params: {
-  agentFacts: PreparedModelRuntimeAgentFacts;
-  workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
-  templateModelRegistry: ModelRegistry;
-  configuredRuntimeModels: readonly PreparedConfiguredRuntimeModel[];
-}): ModelCatalogSnapshot {
-  const entries = new Map<string, ModelCatalogEntry>();
-  const addEntry = (entry: ModelCatalogEntry) => {
-    const key = modelCatalogEntryKey(entry);
-    if (!entries.has(key)) {
-      entries.set(key, entry);
-    }
-  };
-  for (const entry of params.workspaceFacts.configuredCatalogEntries) {
-    addEntry(entry);
-  }
-  for (const configured of params.configuredRuntimeModels) {
-    addEntry(toStaticCatalogEntry(configured.model));
-  }
-  for (const { value } of params.agentFacts.configuredModelRefs) {
-    const separator = value.indexOf("/");
-    if (separator <= 0 || separator >= value.length - 1) {
-      continue;
-    }
-    const provider = normalizeProviderId(value.slice(0, separator));
-    const modelId = value.slice(separator + 1).trim();
-    if (!provider || !modelId) {
-      continue;
-    }
-    const model = params.templateModelRegistry.find(provider, modelId);
-    if (model) {
-      addEntry(toStaticCatalogEntry(model));
-    }
-  }
-  const configuredEntries = [...entries.values()];
-  const staticEntries = params.configuredRuntimeModels.map(({ model }) =>
-    toStaticCatalogEntry(model),
-  );
-  return {
-    entries: configuredEntries,
-    routeVariants: configuredEntries,
-    ...(staticEntries.length > 0 ? { staticEntries } : {}),
-  };
-}
-
-function prepareConfiguredRuntimeFacts(
-  agentFacts: PreparedModelRuntimeAgentFacts,
-  workspaceFacts: PreparedModelRuntimeWorkspaceFacts,
-  sharedTemplateModelRegistry: ModelRegistry,
-): PreparedModelRuntimeCatalogFacts {
-  const { configuredRuntimeModels } = agentFacts;
-  const { inlineProviderModels } = workspaceFacts;
-  const templateModelRegistry = sharedTemplateModelRegistry;
-  return {
-    templateModelRegistry,
-    modelCatalog: createConfiguredModelCatalogSnapshot({
-      agentFacts,
-      workspaceFacts,
-      templateModelRegistry,
-      configuredRuntimeModels,
-    }),
-    configuredRuntimeModels,
-    inlineProviderModels,
-  };
-}
-
-function captureModelsJsonContents(agentDir: string): string | null {
-  try {
-    return fs.readFileSync(path.join(agentDir, "models.json"), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-}
-
-export function fingerprintPreparedRuntimeFacts(value: unknown): string {
-  return sha256Base64Url(stableStringify(value));
-}
-
-function hasSameOAuthProviderGeneration(
-  left: ReturnType<AuthStorage["getOAuthProviders"]>,
-  right: ReturnType<AuthStorage["getOAuthProviders"]>,
-): boolean {
-  // OAuth descriptors carry executable hooks. Match those hooks by identity so equivalent
-  // AuthStorage instances share built-ins without merging distinct closure generations.
-  return (
-    left.length === right.length &&
-    left.every((provider, index) => {
-      const candidate = right[index];
-      return (
-        candidate !== undefined &&
-        provider.id === candidate.id &&
-        provider.name === candidate.name &&
-        provider.usesCallbackServer === candidate.usesCallbackServer &&
-        provider.login === candidate.login &&
-        provider.refreshToken === candidate.refreshToken &&
-        provider.getApiKey === candidate.getApiKey &&
-        provider.modifyModels === candidate.modifyModels
-      );
-    })
-  );
-}
-
-function groupConfiguredRegistrySources(
-  agentFacts: readonly PreparedModelRuntimeAgentFacts[],
-): PreparedConfiguredRegistryGroup[] {
-  const groups = new Map<string, PreparedConfiguredRegistryGroup[]>();
-  for (const facts of agentFacts) {
-    const modelsJsonContents = captureModelsJsonContents(facts.input.agentDir);
-    const oauthProviders = facts.templateAuthStorage.getOAuthProviders();
-    // Generated catalogs are agent-owned. Capture only plugins needed by unresolved configured
-    // refs, then group exact bytes and OAuth behavior so publication never mixes generations.
-    const pluginCatalogs = loadPersistedPluginModelCatalogsReadOnly(
-      facts.input.agentDir,
-      facts.configuredGeneratedCatalogPluginIds,
-    );
-    const key = fingerprintPreparedRuntimeFacts({
-      credentials: facts.credentials,
-      modelsJsonContents,
-      pluginCatalogs,
-    });
-    const candidates = groups.get(key) ?? [];
-    const group = candidates.find((candidate) =>
-      hasSameOAuthProviderGeneration(candidate.oauthProviders, oauthProviders),
-    );
-    if (group) {
-      group.agentFacts.push(facts);
-    } else {
-      candidates.push({
-        agentFacts: [facts],
-        modelsJsonContents,
-        oauthProviders,
-        pluginCatalogs,
-      });
-      groups.set(key, candidates);
-    }
-  }
-  return [...groups.values()].flat();
-}
-
-export function prepareConfiguredRuntimeFactsBatch(params: {
-  agentFacts: readonly PreparedModelRuntimeAgentFacts[];
-  workspaceFacts: PreparedModelRuntimeWorkspaceFacts;
-}): {
-  catalogs: Map<PreparedModelRuntimeInput, PreparedModelRuntimeCatalogFacts>;
-  registryCount: number;
-} {
-  const catalogs = new Map<PreparedModelRuntimeInput, PreparedModelRuntimeCatalogFacts>();
-  let registryCount = 0;
-  for (const group of groupConfiguredRegistrySources(params.agentFacts)) {
-    const representative = group.agentFacts[0];
-    if (!representative) {
-      continue;
-    }
-    const sourceKey = fingerprintPreparedRuntimeFacts({
-      config: hashRuntimeConfigValue(representative.input.config),
-      agentDir: representative.input.agentDir,
-      credentials: representative.credentials,
-      modelsJsonContents: group.modelsJsonContents,
-      pluginCatalogs: group.pluginCatalogs,
-      metadata: params.workspaceFacts.pluginMetadataSnapshot.configFingerprint,
-    });
-    const cachedCatalogs = group.agentFacts.map((facts) =>
-      sharedStaticConfiguredCatalogFacts.get(
-        `${sourceKey}\0${facts.input.agentId ?? ""}\0${fingerprintPreparedRuntimeFacts(
-          facts.configuredModelRefs,
-        )}`,
-      ),
-    );
-    if (
-      cachedCatalogs.every(
-        (catalog): catalog is PreparedModelRuntimeCatalogFacts => catalog !== undefined,
-      )
-    ) {
-      for (const [index, facts] of group.agentFacts.entries()) {
-        catalogs.set(facts.input, cachedCatalogs[index]!);
-      }
-      continue;
-    }
-    // Catalog bytes, credentials, and OAuth provider behavior are identical inside this group.
-    // Parse once, then fork request auth without reopening filesystem or SQLite catalog sources.
-    const templateModelRegistry = discoverModelsFromCapturedSources(
-      representative.templateAuthStorage,
-      {
-        config: representative.input.config,
-        includePluginCatalogs: true,
-        modelsJsonContents: group.modelsJsonContents,
-        pluginCatalogs: group.pluginCatalogs,
-        pluginMetadataSnapshot: params.workspaceFacts.pluginMetadataSnapshot,
-        ...(representative.input.workspaceDir
-          ? { workspaceDir: representative.input.workspaceDir }
-          : {}),
-      },
-    );
-    registryCount += 1;
-    for (const facts of group.agentFacts) {
-      const catalogFacts = prepareConfiguredRuntimeFacts(
-        facts,
-        params.workspaceFacts,
-        templateModelRegistry,
-      );
-      catalogs.set(facts.input, catalogFacts);
-      sharedStaticConfiguredCatalogFacts.set(
-        `${sourceKey}\0${facts.input.agentId ?? ""}\0${fingerprintPreparedRuntimeFacts(
-          facts.configuredModelRefs,
-        )}`,
-        catalogFacts,
-      );
-    }
-  }
-  return { catalogs, registryCount };
 }
 
 export async function prepareAgentCatalogSource(
