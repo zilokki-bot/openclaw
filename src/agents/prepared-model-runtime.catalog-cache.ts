@@ -18,10 +18,8 @@ import type {
   PreparedModelRuntimeAgentFacts,
   PreparedModelRuntimeWorkspaceFacts,
 } from "./prepared-model-runtime.facts.js";
-import type {
-  PreparedModelRuntimeCatalogFacts,
-  PreparedModelRuntimeInput,
-} from "./prepared-model-runtime.facts.js";
+import type { PreparedModelRuntimeCatalogFacts } from "./prepared-model-runtime.facts.js";
+import type { PreparedModelRuntimeInput } from "./prepared-model-runtime.types.js";
 import { AuthStorage } from "./sessions/auth-storage.js";
 import type { ModelRegistry } from "./sessions/model-registry.js";
 import { stableStringify } from "./stable-stringify.js";
