@@ -22,6 +22,7 @@ const firstUseAttribution = vi.hoisted(() => ({
     workspaceDir?: string;
     workspacePluginRootPresent?: boolean;
     origins: string[];
+    stack?: string[];
   }>,
   authDiscoveryCalls: 0,
   capturedModelDiscoveryCalls: 0,
@@ -101,6 +102,7 @@ vi.mock("../plugins/plugin-metadata-snapshot.js", async (importOriginal) => {
               ? { workspacePluginRootPresent: args[0].workspacePluginRootPresent }
               : {}),
             origins: snapshot.plugins.map((plugin) => plugin.origin),
+            stack: new Error().stack?.split("\n").slice(2, 8),
           });
           return snapshot;
         } finally {
