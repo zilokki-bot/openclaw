@@ -64,7 +64,7 @@ function normalizeBinding(pluginId: string, input: ApprovalBoundMutationBinding)
     requester: {
       deviceId: input.requester.deviceId?.trim() || null,
       clientId: input.requester.clientId?.trim() || null,
-      deviceTokenAuth: input.requester.deviceTokenAuth === true,
+      deviceTokenAuth: input.requester.deviceTokenAuth,
     },
     expectedRevision: requireRevision(input.expectedRevision),
   };
