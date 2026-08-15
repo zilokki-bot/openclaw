@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => {
     metadataSnapshot,
     resolveAmbientCredentials: vi.fn((..._args: unknown[]) => ({})),
     discoverAuthStorage: vi.fn(() => authStorage),
+    resolveAgentDiscoveryAuthFacts: vi.fn(),
     discoverModels: vi.fn(() => modelRegistry),
     ensureOpenClawModelsJson: vi.fn(
       async (_config: unknown, _agentDir: unknown, _options?: unknown) => ({
@@ -104,10 +105,13 @@ vi.mock("../plugins/plugin-metadata-snapshot.js", () => ({
 vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: mocks.resolveAmbientCredentials,
+  resolveAgentDiscoveryAuthFacts: (...args: unknown[]) =>
+    mocks.resolveAgentDiscoveryAuthFacts(...args),
 }));
 
 vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
+  discoverAuthStorageFacts: (...args: unknown[]) => mocks.resolveAgentDiscoveryAuthFacts(...args),
   discoverAuthStorage: mocks.discoverAuthStorage,
   discoverModels: mocks.discoverModels,
   discoverModelsFromCapturedSources: mocks.discoverModels,
@@ -169,6 +173,14 @@ const { resetPreparedModelRuntimeSnapshotsForTest } =
 beforeEach(() => {
   resetPreparedModelRuntimeSnapshotsForTest();
   vi.clearAllMocks();
+  mocks.resolveAgentDiscoveryAuthFacts.mockImplementation((...args: unknown[]) => {
+    const authStorage = mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
+    return {
+      authStorage,
+      store: { version: 1, profiles: {} },
+      credentials: authStorage.getAll(),
+    };
+  });
   mocks.resolveStaticCatalogModel.mockReturnValue(undefined);
 });
 

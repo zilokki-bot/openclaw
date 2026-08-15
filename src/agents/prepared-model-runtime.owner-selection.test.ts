@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     routeVariants: [],
   })),
   discoverAuthStorage: vi.fn((..._args: unknown[]) => undefined as unknown),
+  resolveAgentDiscoveryAuthFacts: vi.fn(),
   discoverModels: vi.fn(),
   ensureOpenClawModelsJson: vi.fn(async (..._args: unknown[]) => ({
     agentDir: "/tmp/agent",
@@ -53,10 +54,13 @@ vi.mock("./agent-auth-discovery.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./agent-auth-discovery.js")>()),
   resolveAmbientAgentCredentialsForDiscovery: (...args: unknown[]) =>
     mocks.resolveAmbientCredentials(...args),
+  resolveAgentDiscoveryAuthFacts: (...args: unknown[]) =>
+    mocks.resolveAgentDiscoveryAuthFacts(...args),
 }));
 
 vi.mock("./agent-model-discovery.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./agent-model-discovery.js")>()),
+  discoverAuthStorageFacts: (...args: unknown[]) => mocks.resolveAgentDiscoveryAuthFacts(...args),
   discoverAuthStorage: (...args: unknown[]) =>
     mocks.discoverAuthStorage(...args) ?? mocks.authStorage,
   discoverModels: (...args: unknown[]) => {
@@ -145,6 +149,15 @@ describe("prepared model runtime owner selection", () => {
     mocks.configuredWorkspaces.clear();
     mocks.buildPreparedModelCatalogSnapshot.mockClear();
     mocks.discoverAuthStorage.mockReset();
+    mocks.resolveAgentDiscoveryAuthFacts.mockReset();
+    mocks.resolveAgentDiscoveryAuthFacts.mockImplementation((...args: unknown[]) => {
+      const authStorage = mocks.discoverAuthStorage(...args) ?? mocks.authStorage;
+      return {
+        authStorage,
+        store: { version: 1, profiles: {} },
+        credentials: authStorage.getAll(),
+      };
+    });
     mocks.discoverAuthStorage.mockImplementation(() => mocks.authStorage);
     mocks.discoverModels.mockClear();
     mocks.ensureOpenClawModelsJson.mockReset();
