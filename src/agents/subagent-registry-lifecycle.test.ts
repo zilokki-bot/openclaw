@@ -1972,6 +1972,45 @@ describe("subagent registry lifecycle hardening", () => {
     expect(lifecycleEventMocks.emitSessionLifecycleEvent).not.toHaveBeenCalled();
   });
 
+  it("freezes completion text only on the latest pending session generation", async () => {
+    const older = createRunEntry({
+      runId: "run-older-generation",
+      generation: 1,
+      createdAt: 1_000,
+      startedAt: 1_000,
+      endedAt: 2_000,
+      expectsCompletionMessage: true,
+    });
+    const latest = createRunEntry({
+      runId: "run-latest-generation",
+      generation: 2,
+      createdAt: 2_000,
+      startedAt: 2_000,
+      endedAt: 3_000,
+      expectsCompletionMessage: true,
+    });
+    const runs = new Map([
+      [older.runId, older],
+      [latest.runId, latest],
+    ]);
+    const persist = vi.fn();
+    const controller = createLifecycleController({
+      entry: latest,
+      runs,
+      persist,
+      captureSubagentCompletionReply: vi.fn(async () => "latest completion reply"),
+    });
+
+    await expect(controller.refreshFrozenResultFromSession(latest.childSessionKey)).resolves.toBe(
+      true,
+    );
+
+    expect(older.completion?.resultText).not.toBe("latest completion reply");
+    expect(latest.completion?.resultText).toBe("latest completion reply");
+    expect(persist).toHaveBeenCalledWith(latest.runId);
+    expect(persist).not.toHaveBeenCalledWith(older.runId);
+  });
+
   it("rechecks session ownership inside a delayed timing write", async () => {
     const entry = createRunEntry({ generation: 1, createdAt: 1_000, startedAt: 1_000 });
     const runs = new Map([[entry.runId, entry]]);
@@ -3653,6 +3692,43 @@ describe("requester settle wake trigger", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(settleWake).toHaveBeenCalledTimes(2);
       expect(entry.requesterSettleWake).toBeUndefined();
+    } finally {
+      controller.clearScheduledResumeTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets a fresh yielded generation preempt an older requester wake timer", async () => {
+    const entry = createRunEntry({
+      endedAt: 4_000,
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 1,
+        nextAttemptAt: 30_000,
+        rearmGeneration: 1,
+      },
+    });
+    const settleWake = vi.fn(async () => false);
+    const controller = createLifecycleController({
+      entry,
+      maybeWakeRequesterAfterAllChildrenSettled: settleWake,
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      controller.resumeRequesterSettleWake(entry.runId, entry);
+      entry.requesterSettleWake = {
+        ...entry.requesterSettleWake,
+        nextAttemptAt: 10_000,
+        rearmGeneration: 2,
+      };
+      controller.resumeRequesterSettleWake(entry.runId, entry);
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(settleWake).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settleWake).toHaveBeenCalledOnce();
     } finally {
       controller.clearScheduledResumeTimers();
       vi.useRealTimers();

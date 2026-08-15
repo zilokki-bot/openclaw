@@ -1990,20 +1990,9 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     expect(sessionStore["agent:main:main"]?.restartRecoveryDeliveryRunId).toBe("session-1");
   });
 
-  it.each([
-    {
-      name: "persists only the CLI assistant reply after the runner persists the current user turn",
-      runner: "cli",
-      canonicalUserRecorder: true,
-      embeddedAssistantGapFill: false,
-    },
-    {
-      name: "persists the full embedded turn when no canonical user recorder exists",
-      runner: "embedded",
-      canonicalUserRecorder: false,
-      embeddedAssistantGapFill: true,
-    },
-  ])("$name", async ({ runner, canonicalUserRecorder, embeddedAssistantGapFill }) => {
+  it("persists only the CLI assistant reply after the runner persists the current user turn", async () => {
+    const runner = "cli";
+    const canonicalUserRecorder = true;
     type AttemptCall = {
       onUserMessagePersisted?: () => void;
     };
@@ -2047,8 +2036,30 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       });
     }
     expectRecordFields(mockCallArg(state.persistCliTurnTranscriptMock), {
-      embeddedAssistantGapFill,
+      embeddedAssistantGapFill: undefined,
     });
+  });
+
+  it("does not re-persist embedded assistant output after attempt cleanup", async () => {
+    setupSingleAttemptFallback();
+    setupStoredSession();
+    const result = makeSuccessResult("openai", "gpt-5.4") as ReturnType<
+      typeof makeSuccessResult
+    > & {
+      meta: Record<string, unknown> & { executionTrace: Record<string, unknown> };
+    };
+    result.meta.executionTrace = {
+      runner: "embedded",
+      fallbackUsed: false,
+      winnerProvider: "openai",
+      winnerModel: "gpt-5.4",
+    };
+    result.meta.finalAssistantVisibleText = "final";
+    state.runAgentAttemptMock.mockResolvedValue(result);
+
+    await runBasicAgentCommand();
+
+    expect(state.persistCliTurnTranscriptMock).not.toHaveBeenCalled();
   });
 
   it("does not treat backend CLI session id as OpenClaw session identity", async () => {
