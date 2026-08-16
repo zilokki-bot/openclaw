@@ -1832,6 +1832,92 @@ describe("Codex supervision catalog", () => {
     expect(result.hosts[0]?.sessions).toHaveLength(1);
   });
 
+  it("scales the bounded lookup by configured supervision agents", async () => {
+    const control = createControl({
+      listPage: vi.fn(async () => ({
+        sessions: [{ threadId: "source-thread", status: "active", archived: false }],
+      })),
+    });
+    const { runtime, entries, getSessionEntry } = createRuntime();
+    const multiAgentConfig = {
+      agents: { list: [{ id: "main" }, { id: "second" }, { id: "third" }] },
+    } as unknown as OpenClawConfig;
+    const sessionKey = `agent:third:${supervisionSessionInputKey("source-thread")}`;
+    const sessionId = "openclaw-session-third";
+    entries.push({
+      sessionKey,
+      entry: adoptedEntry({ sourceThreadId: "source-thread", sessionId }),
+    });
+    const bindingStore = createCodexTestBindingStore();
+    await seedSupervisionBinding({
+      bindingStore,
+      sessionId,
+      sessionKey,
+      sourceThreadId: "source-thread",
+    });
+
+    const result = await listCodexSessionCatalog({
+      bindingStore,
+      config: multiAgentConfig,
+      runtime,
+      control,
+    });
+
+    // An adoption owned by a non-default agent must still be found, and the
+    // cost stays threads x agents rather than a walk over the whole store.
+    expect(result.hosts[0]?.sessions[0]).toMatchObject({ threadId: "source-thread", sessionKey });
+    expect(getSessionEntry.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(getSessionEntry.mock.calls.map(([getParams]) => getParams.agentId)).toEqual(
+      expect.arrayContaining(["main", "second", "third"]),
+    );
+  });
+
+  it("fails the host when two agents adopt the same thread on the bounded path", async () => {
+    const control = createControl({
+      listPage: vi.fn(async () => ({
+        sessions: [{ threadId: "source-thread", status: "active", archived: false }],
+      })),
+    });
+    const { runtime, entries } = createRuntime();
+    const multiAgentConfig = {
+      agents: { list: [{ id: "main" }, { id: "second" }] },
+    } as unknown as OpenClawConfig;
+    const bindingStore = createCodexTestBindingStore();
+    for (const agentId of ["main", "second"]) {
+      const sessionKey = `agent:${agentId}:${supervisionSessionInputKey("source-thread")}`;
+      const sessionId = `openclaw-session-${agentId}`;
+      entries.push({
+        sessionKey,
+        entry: adoptedEntry({ sourceThreadId: "source-thread", sessionId }),
+      });
+      await seedSupervisionBinding({
+        bindingStore,
+        sessionId,
+        sessionKey,
+        sourceThreadId: "source-thread",
+      });
+    }
+
+    const result = await listCodexSessionCatalog({
+      bindingStore,
+      config: multiAgentConfig,
+      runtime,
+      control,
+    });
+
+    // listGatewayHost converts any throw into a disconnected host, and the error
+    // is sanitized to a generic code, so a collision is observable only as a
+    // failed host — never as an adopted row. Same shape the unbounded path gave,
+    // since both throw from inside the same try. Guarding the shape is what
+    // keeps a collision from silently becoming a normal listing.
+    expect(result.hosts[0]).toMatchObject({
+      hostId: CODEX_LOCAL_SESSION_HOST_ID,
+      connected: false,
+      sessions: [],
+    });
+    expect(result.hosts[0]?.error).toMatchObject({ code: "APP_SERVER_UNAVAILABLE" });
+  });
+
   it("does not expose an adopted marker while generic initialization remains pending", async () => {
     const control = createControl({
       listPage: vi.fn(async () => ({
