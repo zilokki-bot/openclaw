@@ -16,7 +16,13 @@ import { assertValidParams } from "./validation.js";
  * RPC adapter for invoking gateway-visible tools from connected clients.
  */
 function resolveRpcErrorCode(params: {
-  type: "invalid_request" | "not_found" | "tool_call_blocked" | "tool_error";
+  type:
+    | "invalid_request"
+    | "not_found"
+    | "tool_call_blocked"
+    | "tool_error"
+    | "gateway_transport_timeout"
+    | "gateway_transport_closed";
   requiresApproval?: boolean;
 }): string {
   if (params.requiresApproval) {
@@ -31,6 +37,10 @@ function resolveRpcErrorCode(params: {
       return "forbidden";
     case "tool_error":
       return "internal_error";
+    case "gateway_transport_timeout":
+    case "gateway_transport_closed":
+      // Loopback gateway RPC backpressure: retryable, not an internal tool defect.
+      return "unavailable";
   }
   return "internal_error";
 }

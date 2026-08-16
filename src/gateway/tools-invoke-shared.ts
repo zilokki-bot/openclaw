@@ -29,6 +29,7 @@ import {
   isAgentHarnessSessionKey,
   isAgentHarnessSessionStoreEntryProtected,
 } from "../sessions/agent-harness-session-key.js";
+import { GatewayTransportError } from "./call.js";
 import { canonicalizeSessionKeyForAgent } from "./session-store-key.js";
 import { resolveGatewayScopedTools } from "./tool-resolution.js";
 
@@ -46,7 +47,13 @@ export type ToolsInvokeInput = {
   dryRun?: unknown;
 };
 
-type ToolsInvokeErrorType = "invalid_request" | "not_found" | "tool_call_blocked" | "tool_error";
+type ToolsInvokeErrorType =
+  | "invalid_request"
+  | "not_found"
+  | "tool_call_blocked"
+  | "tool_error"
+  | "gateway_transport_timeout"
+  | "gateway_transport_closed";
 
 type ToolsInvokeOutcome =
   | {
@@ -58,12 +65,13 @@ type ToolsInvokeOutcome =
     }
   | {
       ok: false;
-      status: 400 | 403 | 404 | 500;
+      status: 400 | 403 | 404 | 500 | 503;
       toolName: string;
       error: {
         type: ToolsInvokeErrorType;
         message: string;
         requiresApproval?: boolean;
+        retryable?: boolean;
       };
     };
 
@@ -343,6 +351,22 @@ export async function invokeGatewayTool(params: {
     }
     if (!params.signal?.aborted) {
       logWarn(`tools-invoke: tool execution failed: ${String(err)}`);
+    }
+    if (err instanceof GatewayTransportError) {
+      // Session tools call the gateway over a loopback RPC; a timeout or closed
+      // socket there is backpressure/unavailability, not a defect of the tool.
+      // Surface it as a retryable 503 with the real reason instead of hiding it
+      // behind the generic 500 "tool execution failed".
+      return {
+        ok: false,
+        status: 503,
+        toolName,
+        error: {
+          type: err.kind === "timeout" ? "gateway_transport_timeout" : "gateway_transport_closed",
+          message: getErrorMessage(err) || `gateway transport ${err.kind}`,
+          retryable: true,
+        },
+      };
     }
     return {
       ok: false,
