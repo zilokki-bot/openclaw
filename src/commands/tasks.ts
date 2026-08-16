@@ -93,7 +93,7 @@ type GatewayTaskCancelResult = {
 async function tryCancelGatewayOwnedTaskViaGateway(
   task: TaskRecord,
 ): Promise<GatewayTaskCancelResult | null> {
-  if (task.runtime !== "cron" && task.runtime !== "acp") {
+  if (task.runtime !== "cron" && task.runtime !== "acp" && task.runtime !== "cli") {
     return null;
   }
   try {
