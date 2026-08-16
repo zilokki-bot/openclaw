@@ -6,6 +6,7 @@ import type {
   SessionTranscriptWriteLockTarget,
 } from "../../../config/sessions/transcript-write-context.js";
 import { withOwnedSessionTranscriptWrites } from "../../../config/sessions/transcript-write-context.js";
+import { resolveGlobalSingleton } from "../../../shared/global-singleton.js";
 import { isSessionWriteLockAcquireError } from "../../session-write-lock-error.js";
 import type { acquireSessionWriteLock } from "../../session-write-lock.js";
 import type {
@@ -23,6 +24,119 @@ type LockOptions = Omit<SessionKeyLockOptions, "targetKind"> & {
   targetKind?: "session-key";
 };
 const PROMPT_DISPOSE_SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * Concurrent attempts on one agent+session identity each build their own lock
+ * controller, so no controller can see the other's prompt in flight. Without a
+ * process-wide turn queue the second submission releases the session lock while
+ * the first prompt still owns the transcript. The queue is keyed by identity and
+ * lives on globalThis so every runner instance in this process shares it.
+ */
+type PromptSubmissionQueueState = {
+  queues: Map<string, Promise<void>>;
+};
+
+const EMBEDDED_ATTEMPT_PROMPT_QUEUE_STATE_KEY = Symbol.for(
+  "openclaw.embeddedAttemptPromptQueueState",
+);
+
+const promptSubmissionQueueState = resolveGlobalSingleton(
+  EMBEDDED_ATTEMPT_PROMPT_QUEUE_STATE_KEY,
+  (): PromptSubmissionQueueState => ({
+    queues: new Map<string, Promise<void>>(),
+  }),
+);
+
+export function resetEmbeddedAttemptPromptSubmissionQueueForTest(): void {
+  promptSubmissionQueueState.queues.clear();
+}
+
+function resolvePromptSubmissionQueueKey(params: {
+  agentId?: string;
+  sessionKey?: string;
+}): string | undefined {
+  const agentId = params.agentId?.trim();
+  const sessionKey = params.sessionKey?.trim();
+  if (!agentId || !sessionKey) {
+    // An incomplete identity cannot be serialized against anything meaningful;
+    // queueing everything under one bucket would stall unrelated sessions.
+    return undefined;
+  }
+  return `${agentId}\0${sessionKey}`;
+}
+
+function waitForPromptSubmissionTurn(params: {
+  previous: Promise<void>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const signal = params.signal;
+  if (!signal) {
+    return params.previous.catch(() => undefined);
+  }
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    const settle = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    // A failed predecessor still hands over its turn: the queue orders
+    // submissions, it does not propagate their outcomes.
+    params.previous.then(settle, settle);
+  });
+}
+
+async function runWithPromptSubmissionQueue<T>(
+  params: {
+    agentId?: string;
+    sessionKey?: string;
+    signal?: AbortSignal;
+  },
+  run: () => Promise<T>,
+): Promise<T> {
+  const queueKey = resolvePromptSubmissionQueueKey(params);
+  if (!queueKey) {
+    return await run();
+  }
+  const previous = promptSubmissionQueueState.queues.get(queueKey) ?? Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const tail = previous.catch(() => undefined).then(() => current);
+  promptSubmissionQueueState.queues.set(queueKey, tail);
+  void tail.finally(() => {
+    // Only the newest waiter may clear the slot, or a late finisher would drop
+    // a queue another submission is already waiting behind.
+    if (promptSubmissionQueueState.queues.get(queueKey) === tail) {
+      promptSubmissionQueueState.queues.delete(queueKey);
+    }
+  });
+  let released = false;
+  const releaseQueue = (): void => {
+    if (released) {
+      return;
+    }
+    released = true;
+    releaseCurrent();
+  };
+  try {
+    await waitForPromptSubmissionTurn({ previous, signal: params.signal });
+  } catch (error) {
+    releaseQueue();
+    throw error;
+  }
+  try {
+    return await run();
+  } finally {
+    releaseQueue();
+  }
+}
 
 export type EmbeddedAttemptSessionFileOwner = {
   sessionFileKey: string;
@@ -509,6 +623,8 @@ function attachPromptSettlementError(promptError: unknown, settlementError: unkn
 
 export function installPromptSubmissionLockRelease(params: {
   session: unknown;
+  agentId?: string;
+  abortSignal?: AbortSignal;
   releaseForPrompt: () => Promise<void>;
   reacquireAfterPrompt: () => Promise<void>;
   sessionFile?: string;
@@ -531,50 +647,59 @@ export function installPromptSubmissionLockRelease(params: {
   }
   const originalStreamFn = currentStreamFn.bind(agent);
   const wrappedStreamFn: PromptReleaseStreamFn = async (...args: unknown[]) => {
-    // The internal agent runtime routes transcript mutations through the
-    // lifecycle lock; it has no separate SDK event queue to drain.
-    await params.releaseForPrompt();
-    let promptFailed = false;
-    let promptError: unknown;
-    let promptResult: unknown;
-    try {
-      if (params.sessionFile && params.withSessionWriteLock) {
-        promptResult = await withOwnedSessionTranscriptWrites(
-          {
-            sessionFile: params.sessionFile,
-            sessionKey: params.sessionKey,
-            sessionTarget: params.sessionTarget,
-            withSessionWriteLock: params.withSessionWriteLock,
-            canAdvanceSessionEntryCache: params.canAdvanceSessionEntryCache,
-            publishSessionFileSnapshot: params.publishSessionFileSnapshot,
-          },
-          async () => await originalStreamFn(...args),
-        );
-      } else {
-        promptResult = await originalStreamFn(...args);
-      }
-    } catch (error) {
-      promptFailed = true;
-      promptError = error;
-    }
-    let settlementFailed = false;
-    let settlementError: unknown;
-    try {
-      await settlePromptSubmission(params);
-    } catch (error) {
-      settlementFailed = true;
-      settlementError = error;
-    }
-    if (promptFailed) {
-      if (settlementFailed) {
-        attachPromptSettlementError(promptError, settlementError);
-      }
-      throw promptError;
-    }
-    if (settlementFailed) {
-      throw settlementError;
-    }
-    return promptResult;
+    return await runWithPromptSubmissionQueue(
+      {
+        agentId: params.agentId ?? params.sessionTarget?.agentId,
+        sessionKey: params.sessionKey ?? params.sessionTarget?.sessionKey,
+        signal: params.abortSignal,
+      },
+      async () => {
+        // The internal agent runtime routes transcript mutations through the
+        // lifecycle lock; it has no separate SDK event queue to drain.
+        await params.releaseForPrompt();
+        let promptFailed = false;
+        let promptError: unknown;
+        let promptResult: unknown;
+        try {
+          if (params.sessionFile && params.withSessionWriteLock) {
+            promptResult = await withOwnedSessionTranscriptWrites(
+              {
+                sessionFile: params.sessionFile,
+                sessionKey: params.sessionKey,
+                sessionTarget: params.sessionTarget,
+                withSessionWriteLock: params.withSessionWriteLock,
+                canAdvanceSessionEntryCache: params.canAdvanceSessionEntryCache,
+                publishSessionFileSnapshot: params.publishSessionFileSnapshot,
+              },
+              async () => await originalStreamFn(...args),
+            );
+          } else {
+            promptResult = await originalStreamFn(...args);
+          }
+        } catch (error) {
+          promptFailed = true;
+          promptError = error;
+        }
+        let settlementFailed = false;
+        let settlementError: unknown;
+        try {
+          await settlePromptSubmission(params);
+        } catch (error) {
+          settlementFailed = true;
+          settlementError = error;
+        }
+        if (promptFailed) {
+          if (settlementFailed) {
+            attachPromptSettlementError(promptError, settlementError);
+          }
+          throw promptError;
+        }
+        if (settlementFailed) {
+          throw settlementError;
+        }
+        return promptResult;
+      },
+    );
   };
   wrappedStreamFn.openclawSessionLockPromptReleaseInstalled = true;
   agent.streamFn = wrappedStreamFn;
