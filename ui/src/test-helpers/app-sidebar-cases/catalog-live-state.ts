@@ -85,7 +85,16 @@ describe("AppSidebar session catalog pagination", () => {
   it("sheds expanded-page replay and backs off when the catalog list is slow", async () => {
     vi.useFakeTimers();
     try {
-      let catalogs: SessionCatalog[] = [];
+      // The host must already hold expanded rows, otherwise there is nothing to
+      // preserve and the assertions below would pass on a data-losing build.
+      const expanded = catalogPage(
+        [
+          { threadId: "thread-1", name: "First page" },
+          { threadId: "thread-2", name: "Second page" },
+        ],
+        "cursor-2",
+      );
+      let catalogs: SessionCatalog[] = expanded.catalogs;
       const request = vi.fn(async (_method: string, requestParams: Record<string, unknown>) => {
         if (requestParams.cursors) {
           return catalogPage([{ threadId: "thread-2", name: "Second page" }]);
@@ -121,6 +130,15 @@ describe("AppSidebar session catalog pagination", () => {
 
       // The expanded page must not be replayed: only the initial list ran.
       expect(request.mock.calls.some(([, callParams]) => callParams.cursors)).toBe(false);
+
+      // Shedding the replay must not shed the rows already on screen, nor the
+      // cursor that a later manual load-more depends on.
+      const shedHost = catalogs[0]?.hosts[0];
+      expect(shedHost?.sessions.map((session) => session.threadId)).toEqual([
+        "thread-1",
+        "thread-2",
+      ]);
+      expect(shedHost?.nextCursor).toBe("cursor-2");
 
       // And the next poll must be pushed out past both normal cadences.
       await vi.advanceTimersByTimeAsync(30_000);
