@@ -326,6 +326,14 @@ function createRuntime(
     summary.entry = next;
     return next;
   });
+  const listSessionEntries = vi.fn((listParams) => {
+    const agentPrefix = listParams?.agentId ? `agent:${listParams.agentId}:` : undefined;
+    return entries.filter(({ sessionKey }) => !agentPrefix || sessionKey.startsWith(agentPrefix));
+  });
+  const getSessionEntry = vi.fn(
+    (getParams: { agentId?: string; sessionKey: string }) =>
+      entries.find(({ sessionKey }) => sessionKey === getParams.sessionKey)?.entry,
+  );
   const runtime = {
     nodes: {
       list: vi.fn(async () => ({ nodes: params.nodes ?? [] })),
@@ -334,17 +342,20 @@ function createRuntime(
     agent: {
       session: {
         createSessionEntry,
-        listSessionEntries: vi.fn((listParams) => {
-          const agentPrefix = listParams?.agentId ? `agent:${listParams.agentId}:` : undefined;
-          return entries.filter(
-            ({ sessionKey }) => !agentPrefix || sessionKey.startsWith(agentPrefix),
-          );
-        }),
+        getSessionEntry,
+        listSessionEntries,
         patchSessionEntry,
       },
     },
   } as unknown as PluginRuntime;
-  return { runtime, entries, createSessionEntry, patchSessionEntry };
+  return {
+    runtime,
+    entries,
+    createSessionEntry,
+    getSessionEntry,
+    listSessionEntries,
+    patchSessionEntry,
+  };
 }
 
 function archiveTestSession(params: {
@@ -1756,6 +1767,69 @@ describe("Codex supervision catalog", () => {
       status: "idle",
       archived: false,
     });
+  });
+
+  it("looks up adopted sessions only for threads on the current page", async () => {
+    const control = createControl({
+      listPage: vi.fn(async () => ({
+        sessions: [{ threadId: "source-thread", status: "active", archived: false }],
+      })),
+    });
+    const { runtime, entries, getSessionEntry } = createRuntime();
+    const sessionKey = supervisionSessionKey("source-thread");
+    const sessionId = "openclaw-session-existing";
+    entries.push({
+      sessionKey,
+      entry: adoptedEntry({ sourceThreadId: "source-thread", sessionId }),
+    });
+    // Unrelated adoptions must not be walked: the cost of listing one page has
+    // to stay bounded by the page, not by how many sessions the store holds.
+    const bindingStore = createCodexTestBindingStore();
+    for (let index = 0; index < 25; index += 1) {
+      const otherThreadId = `other-thread-${index}`;
+      const otherSessionKey = supervisionSessionKey(otherThreadId);
+      const otherSessionId = `openclaw-session-other-${index}`;
+      entries.push({
+        sessionKey: otherSessionKey,
+        entry: adoptedEntry({ sourceThreadId: otherThreadId, sessionId: otherSessionId }),
+      });
+      await seedSupervisionBinding({
+        bindingStore,
+        sessionId: otherSessionId,
+        sessionKey: otherSessionKey,
+        sourceThreadId: otherThreadId,
+      });
+    }
+    await seedSupervisionBinding({
+      bindingStore,
+      sessionId,
+      sessionKey,
+      sourceThreadId: "source-thread",
+    });
+
+    const result = await listCodexSessionCatalog({
+      bindingStore,
+      config,
+      runtime,
+      control,
+    });
+
+    expect(result.hosts[0]?.sessions[0]).toMatchObject({
+      threadId: "source-thread",
+      sessionKey,
+    });
+    expect(getSessionEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey, readConsistency: "latest" }),
+    );
+    // One page thread times one supervision agent — not one read per stored
+    // session. With 26 adoptions on disk an unbounded walk would blow past this.
+    expect(getSessionEntry.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(
+      getSessionEntry.mock.calls.every(([getParams]) => getParams.sessionKey === sessionKey),
+    ).toBe(true);
+    // The node host still enumerates by design (out of scope here), so this only
+    // asserts that no unrelated adoption leaked into the gateway host rows.
+    expect(result.hosts[0]?.sessions).toHaveLength(1);
   });
 
   it("does not expose an adopted marker while generic initialization remains pending", async () => {

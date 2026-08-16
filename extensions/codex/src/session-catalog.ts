@@ -557,11 +557,11 @@ async function listGatewayHost(params: {
         ...(params.query.search ? { searchTerm: params.query.search } : {}),
       }),
     );
-    const adoptedSessions = await listAdoptedSessionEntries({
+    const adoptedSessions = await listAdoptedSessionEntriesForThreads({
       bindingStore: params.bindingStore,
       config: params.config,
       runtime: params.runtime,
-      sessionEntries: params.sessionEntries,
+      threadIds: page.sessions.map((session) => session.threadId),
     });
     return {
       hostId: CODEX_LOCAL_SESSION_HOST_ID,
@@ -847,6 +847,96 @@ function isAdoptionSessionKeyForThread(sessionKey: string, threadId: string): bo
 }
 
 type CodexSupervisionMarker = { sourceThreadId: string };
+
+function agentQualifiedAdoptionSessionKey(agentId: string, threadId: string): string {
+  return `agent:${agentId}:${adoptionSessionKey(threadId)}`;
+}
+
+/**
+ * Validates one candidate adoption read by its exact key. Mirrors the filters of
+ * listAdoptedSessionEntries so both paths accept the same entries; the only
+ * difference is how the candidate was found.
+ */
+async function readAdoptedSessionEntry(params: {
+  bindingStore: CodexAppServerBindingStore;
+  config?: OpenClawConfig;
+  agentId: string;
+  entry: ReturnType<PluginRuntime["agent"]["session"]["getSessionEntry"]>;
+  sessionKey: string;
+  sourceThreadId: string;
+}): Promise<AdoptedSessionEntry | undefined> {
+  const entry = params.entry;
+  if (
+    !entry ||
+    entry.initializationPending === true ||
+    entry.agentHarnessId !== "codex" ||
+    entry.modelSelectionLocked !== true ||
+    adoptionSessionKeyRest(params.sessionKey) !== adoptionSessionKey(params.sourceThreadId)
+  ) {
+    return undefined;
+  }
+  const sessionId = entry.sessionId?.trim();
+  if (!sessionId) {
+    return undefined;
+  }
+  const binding = await params.bindingStore.read(
+    sessionBindingIdentity({ sessionId, sessionKey: params.sessionKey, config: params.config }),
+  );
+  const boundThreadId = binding?.threadId.trim();
+  if (
+    binding?.connectionScope !== "supervision" ||
+    !boundThreadId ||
+    binding.supervisionSourceThreadId?.trim() !== params.sourceThreadId
+  ) {
+    return undefined;
+  }
+  return { key: params.sessionKey, sessionId, agentId: params.agentId, boundThreadId };
+}
+
+/**
+ * Bounded counterpart of listAdoptedSessionEntries: the adoption session key is
+ * derived from the thread id, so one listed page costs threads x supervision
+ * agents point reads instead of a walk over every stored session.
+ */
+async function listAdoptedSessionEntriesForThreads(params: {
+  bindingStore: CodexAppServerBindingStore;
+  config?: OpenClawConfig;
+  runtime: PluginRuntime;
+  threadIds: readonly string[];
+}): Promise<Map<string, AdoptedSessionEntry>> {
+  const adopted = new Map<string, AdoptedSessionEntry>();
+  const threadIds = [
+    ...new Set(params.threadIds.map((threadId) => threadId.trim()).filter(Boolean)),
+  ];
+  if (threadIds.length === 0) {
+    return adopted;
+  }
+  for (const sourceThreadId of threadIds) {
+    for (const agentId of listSupervisionAgentIds(params.config ?? {})) {
+      const sessionKey = agentQualifiedAdoptionSessionKey(agentId, sourceThreadId);
+      const candidate = await readAdoptedSessionEntry({
+        bindingStore: params.bindingStore,
+        config: params.config,
+        agentId,
+        entry: params.runtime.agent.session.getSessionEntry({
+          agentId,
+          readConsistency: "latest",
+          sessionKey,
+        }),
+        sessionKey,
+        sourceThreadId,
+      });
+      if (!candidate) {
+        continue;
+      }
+      if (adopted.has(sourceThreadId)) {
+        throw new Error(`multiple OpenClaw sessions adopt Codex thread ${sourceThreadId}`);
+      }
+      adopted.set(sourceThreadId, candidate);
+    }
+  }
+  return adopted;
+}
 
 async function listAdoptedSessionEntries(params: {
   bindingStore: CodexAppServerBindingStore;
