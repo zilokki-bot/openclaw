@@ -12,6 +12,7 @@ import {
   formatMigrationPluginSelectionHint,
   getDefaultMigrationPluginSelectionValues,
   getSelectableMigrationPluginItems,
+  getSelectableMigrationSkillItems,
   getDefaultMigrationSkillSelectionValues,
   MIGRATION_SELECTION_TOGGLE_ALL_OFF,
   MIGRATION_SELECTION_TOGGLE_ALL_ON,
@@ -27,13 +28,14 @@ const MIGRATION_NOT_SELECTED_REASON = "not selected for migration";
 function skillItem(params: {
   id: string;
   name: string;
+  action?: MigrationItem["action"];
   status?: MigrationItem["status"];
   reason?: string;
 }): MigrationItem {
   return {
     id: params.id,
     kind: "skill",
-    action: "copy",
+    action: params.action ?? "copy",
     status: params.status ?? "planned",
     source: `/tmp/codex/skills/${params.name}`,
     target: `/tmp/openclaw/workspace/skills/${params.name}`,
@@ -201,6 +203,31 @@ describe("applyMigrationItemSelection", () => {
 });
 
 describe("applyMigrationSkillSelection", () => {
+  it("selects Claude-created skills passed through the shared CLI selector", () => {
+    const selected = applyMigrationSkillSelection(
+      plan([
+        skillItem({
+          id: "skill:claude-command-design-review",
+          name: "claude-command-design-review",
+          action: "create",
+        }),
+        skillItem({ id: "skill:codex-helper", name: "codex-helper" }),
+      ]),
+      ["claude-command-design-review"],
+    );
+
+    expect(getSelectableMigrationSkillItems(selected).map((item) => item.id)).toEqual([
+      "skill:claude-command-design-review",
+    ]);
+    expectItemStatus(selected.items, "skill:claude-command-design-review", "planned");
+    expectItemStatus(
+      selected.items,
+      "skill:codex-helper",
+      "skipped",
+      MIGRATION_NOT_SELECTED_REASON,
+    );
+  });
+
   it("keeps selected skills and skips unselected skill copy items", () => {
     const selected = applyMigrationSkillSelection(
       plan([

@@ -181,7 +181,7 @@ export function getSelectableMigrationSkillItems(plan: MigrationPlan): Migration
   return plan.items.filter(
     (item) =>
       item.kind === "skill" &&
-      item.action === "copy" &&
+      (item.action === "copy" || item.action === "create") &&
       (item.status === "planned" || item.status === "conflict"),
   );
 }
