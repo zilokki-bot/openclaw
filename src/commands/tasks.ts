@@ -460,6 +460,48 @@ export async function tasksNotifyCommand(
 }
 
 /** Cancels a detached task run by lookup token. */
+/** Resumes a suspended final delivery so its stored result reaches the requester. */
+export async function tasksRedeliverCommand(
+  opts: { json?: boolean; lookup: string },
+  runtime: RuntimeEnv,
+) {
+  const task = reconcileTaskLookupToken(opts.lookup);
+  if (!task) {
+    runtime.error(formatTaskLookupMiss(opts.lookup));
+    runtime.exit(1);
+    return;
+  }
+  // A suspended delivery is held by the run record, not the task record: the
+  // result is frozen in its payload. Without a runId there is nothing to resume.
+  const runId = normalizeOptionalString(task.runId);
+  if (!runId) {
+    runtime.error(
+      `Task ${task.taskId} has no run id, so there is no suspended delivery to resume.`,
+    );
+    runtime.exit(1);
+    return;
+  }
+  const { listSuspendedSubagentDeliveries, resumeSuspendedSubagentDelivery } =
+    await import("../agents/subagent-registry.js");
+  const resumed = resumeSuspendedSubagentDelivery(runId);
+  if (opts.json) {
+    runtime.log(JSON.stringify({ taskId: task.taskId, runId, resumed }, null, 2));
+    return;
+  }
+  if (!resumed) {
+    // Separate "nothing to resume" from "resumed": a silent success on a no-op
+    // reads as a delivery that never happened. Showing what is still waiting
+    // gives the operator somewhere to go next.
+    const waiting = listSuspendedSubagentDeliveries().length;
+    runtime.error(
+      `No suspended delivery for run ${runId}; nothing was resumed. Delivery status: ${task.deliveryStatus}. Suspended deliveries waiting: ${waiting}.`,
+    );
+    runtime.exit(1);
+    return;
+  }
+  runtime.log(`Resumed suspended delivery for run ${runId} (task ${task.taskId}).`);
+}
+
 export async function tasksCancelCommand(opts: { lookup: string }, runtime: RuntimeEnv) {
   const task = reconcileTaskLookupToken(opts.lookup);
   if (!task) {

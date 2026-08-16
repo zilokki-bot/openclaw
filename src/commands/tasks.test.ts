@@ -29,6 +29,7 @@ import type { TaskSystemAuditCode, TaskSystemAuditSeverity } from "./tasks-audit
 import {
   tasksAuditCommand,
   tasksCancelCommand,
+  tasksRedeliverCommand,
   tasksListCommand,
   tasksMaintenanceCommand,
   tasksShowCommand,
@@ -346,6 +347,51 @@ describe("tasks commands", () => {
       );
       expect(runtime.error).not.toHaveBeenCalled();
       expect(runtime.exit).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reports nothing to resume instead of a silent success", async () => {
+    await withTaskCommandStateDir(async () => {
+      const task = createTaskRecord({
+        runtime: "cli",
+        ownerKey: "agent:analyst:subagent:redeliver",
+        scopeKind: "session",
+        childSessionKey: "agent:analyst:subagent:redeliver",
+        runId: "redeliver-run-1",
+        task: "Resume a suspended delivery",
+        status: "ended",
+        deliveryStatus: "not_applicable",
+        notifyPolicy: "silent",
+      });
+      const runtime = createRuntime();
+
+      await tasksRedeliverCommand({ lookup: task.taskId }, runtime);
+
+      // A no-op must not read as a delivery that happened.
+      expect(runtime.log).not.toHaveBeenCalled();
+      expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("nothing was resumed"));
+      expect(runtime.exit).toHaveBeenCalledWith(1);
+    });
+  });
+
+  it("refuses to resume a task that carries no run id", async () => {
+    await withTaskCommandStateDir(async () => {
+      const task = createTaskRecord({
+        runtime: "cli",
+        ownerKey: "agent:analyst:subagent:norun",
+        scopeKind: "session",
+        childSessionKey: "agent:analyst:subagent:norun",
+        task: "No run id",
+        status: "ended",
+        deliveryStatus: "not_applicable",
+        notifyPolicy: "silent",
+      });
+      const runtime = createRuntime();
+
+      await tasksRedeliverCommand({ lookup: task.taskId }, runtime);
+
+      expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("no run id"));
+      expect(runtime.exit).toHaveBeenCalledWith(1);
     });
   });
 
