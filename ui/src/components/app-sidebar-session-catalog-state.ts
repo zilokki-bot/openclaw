@@ -87,6 +87,8 @@ export async function refetchExpandedSessionCatalogPages(params: {
   agentId: string;
   pageDepths: ReadonlyMap<string, number>;
   isCurrent: () => boolean;
+  /** Shed the cursor replay while the gateway is already answering slowly. */
+  skipExpandedReplay?: boolean;
 }): Promise<SessionCatalog[]> {
   const previousCatalogs = new Map(params.previousCatalogs.map((catalog) => [catalog.id, catalog]));
   return Promise.all(
@@ -102,7 +104,9 @@ export async function refetchExpandedSessionCatalogPages(params: {
             return host;
           }
           const previous = previousHosts.get(host.hostId);
-          if (host.error) {
+          if (host.error || params.skipExpandedReplay) {
+            // Keeping the rows already on screen costs nothing; replaying every
+            // expanded page is exactly the work a slow gateway cannot absorb.
             return preserveExpandedCatalogHost(host, previous);
           }
           let sessions = host.sessions;

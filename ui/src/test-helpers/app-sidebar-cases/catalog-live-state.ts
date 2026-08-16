@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SessionsCatalogListResult } from "../../../../packages/gateway-protocol/src/index.ts";
+import type {
+  SessionCatalog,
+  SessionsCatalogListResult,
+} from "../../../../packages/gateway-protocol/src/index.ts";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import {
   refreshSessionCatalogsLive,
@@ -74,6 +77,95 @@ describe("AppSidebar session catalog pagination", () => {
       expect(refresh).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(25_000);
       expect(refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sheds expanded-page replay and backs off when the catalog list is slow", async () => {
+    vi.useFakeTimers();
+    try {
+      let catalogs: SessionCatalog[] = [];
+      const request = vi.fn(async (_method: string, requestParams: Record<string, unknown>) => {
+        if (requestParams.cursors) {
+          return catalogPage([{ threadId: "thread-2", name: "Second page" }]);
+        }
+        // A slow gateway round-trip is exactly when replaying every expanded
+        // page costs the most, so the elapsed time drives the decision.
+        vi.setSystemTime(Date.now() + 2_000);
+        return catalogPage([{ threadId: "thread-1", name: "First page" }], "cursor-1");
+      });
+      const client = { request } as unknown as GatewayBrowserClient;
+      const refresh = vi.fn();
+
+      await refreshSessionCatalogsLive({
+        live: new SessionCatalogLiveState(),
+        client,
+        agentId: "main",
+        generation: 1,
+        revision: 1,
+        currentGeneration: () => 1,
+        currentRevision: () => 1,
+        currentClient: () => client,
+        catalogs: () => catalogs,
+        pageDepths: new Map([["codex\u0000gateway:local", 1]]),
+        connected: () => true,
+        applyFinal: (next) => {
+          catalogs = next;
+        },
+        applyError: (error) => {
+          throw error;
+        },
+        refresh,
+      });
+
+      // The expanded page must not be replayed: only the initial list ran.
+      expect(request.mock.calls.some(([, callParams]) => callParams.cursors)).toBe(false);
+
+      // And the next poll must be pushed out past both normal cadences.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(refresh).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(270_000);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps replaying expanded pages when the catalog list is fast", async () => {
+    vi.useFakeTimers();
+    try {
+      let catalogs: SessionCatalog[] = [];
+      const request = vi.fn(async (_method: string, requestParams: Record<string, unknown>) => {
+        if (requestParams.cursors) {
+          return catalogPage([{ threadId: "thread-2", name: "Second page" }]);
+        }
+        return catalogPage([{ threadId: "thread-1", name: "First page" }], "cursor-1");
+      });
+      const client = { request } as unknown as GatewayBrowserClient;
+
+      await refreshSessionCatalogsLive({
+        live: new SessionCatalogLiveState(),
+        client,
+        agentId: "main",
+        generation: 1,
+        revision: 1,
+        currentGeneration: () => 1,
+        currentRevision: () => 1,
+        currentClient: () => client,
+        catalogs: () => catalogs,
+        pageDepths: new Map([["codex\u0000gateway:local", 1]]),
+        connected: () => true,
+        applyFinal: (next) => {
+          catalogs = next;
+        },
+        applyError: (error) => {
+          throw error;
+        },
+        refresh: vi.fn(),
+      });
+
+      expect(request.mock.calls.some(([, callParams]) => callParams.cursors)).toBe(true);
     } finally {
       vi.useRealTimers();
     }

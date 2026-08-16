@@ -16,6 +16,10 @@ import { sessionCatalogHostKey } from "./app-sidebar-session-types.ts";
 
 export const SESSION_CATALOG_CHANGED_REFRESH_MS = 5_000;
 const SESSION_CATALOG_STABLE_REFRESH_MS = 30_000;
+/** Cadence used once a refresh round-trip shows the gateway is under pressure. */
+const SESSION_CATALOG_PRESSURE_REFRESH_MS = 300_000;
+/** A list round-trip slower than this means shedding work beats staying fresh. */
+const SESSION_CATALOG_SLOW_REFRESH_THRESHOLD_MS = 1_000;
 
 function sessionCatalogSnapshot(catalogs: readonly SessionCatalog[]): string {
   return JSON.stringify(catalogs);
@@ -513,16 +517,21 @@ export async function refreshSessionCatalogsLive(params: {
   const hadCatalogs = params.catalogs().length > 0;
   const previousMaterialSnapshot = sessionCatalogMaterialSnapshot(params.catalogs());
   let refetchOwner: symbol | null = null;
+  let shedExpandedReplay = false;
   const requestIsCurrent = () =>
     live.ownsRequest(requestOwner) &&
     generation === params.currentGeneration() &&
     client === params.currentClient();
   const revisionIsCurrent = () => requestIsCurrent() && revision === params.currentRevision();
   try {
+    const listStartedAt = Date.now();
     const result = await live.requestList(client, params.agentId, progressId);
     if (!requestIsCurrent() || !result?.catalogs) {
       return;
     }
+    shedExpandedReplay =
+      params.pageDepths.size > 0 &&
+      Date.now() - listStartedAt >= SESSION_CATALOG_SLOW_REFRESH_THRESHOLD_MS;
     refetchOwner = live.beginRefetch(params.pageDepths.size > 0);
     const previousCatalogs = params.catalogs();
     const catalogs = await refetchExpandedSessionCatalogPages({
@@ -532,6 +541,7 @@ export async function refreshSessionCatalogsLive(params: {
       agentId: params.agentId,
       pageDepths: params.pageDepths,
       isCurrent: revisionIsCurrent,
+      skipExpandedReplay: shedExpandedReplay,
     });
     if (!revisionIsCurrent()) {
       return;
@@ -560,9 +570,11 @@ export async function refreshSessionCatalogsLive(params: {
       live.schedule(
         pending
           ? 0
-          : live.sawChange
-            ? SESSION_CATALOG_CHANGED_REFRESH_MS
-            : SESSION_CATALOG_STABLE_REFRESH_MS,
+          : shedExpandedReplay
+            ? SESSION_CATALOG_PRESSURE_REFRESH_MS
+            : live.sawChange
+              ? SESSION_CATALOG_CHANGED_REFRESH_MS
+              : SESSION_CATALOG_STABLE_REFRESH_MS,
         params.connected(),
         params.refresh,
       );
