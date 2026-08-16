@@ -46,6 +46,7 @@ export async function resolveCronEditPayloadDeliveryPatch(
     throw new Error("Use --fallbacks or --clear-fallbacks, not both");
   }
   const toolsAllow = parseCronToolsAllow(opts.tools);
+  const hasClearTimeoutSeconds = Boolean(opts.clearTimeoutSeconds);
   const timeoutSecondsValue = opts.timeoutSeconds;
   const rawTimeoutSeconds =
     timeoutSecondsValue === undefined
@@ -53,6 +54,9 @@ export async function resolveCronEditPayloadDeliveryPatch(
       : typeof timeoutSecondsValue === "string" || typeof timeoutSecondsValue === "number"
         ? String(timeoutSecondsValue).trim()
         : "";
+  if (rawTimeoutSeconds !== undefined && hasClearTimeoutSeconds) {
+    throw new Error("Use --timeout-seconds or --clear-timeout-seconds, not both");
+  }
   if (rawTimeoutSeconds !== undefined && !/^\d+$/u.test(rawTimeoutSeconds)) {
     throw new Error("Invalid --timeout-seconds (must be a positive integer).");
   }
@@ -80,6 +84,9 @@ export async function resolveCronEditPayloadDeliveryPatch(
   const scriptTimeoutSeconds = parseStrictPositiveInteger(opts.scriptTimeoutSeconds);
   if (opts.scriptTimeoutSeconds !== undefined && scriptTimeoutSeconds === undefined) {
     throw new Error("Invalid --script-timeout-seconds (must be a positive integer).");
+  }
+  if (opts.scriptTimeoutSeconds !== undefined && hasClearTimeoutSeconds) {
+    throw new Error("Use --script-timeout-seconds or --clear-timeout-seconds, not both");
   }
   const scriptToolBudget = parseStrictPositiveInteger(opts.scriptToolBudget);
   if (opts.scriptToolBudget !== undefined && scriptToolBudget === undefined) {
@@ -137,10 +144,22 @@ export async function resolveCronEditPayloadDeliveryPatch(
     typeof opts.lightContext === "boolean";
   const hasScriptSpecificPayloadField =
     Boolean(scriptPath) || scriptTimeoutSeconds !== undefined || scriptToolBudget !== undefined;
-  let timeoutOnlyPayloadKind: "agentTurn" | "command" | undefined;
-  if (hasTimeoutSeconds && !hasCommandSpecificPayloadField && !hasAgentTurnSpecificPayloadField) {
+  let timeoutOnlyPayloadKind: "agentTurn" | "command" | "script" | undefined;
+  if (
+    (hasTimeoutSeconds || hasClearTimeoutSeconds) &&
+    !hasCommandSpecificPayloadField &&
+    !hasAgentTurnSpecificPayloadField &&
+    !hasScriptSpecificPayloadField
+  ) {
+    // Clearing has no kind of its own: it belongs to whatever payload the job
+    // already stores, script included.
     const existing = await loadExistingJob();
-    timeoutOnlyPayloadKind = existing.payload.kind === "command" ? "command" : "agentTurn";
+    timeoutOnlyPayloadKind =
+      existing.payload.kind === "command"
+        ? "command"
+        : existing.payload.kind === "script"
+          ? "script"
+          : "agentTurn";
   }
   let toolsOnlyPayloadKind: CronJob["payload"]["kind"] | undefined;
   if (
@@ -149,26 +168,32 @@ export async function resolveCronEditPayloadDeliveryPatch(
     !hasAgentTurnSpecificPayloadField &&
     !hasCommandSpecificPayloadField &&
     !hasScriptSpecificPayloadField &&
-    !hasTimeoutSeconds
+    !hasTimeoutSeconds &&
+    !hasClearTimeoutSeconds
   ) {
     // Tool grants are shared by every payload kind; a policy-only edit must
     // preserve the stored execution kind instead of creating an agent turn.
     toolsOnlyPayloadKind = (await loadExistingJob()).payload.kind;
   }
+  const hasAnyTimeoutPatch = hasTimeoutSeconds || hasClearTimeoutSeconds;
   const hasAgentTurnPayloadField =
     hasAgentTurnSpecificPayloadField ||
-    (hasTimeoutSeconds &&
+    (hasAnyTimeoutPatch &&
       !hasCommandSpecificPayloadField &&
-      timeoutOnlyPayloadKind !== "command") ||
+      timeoutOnlyPayloadKind !== "command" &&
+      timeoutOnlyPayloadKind !== "script") ||
     (hasToolsAllowPatch && toolsOnlyPayloadKind === "agentTurn");
   const hasCommandPayloadField =
     hasCommandSpecificPayloadField ||
-    (hasTimeoutSeconds &&
+    (hasAnyTimeoutPatch &&
       (hasCommandSpecificPayloadField || timeoutOnlyPayloadKind === "command")) ||
     toolsOnlyPayloadKind === "command";
   const hasAgentTurnPatch = hasAgentTurnPayloadField;
   const hasCommandPatch = hasCommandPayloadField;
-  const hasScriptPatch = hasScriptSpecificPayloadField || toolsOnlyPayloadKind === "script";
+  const hasScriptPatch =
+    hasScriptSpecificPayloadField ||
+    toolsOnlyPayloadKind === "script" ||
+    (hasAnyTimeoutPatch && timeoutOnlyPayloadKind === "script");
   const hasSystemEventOrToolsPatch = hasSystemEventPatch || toolsOnlyPayloadKind === "systemEvent";
   if (
     [hasSystemEventOrToolsPatch, hasAgentTurnPatch, hasCommandPatch, hasScriptPatch].filter(Boolean)
@@ -207,7 +232,11 @@ export async function resolveCronEditPayloadDeliveryPatch(
     } else {
       assignIf(payload, "thinking", thinking, Boolean(thinking));
     }
-    assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+    if (hasClearTimeoutSeconds) {
+      payload.timeoutSeconds = null;
+    } else {
+      assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+    }
     assignIf(payload, "lightContext", opts.lightContext, typeof opts.lightContext === "boolean");
     assignToolsAllowPatch(payload);
     patch.payload = payload;
@@ -223,7 +252,11 @@ export async function resolveCronEditPayloadDeliveryPatch(
     );
     assignIf(payload, "env", parseCronCommandEnv(opts.commandEnv), opts.commandEnv !== undefined);
     assignIf(payload, "input", opts.commandInput, typeof opts.commandInput === "string");
-    assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+    if (hasClearTimeoutSeconds) {
+      payload.timeoutSeconds = null;
+    } else {
+      assignIf(payload, "timeoutSeconds", timeoutSeconds, hasTimeoutSeconds);
+    }
     assignIf(
       payload,
       "noOutputTimeoutSeconds",
@@ -238,7 +271,11 @@ export async function resolveCronEditPayloadDeliveryPatch(
     if (scriptPath) {
       payload.script = await readCronPayloadScript(scriptPath);
     }
-    assignIf(payload, "timeoutSeconds", scriptTimeoutSeconds, scriptTimeoutSeconds !== undefined);
+    if (hasClearTimeoutSeconds) {
+      payload.timeoutSeconds = null;
+    } else {
+      assignIf(payload, "timeoutSeconds", scriptTimeoutSeconds, scriptTimeoutSeconds !== undefined);
+    }
     assignIf(payload, "toolBudget", scriptToolBudget, scriptToolBudget !== undefined);
     assignToolsAllowPatch(payload);
     patch.payload = payload;

@@ -15,6 +15,7 @@ vi.mock("../gateway-rpc.js", async () => {
 });
 
 const { registerCronEditCommand } = await import("./register.cron-edit.js");
+const { registerCronAddCommand } = await import("./register.cron-add.js");
 
 function createCronProgram(): Command {
   const program = new Command();
@@ -751,5 +752,101 @@ describe("cron edit command", () => {
 
     errorSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+  it("documents that clearing a timeout is an edit-only operation", () => {
+    const editCommand = createCronProgram().commands.find((command) => command.name() === "edit");
+    const help = editCommand?.helpInformation() ?? "";
+
+    expect(help).toContain("--clear-timeout-seconds");
+    expect(help).toMatch(/existing job/i);
+  });
+
+  it("rejects --timeout-seconds together with --clear-timeout-seconds", async () => {
+    const program = createCronProgram();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code ?? 0}`);
+    }) as never);
+
+    await expect(
+      program.parseAsync(["edit", "job-1", "--timeout-seconds", "12", "--clear-timeout-seconds"], {
+        from: "user",
+      }),
+    ).rejects.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Use --timeout-seconds or --clear-timeout-seconds, not both"),
+    );
+    expect(callGatewayFromCli.mock.calls.some(([method]) => method === "cron.update")).toBe(false);
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it.each([
+    { kind: "agentTurn", stored: { kind: "agentTurn", message: "tick", timeoutSeconds: 120 } },
+    {
+      kind: "command",
+      stored: { kind: "command", argv: ["sh", "-lc", "echo ok"], timeoutSeconds: 30 },
+    },
+    { kind: "script", stored: { kind: "script", script: "run()", timeoutSeconds: 45 } },
+  ])("clears a stored $kind timeout override", async ({ kind, stored }) => {
+    callGatewayFromCli.mockImplementation(async (method: string) => {
+      if (method === "cron.get") {
+        return { id: "job-1", payload: stored };
+      }
+      return { ok: true };
+    });
+    const program = createCronProgram();
+
+    await program.parseAsync(["edit", "job-1", "--clear-timeout-seconds"], { from: "user" });
+
+    expect(callGatewayFromCli).toHaveBeenCalledWith("cron.update", expect.anything(), {
+      id: "job-1",
+      patch: { payload: { kind, timeoutSeconds: null } },
+    });
+  });
+
+  it("leaves a stored timeout untouched when neither timeout flag is given", async () => {
+    callGatewayFromCli.mockImplementation(async (method: string) => {
+      if (method === "cron.get") {
+        return {
+          id: "job-1",
+          payload: { kind: "agentTurn", message: "tick", timeoutSeconds: 120 },
+        };
+      }
+      return { ok: true };
+    });
+    const program = createCronProgram();
+
+    await program.parseAsync(["edit", "job-1", "--message", "tock"], { from: "user" });
+
+    expect(callGatewayFromCli).toHaveBeenCalledWith("cron.update", expect.anything(), {
+      id: "job-1",
+      patch: { payload: { kind: "agentTurn", message: "tock" } },
+    });
+  });
+});
+
+describe("cron add command", () => {
+  beforeEach(() => {
+    callGatewayFromCli.mockReset();
+    callGatewayFromCli.mockResolvedValue({ ok: true });
+  });
+
+  it("refuses --clear-timeout-seconds on create", async () => {
+    // Clearing an override that cannot exist yet is meaningless, so create must
+    // fail closed rather than silently ignore the flag.
+    const program = new Command();
+    program.exitOverride();
+    registerCronAddCommand(program);
+
+    await expect(
+      program.parseAsync(["add", "--every", "1h", "--message", "tick", "--clear-timeout-seconds"], {
+        from: "user",
+      }),
+    ).rejects.toThrow(/unknown option.*--clear-timeout-seconds/i);
+
+    expect(callGatewayFromCli.mock.calls.some(([method]) => method === "cron.add")).toBe(false);
   });
 });
