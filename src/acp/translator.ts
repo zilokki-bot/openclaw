@@ -486,7 +486,9 @@ export class AcpGatewayAgent implements Agent {
     while (true) {
       const result = await this.gateway.request<SessionsListResult>("sessions.list", {
         limit: fetchLimit,
-        includeDerivedTitles: true,
+        // The list surface renders stored titles only, so hydrating a derived
+        // title per row buys nothing and costs a transcript read each.
+        includeDerivedTitles: false,
       });
       rows = result.sessions
         .filter((session) => {
