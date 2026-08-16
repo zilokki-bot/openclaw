@@ -11,7 +11,10 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { RuntimeLogger, PluginRuntimeCore } from "../plugins/runtime/types-core.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { isModelSelectionLocked, ModelSelectionLockedError } from "../sessions/model-overrides.js";
-import { beginSessionWorkAdmission } from "../sessions/session-lifecycle-admission.js";
+import {
+  beginSessionWorkAdmission,
+  isCompetingSessionWorkAdmissionActive,
+} from "../sessions/session-lifecycle-admission.js";
 import {
   deliveryContextFromSession,
   normalizeDeliveryContext,
@@ -296,6 +299,26 @@ export async function consultRealtimeVoiceAgent(params: {
   };
   assertRealtimeVoiceAgentConsultModelSelectionUnlocked(modelLockParams);
   const lifecycleAbortController = new AbortController();
+  const assertSessionUnchanged = (): void => {
+    const currentEntry = params.agentRuntime.session.getSessionEntry({
+      storePath,
+      sessionKey: params.sessionKey,
+      readConsistency: "latest",
+    });
+    // A session appearing where there was none is this consult initializing,
+    // not another owner taking over: only a swapped sessionId is a conflict.
+    const changed = initialSessionEntry
+      ? !currentEntry || currentEntry.sessionId !== initialSessionEntry.sessionId
+      : false;
+    if (changed) {
+      throw new Error(`Session "${params.sessionKey}" changed while starting work. Retry.`);
+    }
+    const archivedSessionError = resolveSessionWorkStartError(params.sessionKey, currentEntry);
+    if (archivedSessionError) {
+      throw new Error(archivedSessionError);
+    }
+    assertRealtimeVoiceAgentConsultModelSelectionUnlocked(modelLockParams);
+  };
   const sessionWorkAdmission = await beginSessionWorkAdmission({
     scope: storePath,
     identities: [params.sessionKey, initialSessionEntry?.sessionId],
@@ -304,25 +327,19 @@ export async function consultRealtimeVoiceAgent(params: {
         new Error("Realtime voice agent consult interrupted by a session lifecycle change."),
       ),
     assertAllowed: () => {
-      const currentEntry = params.agentRuntime.session.getSessionEntry({
-        storePath,
-        sessionKey: params.sessionKey,
-        readConsistency: "latest",
-      });
-      // A session appearing where there was none is this consult initializing,
-      // not another owner taking over: only a swapped sessionId is a conflict.
-      const changed = initialSessionEntry
-        ? !currentEntry || currentEntry.sessionId !== initialSessionEntry.sessionId
-        : false;
-      if (changed) {
+      // Acquisition is serialized per identity, so a rival admission registered
+      // here is a real second consult, not this one's own delayed write.
+      if (
+        !initialSessionEntry &&
+        isCompetingSessionWorkAdmissionActive(storePath, [params.sessionKey])
+      ) {
         throw new Error(`Session "${params.sessionKey}" changed while starting work. Retry.`);
       }
-      const archivedSessionError = resolveSessionWorkStartError(params.sessionKey, currentEntry);
-      if (archivedSessionError) {
-        throw new Error(archivedSessionError);
-      }
-      assertRealtimeVoiceAgentConsultModelSelectionUnlocked(modelLockParams);
+      assertSessionUnchanged();
     },
+    // The writer barrier runs after this admission is registered but before it
+    // owns the current-admission scope, so the rival check would see itself.
+    revalidateAllowed: assertSessionUnchanged,
   });
   const abortFromCaller = () => lifecycleAbortController.abort(params.abortSignal?.reason);
   if (params.abortSignal?.aborted) {

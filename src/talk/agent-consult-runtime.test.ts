@@ -10,6 +10,7 @@ import {
 } from "../infra/diagnostic-events.js";
 import { MODEL_SELECTION_LOCKED_MESSAGE } from "../sessions/model-overrides.js";
 import { runExclusiveSessionLifecycleMutation } from "../sessions/session-lifecycle-admission.js";
+import { beginSessionWorkAdmission } from "../sessions/session-lifecycle-admission.js";
 import {
   closeOpenClawAgentDatabaseByPath,
   closeOpenClawAgentDatabasesForTest,
@@ -524,6 +525,39 @@ describe("realtime voice agent consult runtime", () => {
     const call = requireEmbeddedAgentCall(runEmbeddedAgent);
     expect(call.sessionId).toBe("raced-session");
     expect(call.sessionKey).toBe(sessionKey);
+  });
+
+  it("still rejects a second admission racing on the same brand-new session", async () => {
+    // Dropping the init-race conflict must not drop collision detection: a
+    // genuine second consult on the same new sessionKey has to be turned away.
+    const { runtime } = createAgentRuntime();
+    const sessionKey = "voice:competing-init";
+    const storePath = runtime.session.resolveStorePath(undefined, { agentId: "main" });
+    const competitor = await beginSessionWorkAdmission({
+      scope: storePath,
+      identities: [sessionKey],
+      assertAllowed: () => {},
+      onInterrupt: () => {},
+    });
+    try {
+      await expect(
+        consultRealtimeVoiceAgent({
+          cfg: {} as never,
+          agentRuntime: runtime as never,
+          logger: { warn: vi.fn() },
+          sessionKey,
+          messageProvider: "voice",
+          lane: "voice",
+          runIdPrefix: "voice-realtime-consult:competing-init",
+          args: { question: "What should I say?" },
+          transcript: [],
+          surface: "a live phone call",
+          userLabel: "Caller",
+        }),
+      ).rejects.toThrow(/changed while starting work/u);
+    } finally {
+      competitor.release();
+    }
   });
 
   it("fresh-checks archive state after a queued lifecycle mutation", async () => {
