@@ -253,4 +253,65 @@ describe("prompt submission serialization for one agent+session identity", () =>
     firstGate.resolve();
     await expect(firstRun).resolves.toBe("first");
   });
+  it("rejects a prompt whose abort signal fired before it reached the queue", async () => {
+    const order: string[] = [];
+    const abortReason = new Error("aborted before submission");
+    const controller = new AbortController();
+    controller.abort(abortReason);
+    const first = makeSession({ order, label: "first" });
+    const release = vi.fn(async () => undefined);
+
+    installPromptSubmissionLockRelease({
+      session: first,
+      agentId: "main",
+      sessionKey: "agent:main:main",
+      abortSignal: controller.signal,
+      releaseForPrompt: release,
+      reacquireAfterPrompt: vi.fn(async () => undefined),
+    });
+
+    await expect(first.agent.streamFn()).rejects.toBe(abortReason);
+    expect(release).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
+  });
+
+  it("keeps serving later waiters after one of them is aborted mid-queue", async () => {
+    const order: string[] = [];
+    const firstGate = deferred();
+    const firstEntered = deferred();
+    const abortReason = new Error("second aborted");
+    const controller = new AbortController();
+    const first = makeSession({ order, label: "first", gate: firstGate, entered: firstEntered });
+    const second = makeSession({ order, label: "second" });
+    const third = makeSession({ order, label: "third" });
+
+    for (const [session, signal] of [
+      [first, undefined],
+      [second, controller.signal],
+      [third, undefined],
+    ] as const) {
+      installPromptSubmissionLockRelease({
+        session,
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        ...(signal ? { abortSignal: signal } : {}),
+        releaseForPrompt: vi.fn(async () => undefined),
+        reacquireAfterPrompt: vi.fn(async () => undefined),
+      });
+    }
+
+    const firstRun = first.agent.streamFn();
+    const secondRun = second.agent.streamFn();
+    const thirdRun = third.agent.streamFn();
+    await firstEntered.promise;
+
+    controller.abort(abortReason);
+    await expect(secondRun).rejects.toBe(abortReason);
+
+    // The aborted waiter must hand its turn on, not strand everyone behind it.
+    firstGate.resolve();
+    await expect(firstRun).resolves.toBe("first");
+    await expect(thirdRun).resolves.toBe("third");
+    expect(order).toEqual(["first:enter", "first:exit", "third:enter", "third:exit"]);
+  });
 });
