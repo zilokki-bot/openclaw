@@ -309,9 +309,11 @@ export async function consultRealtimeVoiceAgent(params: {
         sessionKey: params.sessionKey,
         readConsistency: "latest",
       });
+      // A session appearing where there was none is this consult initializing,
+      // not another owner taking over: only a swapped sessionId is a conflict.
       const changed = initialSessionEntry
         ? !currentEntry || currentEntry.sessionId !== initialSessionEntry.sessionId
-        : Boolean(currentEntry);
+        : false;
       if (changed) {
         throw new Error(`Session "${params.sessionKey}" changed while starting work. Retry.`);
       }

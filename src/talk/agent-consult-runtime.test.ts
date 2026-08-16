@@ -487,6 +487,45 @@ describe("realtime voice agent consult runtime", () => {
     expect(runEmbeddedAgent).not.toHaveBeenCalled();
   });
 
+  it("continues when a new consult session appears during start admission", async () => {
+    // A session materializing where there was none is initialization, not a
+    // takeover — treating it as a conflict aborts a perfectly good consult.
+    const { runtime, runEmbeddedAgent, sessionStore } = createAgentRuntime();
+    const sessionKey = "voice:init-race";
+    let reads = 0;
+    runtime.session.getSessionEntry.mockImplementation((params: { sessionKey: string }) => {
+      reads += 1;
+      if (params.sessionKey === sessionKey && reads >= 3 && !sessionStore[sessionKey]) {
+        sessionStore[sessionKey] = {
+          sessionId: "raced-session",
+          updatedAt: 2,
+        };
+      }
+      return sessionStore[params.sessionKey];
+    });
+
+    await expect(
+      consultRealtimeVoiceAgent({
+        cfg: {} as never,
+        agentRuntime: runtime as never,
+        logger: { warn: vi.fn() },
+        sessionKey,
+        messageProvider: "voice",
+        lane: "voice",
+        runIdPrefix: "voice-realtime-consult:init-race",
+        args: { question: "What should I say?" },
+        transcript: [],
+        surface: "a live phone call",
+        userLabel: "Caller",
+      }),
+    ).resolves.toEqual({ text: "Speak this." });
+
+    expect(runtime.session.patchSessionEntry).toHaveBeenCalled();
+    const call = requireEmbeddedAgentCall(runEmbeddedAgent);
+    expect(call.sessionId).toBe("raced-session");
+    expect(call.sessionKey).toBe(sessionKey);
+  });
+
   it("fresh-checks archive state after a queued lifecycle mutation", async () => {
     const { runtime, runEmbeddedAgent, sessionStore } = createAgentRuntime();
     const sessionKey = "voice:archive-race";
