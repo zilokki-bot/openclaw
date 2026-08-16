@@ -316,7 +316,8 @@ describe("models-config", () => {
       expect(providers.deepseek?.baseUrl).toBe("https://api.deepseek.example/v1");
       expect(providers.deepseek?.models?.map((model) => model.id)).toEqual(["deepseek-v4-flash"]);
       expect(providers.deepseek?.apiKey).toBe("DEEPSEEK_API_KEY");
-      // A provider with no base URL is not usable; real normalization drops it.
+      // Dropped by stripBlankProviderBaseUrls before normalization and by
+      // filterWritableProviders after it — not by normalizeProviders itself.
       expect(providers.emptyBaseUrl).toBeUndefined();
     });
   });
