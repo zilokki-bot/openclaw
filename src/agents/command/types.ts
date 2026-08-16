@@ -19,6 +19,7 @@ import type {
 import type { ExecElevatedDefaults } from "../bash-tools.exec-types.js";
 import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
 import type { CliSessionBindingFacts } from "../cli-runner/types.js";
+import type { EmbeddedRunTrigger } from "../embedded-agent-runner/run/params.js";
 import type { MainSessionRecoveryOwnerLease } from "../main-session-recovery-store.js";
 import type { ScheduledToolPolicyContext } from "../scheduled-tool-policy.js";
 import type { AgentStreamParams, ClientToolDefinition } from "./shared-types.js";
@@ -172,6 +173,8 @@ export type AgentCommandOpts = {
   workspaceDir?: SpawnedRunMetadata["workspaceDir"];
   /** Explicit task working directory for this run. Bootstrap still uses workspaceDir. */
   cwd?: string;
+  /** Internal run trigger for trusted gateway/runtime callers. */
+  trigger?: EmbeddedRunTrigger;
   /** Force bundled MCP teardown when a one-shot local run completes. */
   cleanupBundleMcpOnRunEnd?: boolean;
   /** Force long-lived CLI live session teardown when a one-shot local run completes. */
