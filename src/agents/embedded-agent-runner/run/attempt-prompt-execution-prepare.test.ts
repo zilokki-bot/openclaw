@@ -101,6 +101,18 @@ describe("prepareEmbeddedAttemptPromptExecution", () => {
     expect(hoisted.detectAndLoadPromptImages).not.toHaveBeenCalled();
   });
 
+  it("keys the prompt submission queue on an explicit agent id", async () => {
+    // sessionTarget is absent on the caller-owned transcript path, so relying on
+    // it alone silently disables the queue for those runs.
+    const input = createInput({ agentId: "main" } as Partial<PromptExecutionInput>);
+
+    await prepareEmbeddedAttemptPromptExecution(input);
+
+    expect(hoisted.installPromptSubmissionLockRelease).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "main" }),
+    );
+  });
+
   it("hands the run abort signal to the prompt submission queue", async () => {
     const controller = new AbortController();
     const input = createInput({

@@ -214,6 +214,7 @@ export async function runEmbeddedAttemptSettledPhase(
       },
       execution: {
         abortSignal: input.runAbortController.signal,
+        agentId: input.setup.sessionAgentId,
         effectiveFsWorkspaceOnly: input.setup.effectiveFsWorkspaceOnly,
         effectiveWorkspace: input.setup.effectiveWorkspace,
         sandbox: input.setup.sandbox,

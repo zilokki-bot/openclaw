@@ -41,6 +41,12 @@ function emptyPromptImages(): PromptImageResult {
 export async function prepareEmbeddedAttemptPromptExecution(input: {
   /** Run-scoped abort so a prompt waiting for its queue turn can be cancelled. */
   abortSignal?: AbortSignal;
+  /**
+   * Owning agent for the prompt submission queue key. Passed explicitly because
+   * attempt.sessionTarget is absent on the caller-owned transcript path, and a
+   * missing agent id silently disables serialization for those runs.
+   */
+  agentId?: string;
   attempt: PromptExecutionAttempt;
   effectiveFsWorkspaceOnly: boolean;
   effectiveWorkspace: string;
@@ -58,6 +64,7 @@ export async function prepareEmbeddedAttemptPromptExecution(input: {
   installPromptSubmissionLockRelease({
     session: input.session,
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
     releaseForPrompt: () => input.sessionLockController.releaseForPrompt(),
     reacquireAfterPrompt: () => input.sessionLockController.reacquireAfterPrompt(),
     sessionKey: attempt.sessionKey,
