@@ -39,6 +39,8 @@ function emptyPromptImages(): PromptImageResult {
 }
 
 export async function prepareEmbeddedAttemptPromptExecution(input: {
+  /** Run-scoped abort so a prompt waiting for its queue turn can be cancelled. */
+  abortSignal?: AbortSignal;
   attempt: PromptExecutionAttempt;
   effectiveFsWorkspaceOnly: boolean;
   effectiveWorkspace: string;
@@ -55,6 +57,7 @@ export async function prepareEmbeddedAttemptPromptExecution(input: {
   const { attempt } = input;
   installPromptSubmissionLockRelease({
     session: input.session,
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     releaseForPrompt: () => input.sessionLockController.releaseForPrompt(),
     reacquireAfterPrompt: () => input.sessionLockController.reacquireAfterPrompt(),
     sessionKey: attempt.sessionKey,

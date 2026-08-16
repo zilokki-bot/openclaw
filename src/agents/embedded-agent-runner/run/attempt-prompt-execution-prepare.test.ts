@@ -101,6 +101,21 @@ describe("prepareEmbeddedAttemptPromptExecution", () => {
     expect(hoisted.detectAndLoadPromptImages).not.toHaveBeenCalled();
   });
 
+  it("hands the run abort signal to the prompt submission queue", async () => {
+    const controller = new AbortController();
+    const input = createInput({
+      abortSignal: controller.signal,
+    } as Partial<PromptExecutionInput>);
+
+    await prepareEmbeddedAttemptPromptExecution(input);
+
+    // Without the signal a queued prompt keeps waiting for its turn even after
+    // the run is aborted, so the abort must reach the queue.
+    expect(hoisted.installPromptSubmissionLockRelease).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: controller.signal }),
+    );
+  });
+
   it("installs the lock handoff before loading prompt images", async () => {
     const input = createInput();
 
