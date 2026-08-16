@@ -366,7 +366,10 @@ type CronScriptPayload = {
 
 type CronScriptPayloadPatch = {
   kind: "script";
-} & Partial<CronScriptPayloadFields>;
+} & Partial<Omit<CronScriptPayloadFields, "timeoutSeconds">> & {
+    /** Null clears the stored per-job timeout; omitted leaves it untouched. */
+    timeoutSeconds?: number | null;
+  };
 /** Mutable runtime state persisted beside the immutable cron job spec. */
 export type CronJobState = {
   nextRunAtMs?: number;
