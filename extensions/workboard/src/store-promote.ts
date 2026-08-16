@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { WorkboardCard } from "@openclaw/workboard-contract";
+import type { WorkboardCard, WorkboardStatus } from "@openclaw/workboard-contract";
 import { assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import { MAX_CARD_COMMENTS } from "./store-constants.js";
 import { WorkboardEnrichmentStore } from "./store-enrichment.js";
 import type { WorkboardMutationScope, WorkboardPromoteInput } from "./store-inputs.js";
-import { clearDiagnostics, normalizeBoundedString } from "./store-normalizers.js";
+import { clearDiagnostics, normalizeBoundedString, normalizeStatus } from "./store-normalizers.js";
+
+function assertNonTerminalMoveStatus(status: WorkboardStatus): void {
+  if (status === "done") {
+    throw new Error("workboard move cannot mark cards done; use workboard_complete with proof.");
+  }
+}
 
 export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
   async promoteReady(now = Date.now()): Promise<{ cards: WorkboardCard[]; count: number }> {
@@ -26,6 +32,9 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
     position: unknown,
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard> {
+    // Reject before taking the mutation queue: a move that would finish work is
+    // wrong regardless of card state, and failing fast keeps the queue free.
+    assertNonTerminalMoveStatus(normalizeStatus(status, "todo"));
     return await this.enqueueMutation(async () => {
       const existing = await this.get(id);
       if (!existing) {
