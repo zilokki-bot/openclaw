@@ -31,6 +31,10 @@ vi.mock("./auth-profiles/external-cli-sync.js", () => ({
 }));
 
 vi.mock("./models-config.providers.js", async () => {
+  const actual = await vi.importActual<typeof import("./models-config.providers.js")>(
+    "./models-config.providers.js",
+  );
+
   function createImplicitProvider(baseUrl: string): ModelsProviderConfig {
     // Shared implicit-provider fixture keeps generated-provider expectations compact.
     return {
@@ -57,8 +61,9 @@ vi.mock("./models-config.providers.js", async () => {
     }: {
       providers: Record<string, ModelsProviderConfig>;
     }) => providers,
-    normalizeProviders: ({ providers }: { providers: Record<string, ModelsProviderConfig> }) =>
-      providers,
+    // Stubbing normalization away hid whether configured catalog providers
+    // survive it; the real implementation is what this suite must exercise.
+    normalizeProviders: actual.normalizeProviders,
     normalizeProviderCatalogModelsForConfig: (providers: Record<string, ModelsProviderConfig>) =>
       providers,
     resolveImplicitProviders: async ({ env }: { env?: NodeJS.ProcessEnv }) => {
@@ -103,6 +108,7 @@ installModelsConfigTestHooks();
 let clearConfigCache: typeof import("../config/config.js").clearConfigCache;
 let clearRuntimeConfigSnapshot: typeof import("../config/config.js").clearRuntimeConfigSnapshot;
 let clearRuntimeAuthProfileStoreSnapshots: typeof import("./auth-profiles/store.js").clearRuntimeAuthProfileStoreSnapshots;
+let replaceRuntimeAuthProfileStoreSnapshots: typeof import("./auth-profiles/store.js").replaceRuntimeAuthProfileStoreSnapshots;
 let ensureOpenClawModelsJson: typeof import("./models-config.js").ensureOpenClawModelsJson;
 let resetModelsJsonReadyCacheForTest: typeof import("./models-config-state.test-support.js").resetModelsJsonReadyCacheForTest;
 
@@ -154,7 +160,8 @@ describe("models-config", () => {
   beforeAll(async () => {
     vi.resetModules();
     ({ clearConfigCache, clearRuntimeConfigSnapshot } = await import("../config/config.js"));
-    ({ clearRuntimeAuthProfileStoreSnapshots } = await import("./auth-profiles/store.js"));
+    ({ clearRuntimeAuthProfileStoreSnapshots, replaceRuntimeAuthProfileStoreSnapshots } =
+      await import("./auth-profiles/store.js"));
     ({ ensureOpenClawModelsJson } = await import("./models-config.js"));
     ({ resetModelsJsonReadyCacheForTest } = await import("./models-config-state.test-support.js"));
   });
@@ -228,6 +235,89 @@ describe("models-config", () => {
       const model = parsed.providers["custom-proxy"]?.models?.[0];
       expect(model?.id).toBe("llama-3.1-8b");
       expect(model?.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    });
+  });
+
+  it("keeps configured catalog providers that use profile-backed auth", async () => {
+    await withTempHome(async () => {
+      const agentDir = resolveDefaultAgentDir({});
+      const pluginMetadataSnapshot = {
+        index: { plugins: [{ pluginId: "deepseek", enabled: true }] },
+        normalizePluginId: (pluginId: string) => pluginId,
+        manifestRegistry: { plugins: [], diagnostics: [] },
+        owners: {
+          providers: new Map([["deepseek", ["deepseek"]]]),
+          modelCatalogProviders: new Map([["deepseek", ["deepseek"]]]),
+          setupProviders: new Map(),
+        },
+      } as unknown as Pick<PluginMetadataSnapshot, "index" | "manifestRegistry" | "owners">;
+
+      replaceRuntimeAuthProfileStoreSnapshots([
+        { store: { version: 1, profiles: {} } },
+        {
+          agentDir,
+          store: {
+            version: 1,
+            profiles: {
+              "deepseek:default": {
+                type: "api_key",
+                provider: "deepseek",
+                keyRef: { source: "env", provider: "default", id: "DEEPSEEK_API_KEY" },
+              },
+            },
+          },
+        },
+      ]);
+
+      await ensureOpenClawModelsJson(
+        {
+          models: {
+            mode: "replace",
+            providers: {
+              deepseek: {
+                baseUrl: "https://api.deepseek.example/v1",
+                api: "openai-completions",
+                models: [
+                  {
+                    id: "deepseek-v4-flash",
+                    name: "DeepSeek V4 Flash",
+                    reasoning: false,
+                    input: ["text"],
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                    contextWindow: 8192,
+                    maxTokens: 4096,
+                  },
+                ],
+              },
+              emptyBaseUrl: {
+                baseUrl: "",
+                api: "openai-completions",
+                models: [
+                  {
+                    id: "empty-base-url",
+                    name: "Empty Base URL",
+                    reasoning: false,
+                    input: ["text"],
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                    contextWindow: 8192,
+                    maxTokens: 4096,
+                  },
+                ],
+              },
+            },
+          },
+        },
+        agentDir,
+        { pluginMetadataSnapshot },
+      );
+
+      const providers = await readGeneratedProviders(agentDir);
+
+      expect(providers.deepseek?.baseUrl).toBe("https://api.deepseek.example/v1");
+      expect(providers.deepseek?.models?.map((model) => model.id)).toEqual(["deepseek-v4-flash"]);
+      expect(providers.deepseek?.apiKey).toBe("DEEPSEEK_API_KEY");
+      // A provider with no base URL is not usable; real normalization drops it.
+      expect(providers.emptyBaseUrl).toBeUndefined();
     });
   });
 
