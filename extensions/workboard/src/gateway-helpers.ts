@@ -43,6 +43,16 @@ function readOptionalPositiveInteger(value: unknown, fieldName: string): number 
   return parsed;
 }
 
+function readOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${fieldName} must be a boolean.`);
+  }
+  return value;
+}
+
 export function readPatch(params: Record<string, unknown>): Record<string, unknown> {
   const patch = params.patch;
   if (patch && typeof patch === "object" && !Array.isArray(patch)) {
@@ -60,10 +70,16 @@ export function assertNoCursorAdvance(params: Record<string, unknown>) {
 export async function listWorkboardCards(
   store: WorkboardStore,
   boardId: unknown,
+  includeArchivedParam: unknown,
   redactCard: (card: WorkboardCard) => WorkboardCard,
 ) {
+  const includeArchived = readOptionalBoolean(includeArchivedParam, "includeArchived") === true;
   const [cards, { boards }] = await Promise.all([store.list({ boardId }), store.listBoards()]);
-  return { cards: cards.map(redactCard), boards, statuses: WORKBOARD_STATUSES };
+  return {
+    cards: cards.filter((card) => includeArchived || !card.metadata?.archivedAt).map(redactCard),
+    boards,
+    statuses: WORKBOARD_STATUSES,
+  };
 }
 
 export function resolveGatewayWorkboardWorkspaceAccess(params: {
