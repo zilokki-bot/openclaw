@@ -801,10 +801,37 @@ describe("cron edit command", () => {
 
     await program.parseAsync(["edit", "job-1", "--clear-timeout-seconds"], { from: "user" });
 
-    expect(callGatewayFromCli).toHaveBeenCalledWith("cron.update", expect.anything(), {
-      id: "job-1",
-      patch: { payload: { kind, timeoutSeconds: null } },
-    });
+    expect(callGatewayFromCli).toHaveBeenCalledWith(
+      "cron.update",
+      expect.objectContaining({ clearTimeoutSeconds: true }),
+      {
+        id: "job-1",
+        patch: { payload: { kind, timeoutSeconds: null } },
+      },
+    );
+  });
+
+  it("rejects --script-timeout-seconds together with --clear-timeout-seconds", async () => {
+    const program = createCronProgram();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code ?? 0}`);
+    }) as never);
+
+    await expect(
+      program.parseAsync(
+        ["edit", "job-1", "--script-timeout-seconds", "30", "--clear-timeout-seconds"],
+        { from: "user" },
+      ),
+    ).rejects.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Use --script-timeout-seconds or --clear-timeout-seconds, not both"),
+    );
+    expect(callGatewayFromCli.mock.calls.some(([method]) => method === "cron.update")).toBe(false);
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 
   it("leaves a stored timeout untouched when neither timeout flag is given", async () => {
