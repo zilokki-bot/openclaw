@@ -193,6 +193,74 @@ describe("command queue", () => {
     expect(calls).toEqual(["foreground", "normal", "background"]);
   });
 
+  it("reserves the last multi-concurrency slot from background work", async () => {
+    setCommandLaneConcurrency(CommandLane.Main, 2);
+    const calls: string[] = [];
+    const firstBackgroundRelease = createDeferred();
+
+    const firstBackground = enqueueCommandInLane(
+      CommandLane.Main,
+      async () => {
+        calls.push("background-1");
+        await firstBackgroundRelease.promise;
+        return "background-1";
+      },
+      { priority: "background" },
+    );
+    await Promise.resolve();
+
+    const secondBackground = enqueueCommandInLane(
+      CommandLane.Main,
+      async () => {
+        calls.push("background-2");
+        return "background-2";
+      },
+      { priority: "background" },
+    );
+    await Promise.resolve();
+
+    // The second background entry stays queued even though a slot is free: the
+    // last slot of a multi-slot lane is held for foreground work.
+    expect(calls).toEqual(["background-1"]);
+    expectLaneSnapshotFields(CommandLane.Main, {
+      activeCount: 1,
+      queuedCount: 1,
+      maxConcurrent: 2,
+    });
+
+    const foreground = enqueueCommandInLane(CommandLane.Main, async () => {
+      calls.push("foreground");
+      return "foreground";
+    });
+    await Promise.resolve();
+
+    await expect(foreground).resolves.toBe("foreground");
+    expect(calls).toEqual(["background-1", "foreground"]);
+
+    firstBackgroundRelease.resolve();
+    await expect(firstBackground).resolves.toBe("background-1");
+    await expect(secondBackground).resolves.toBe("background-2");
+    expect(calls).toEqual(["background-1", "foreground", "background-2"]);
+  });
+
+  it("does not reserve a slot in a single-slot lane", async () => {
+    setCommandLaneConcurrency(CommandLane.Main, 1);
+    const calls: string[] = [];
+
+    // Reserving in a one-slot lane would stall background work forever.
+    const background = enqueueCommandInLane(
+      CommandLane.Main,
+      async () => {
+        calls.push("background");
+        return "background";
+      },
+      { priority: "background" },
+    );
+
+    await expect(background).resolves.toBe("background");
+    expect(calls).toEqual(["background"]);
+  });
+
   it("preserves FIFO order within each priority", async () => {
     const { task: blocker, release } = enqueueBlockedMainTask(async () => "blocker");
     const calls: string[] = [];
