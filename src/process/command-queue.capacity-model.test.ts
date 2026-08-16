@@ -7,7 +7,7 @@ import { CommandLane } from "./lanes.js";
  * still has to answer its foreground/control line (Black Rock ARCH2, 2026-08-17):
  *
  *   agents.defaults.maxConcurrent           = 12  (main lane slots)
- *   agents.defaults.subagents.maxConcurrent = 16  (subagent lane slots)
+ *   agents.defaults.subagents.maxConcurrent = 12  (subagent lane slots)
  *   agents.defaults.subagents.maxChildrenPerAgent = 6
  *   agents.defaults.subagents.maxSpawnDepth = 2
  *   foregroundReservedSlots (implicit)      = 1   (last slot of a multi-slot lane)
@@ -31,7 +31,7 @@ vi.mock("../logging/diagnostic-runtime.js", () => ({
 type CommandQueueModule = typeof import("./command-queue.js");
 
 const TARGET_MAIN_MAX_CONCURRENT = 12;
-const TARGET_SUBAGENT_MAX_CONCURRENT = 16;
+const TARGET_SUBAGENT_MAX_CONCURRENT = 12;
 const FOREGROUND_RESERVED_SLOTS = 1;
 
 let enqueueCommandInLane: CommandQueueModule["enqueueCommandInLane"];
@@ -80,7 +80,7 @@ function fillLaneWithBackground(
   return jobs;
 }
 
-describe("command queue capacity model (main 12 / subagent 16 / foreground reserved 1)", () => {
+describe("command queue capacity model (main 12 / subagent 12 / foreground reserved 1)", () => {
   beforeAll(async () => {
     ({ enqueueCommandInLane, getCommandLaneSnapshot, resetAllLanes, setCommandLaneConcurrency } =
       await import("./command-queue.js"));
