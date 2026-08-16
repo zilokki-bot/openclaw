@@ -220,9 +220,15 @@ describe("createCronToolSchema", () => {
     for (const path of ["job.failureAlert.after", "patch.failureAlert.after"]) {
       expect(propertyAt(schemaRecord, path)).toMatchObject({ type: "integer", minimum: 1 });
     }
-    for (const path of ["job.payload.timeoutSeconds", "patch.payload.timeoutSeconds"]) {
-      expect(propertyAt(schemaRecord, path)).toMatchObject({ type: "number", minimum: 0 });
-    }
+    // Create has nothing to clear, so it keeps the strict numeric bound; only a
+    // patch may carry null to remove a stored override.
+    expect(propertyAt(schemaRecord, "job.payload.timeoutSeconds")).toMatchObject({
+      type: "number",
+      minimum: 0,
+    });
+    expect(propertyAt(schemaRecord, "patch.payload.timeoutSeconds")).toMatchObject({
+      anyOf: [{ type: "number", minimum: 0 }, { type: "null" }],
+    });
   });
 
   it("describes cron expressions as local wall-clock time in the supplied timezone", () => {

@@ -91,6 +91,8 @@ export function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch)
     }
     if (typeof patch.timeoutSeconds === "number") {
       next.timeoutSeconds = patch.timeoutSeconds;
+    } else if (patch.timeoutSeconds === null) {
+      delete next.timeoutSeconds;
     }
     if (typeof patch.noOutputTimeoutSeconds === "number") {
       next.noOutputTimeoutSeconds = patch.noOutputTimeoutSeconds;
@@ -111,6 +113,8 @@ export function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch)
     }
     if (typeof patch.timeoutSeconds === "number") {
       next.timeoutSeconds = patch.timeoutSeconds;
+    } else if (patch.timeoutSeconds === null) {
+      delete next.timeoutSeconds;
     }
     if (typeof patch.toolBudget === "number") {
       next.toolBudget = patch.toolBudget;
@@ -151,6 +155,8 @@ export function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch)
   }
   if (typeof patch.timeoutSeconds === "number") {
     next.timeoutSeconds = patch.timeoutSeconds;
+  } else if (patch.timeoutSeconds === null) {
+    delete next.timeoutSeconds;
   }
   if (typeof patch.lightContext === "boolean") {
     next.lightContext = patch.lightContext;
@@ -184,7 +190,7 @@ function buildPayloadFromPatch(patch: CronPayloadPatch): CronPayload {
       cwd: patch.cwd,
       env: patch.env,
       input: patch.input,
-      timeoutSeconds: patch.timeoutSeconds,
+      timeoutSeconds: typeof patch.timeoutSeconds === "number" ? patch.timeoutSeconds : undefined,
       noOutputTimeoutSeconds: patch.noOutputTimeoutSeconds,
       outputMaxBytes: patch.outputMaxBytes,
     };
@@ -199,7 +205,7 @@ function buildPayloadFromPatch(patch: CronPayloadPatch): CronPayload {
     const next: Extract<CronPayload, { kind: "script" }> = {
       kind: "script",
       script: patch.script,
-      timeoutSeconds: patch.timeoutSeconds,
+      timeoutSeconds: typeof patch.timeoutSeconds === "number" ? patch.timeoutSeconds : undefined,
       toolBudget: patch.toolBudget,
     };
     applyToolsAllowPatch(next, patch);
@@ -220,7 +226,7 @@ function buildPayloadFromPatch(patch: CronPayloadPatch): CronPayload {
     model: typeof patch.model === "string" ? patch.model : undefined,
     fallbacks: Array.isArray(patch.fallbacks) ? patch.fallbacks : undefined,
     thinking: typeof patch.thinking === "string" ? patch.thinking : undefined,
-    timeoutSeconds: patch.timeoutSeconds,
+    timeoutSeconds: typeof patch.timeoutSeconds === "number" ? patch.timeoutSeconds : undefined,
     lightContext: patch.lightContext,
     allowUnsafeExternalContent: patch.allowUnsafeExternalContent,
   };

@@ -68,6 +68,8 @@ function cronPayloadObjectSchema(params: {
   model: TSchema;
   toolsAllow: TSchema;
   fallbacks: TSchema;
+  /** Only a patch may clear a stored timeout; create has nothing to clear. */
+  nullableTimeoutClears: boolean;
 }) {
   return Type.Object(
     {
@@ -77,7 +79,14 @@ function cronPayloadObjectSchema(params: {
       script: Type.Optional(Type.String({ description: "Headless code-mode script" })),
       model: params.model,
       thinking: Type.Optional(Type.String({ description: "Thinking override" })),
-      timeoutSeconds: optionalFiniteNumberSchema({ minimum: 0 }),
+      timeoutSeconds: params.nullableTimeoutClears
+        ? Type.Optional(
+            Type.Union([
+              Type.Number({ minimum: 0, description: "Payload timeout seconds" }),
+              Type.Null({ description: "Clear the stored payload timeout override" }),
+            ]),
+          )
+        : optionalFiniteNumberSchema({ minimum: 0 }),
       toolBudget: optionalPositiveIntegerSchema({ description: "Maximum script tool calls" }),
       lightContext: Type.Optional(
         Type.Boolean({
@@ -164,6 +173,7 @@ function createCronPayloadSchema(): TSchema {
       model: Type.Optional(Type.String({ description: "Model override" })),
       toolsAllow: Type.Optional(Type.Array(Type.String(), { description: "Allowed tools" })),
       fallbacks: Type.Optional(Type.Array(Type.String(), { description: "Fallback models" })),
+      nullableTimeoutClears: false,
     }),
   );
 }
@@ -333,6 +343,7 @@ function createCronPatchObjectSchema(): TSchema {
             model: nullableStringSchema("Model override, or null to clear"),
             toolsAllow: nullableStringArraySchema("Allowed tool ids, or null to clear"),
             fallbacks: nullableStringArraySchema("Fallback models, or null to clear"),
+            nullableTimeoutClears: true,
           }),
         ),
         delivery: createCronDeliveryPatchSchema(),

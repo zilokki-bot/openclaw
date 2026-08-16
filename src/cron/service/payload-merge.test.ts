@@ -188,4 +188,52 @@ describe("mergeCronPayload trigger tool caps", () => {
       toolsAllowIsDefault: true,
     });
   });
+
+  // A null override is the only way to remove a stored per-job timeout: omitting
+  // the field means "leave it alone", so without null the value is unclearable.
+  it("clears a stored agentTurn timeout override on a null patch", () => {
+    expect(
+      mergeCronPayload({ kind: "agentTurn", message: "tick", timeoutSeconds: 120 }, {
+        kind: "agentTurn",
+        timeoutSeconds: null,
+      } as CronPayloadPatch),
+    ).toEqual({ kind: "agentTurn", message: "tick" });
+  });
+
+  it("clears a stored command timeout override on a null patch", () => {
+    expect(
+      mergeCronPayload({ kind: "command", argv: ["echo", "hi"], timeoutSeconds: 30 }, {
+        kind: "command",
+        timeoutSeconds: null,
+      } as CronPayloadPatch),
+    ).toEqual({ kind: "command", argv: ["echo", "hi"] });
+  });
+
+  it("clears a stored script timeout override on a null patch", () => {
+    expect(
+      mergeCronPayload({ kind: "script", script: "run()", timeoutSeconds: 45 }, {
+        kind: "script",
+        timeoutSeconds: null,
+      } as CronPayloadPatch),
+    ).toEqual({ kind: "script", script: "run()" });
+  });
+
+  it("keeps a stored timeout override when the patch omits the field", () => {
+    expect(
+      mergeCronPayload(
+        { kind: "agentTurn", message: "tick", timeoutSeconds: 120 },
+        { kind: "agentTurn", message: "tock" },
+      ),
+    ).toEqual({ kind: "agentTurn", message: "tock", timeoutSeconds: 120 });
+  });
+
+  it("does not carry a null timeout into a payload built from scratch", () => {
+    expect(
+      mergeCronPayload({ kind: "systemEvent", text: "before" }, {
+        kind: "agentTurn",
+        message: "after",
+        timeoutSeconds: null,
+      } as CronPayloadPatch),
+    ).toEqual({ kind: "agentTurn", message: "after" });
+  });
 });
