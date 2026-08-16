@@ -13,6 +13,7 @@ import {
   getDeliveryAttemptCount,
   getDeliveryLastAttemptAt,
   isDeliverySuspended,
+  resumeSuspendedDelivery,
 } from "./subagent-delivery-state.js";
 import { createSubagentRegistryCompletionRuntime } from "./subagent-registry-completion-runtime.js";
 import { emitSubagentProgressEndedHook } from "./subagent-registry-completion.js";
@@ -603,6 +604,30 @@ export const listDescendantRunsForRequester = publicApi.listDescendantRunsForReq
 export const getSubagentRunByChildSessionKey = publicApi.getSubagentRunByChildSessionKey;
 export const getLatestSubagentRunByChildSessionKey =
   publicApi.getLatestSubagentRunByChildSessionKey;
+/**
+ * Hands a suspended final delivery back to the announce path.
+ *
+ * Suspension is terminal for every automatic path, so a completed result whose
+ * delivery ran out of attempts stays stored but unreachable until it expires.
+ * This is the operator entry point for that state: it re-arms one run by id and
+ * persists, leaving the frozen payload alone. Returns false when the run is
+ * unknown or was not suspended, so a caller can say "nothing to resume" rather
+ * than report a no-op as success.
+ */
+export function resumeSuspendedSubagentDelivery(runId: string): boolean {
+  const entry = subagentRuns.get(runId);
+  if (!entry || !resumeSuspendedDelivery(entry)) {
+    return false;
+  }
+  persistSubagentRuns(runId);
+  return true;
+}
+
+/** Lists runs whose final delivery is suspended with a stored payload. */
+export function listSuspendedSubagentDeliveries(): SubagentRunRecord[] {
+  return [...subagentRuns.values()].filter((entry) => isDeliverySuspended(entry));
+}
+
 export function initSubagentRegistry() {
   const state = getSubagentRegistryBootstrapState();
   if (!state.ready || !state.restorer) {

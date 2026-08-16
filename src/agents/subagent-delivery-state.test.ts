@@ -1,6 +1,10 @@
 // Subagent delivery-state tests cover current registry record normalization.
 import { describe, expect, it } from "vitest";
-import { normalizeSubagentRunState } from "./subagent-delivery-state.js";
+import {
+  isDeliverySuspended,
+  normalizeSubagentRunState,
+  resumeSuspendedDelivery,
+} from "./subagent-delivery-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 function baseRun(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord {
@@ -132,5 +136,60 @@ describe("normalizeSubagentRunState", () => {
     );
 
     expect(entry.cleanupHandled).toBe(true);
+  });
+});
+
+describe("resumeSuspendedDelivery", () => {
+  function suspendedRun(): SubagentRunRecord {
+    const entry = normalizeSubagentRunState(baseRun({ endedAt: 200 }));
+    entry.delivery = {
+      status: "suspended",
+      suspendedAt: 150,
+      suspendedReason: "retry-limit",
+      attemptCount: 4,
+      lastError: "completion agent did not produce a visible reply",
+      payload: {
+        frozenResultText: "PULSE_SMOKE_DONE marker and one proof line",
+      } as NonNullable<SubagentRunRecord["delivery"]>["payload"],
+    };
+    return entry;
+  }
+
+  it("re-arms the delivery and keeps the stored result", () => {
+    const entry = suspendedRun();
+    expect(isDeliverySuspended(entry)).toBe(true);
+
+    expect(resumeSuspendedDelivery(entry)).toBe(true);
+
+    // The announce path returns early on suspended entries, so clearing the
+    // suspension is what makes a stored result reachable again.
+    expect(isDeliverySuspended(entry)).toBe(false);
+    expect(entry.delivery?.status).toBe("pending");
+    expect(entry.delivery?.suspendedAt).toBeUndefined();
+    expect(entry.delivery?.suspendedReason).toBeUndefined();
+    // A fresh attempt budget, or the next failure would suspend it immediately.
+    expect(entry.delivery?.attemptCount).toBe(0);
+    expect(entry.delivery?.lastError).toBeNull();
+    // The whole point: the answer that was never delivered survives untouched.
+    expect(entry.delivery?.payload).toMatchObject({
+      frozenResultText: "PULSE_SMOKE_DONE marker and one proof line",
+    });
+  });
+
+  it("reports no-op instead of success when nothing is suspended", () => {
+    const pending = normalizeSubagentRunState(baseRun({ endedAt: 200 }));
+    pending.delivery = { status: "pending", attemptCount: 1 };
+
+    expect(resumeSuspendedDelivery(pending)).toBe(false);
+    expect(pending.delivery?.status).toBe("pending");
+    expect(pending.delivery?.attemptCount).toBe(1);
+  });
+
+  it("does not treat a suspended status without a timestamp as resumable", () => {
+    const entry = normalizeSubagentRunState(baseRun({ endedAt: 200 }));
+    entry.delivery = { status: "suspended", attemptCount: 4 };
+
+    expect(resumeSuspendedDelivery(entry)).toBe(false);
+    expect(entry.delivery?.status).toBe("suspended");
   });
 });
