@@ -200,8 +200,12 @@ vi.mock("../agents/openclaw-tools.js", () => {
         if (mode === "transport-timeout") {
           throw new GatewayTransportError({
             kind: "timeout",
-            message: "gateway timeout after 10000ms",
-            connectionDetails: { message: "Gateway target: ws://127.0.0.1:18789" } as never,
+            message:
+              "gateway timeout after 10000ms\nGateway target: ws://127.0.0.1:18789\nConfig: /root/.openclaw/gateway-config-file\nBind: loopback",
+            connectionDetails: {
+              message:
+                "Gateway target: ws://127.0.0.1:18789\nConfig: /root/.openclaw/gateway-config-file",
+            } as never,
             timeoutMs: 10_000,
           });
         }
@@ -992,6 +996,11 @@ describe("POST /tools/invoke", () => {
     expect(body.error?.type).toBe("gateway_transport_timeout");
     expect(body.error?.retryable).toBe(true);
     expect(String(body.error?.message)).toContain("gateway timeout after 10000ms");
+    // Only the transport verdict leaves the process; connection details (config
+    // path, bind, target) stay in the gateway log.
+    expect(String(body.error?.message)).not.toContain("Config:");
+    expect(String(body.error?.message)).not.toContain("Bind:");
+    expect(String(body.error?.message)).not.toContain("\n");
   });
 
   it("passes deprecated format alias through invoke payloads even when schema omits it", async () => {

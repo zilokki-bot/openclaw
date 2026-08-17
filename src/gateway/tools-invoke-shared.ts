@@ -363,7 +363,10 @@ export async function invokeGatewayTool(params: {
         toolName,
         error: {
           type: err.kind === "timeout" ? "gateway_transport_timeout" : "gateway_transport_closed",
-          message: getErrorMessage(err) || `gateway transport ${err.kind}`,
+          // First line only: the verdict ("gateway timeout after Nms"). Connection
+          // details (target, config path, bind) stay in the gateway log above.
+          message:
+            (getErrorMessage(err).split("\n")[0] || "").trim() || `gateway transport ${err.kind}`,
           retryable: true,
         },
       };
