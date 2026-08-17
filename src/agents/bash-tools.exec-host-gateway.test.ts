@@ -2149,6 +2149,30 @@ EOF`,
     });
   });
 
+  it("does not park a background subagent run inline on approval; it yields approval-pending so the lane slot is released", async () => {
+    // A subagent child holding a lane slot for the whole approval timeout (30 min)
+    // while no approver is online is exactly the zombie-slot starvation seen live.
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue("allow-once");
+    createExecApprovalDecisionStateMock.mockReturnValue({
+      baseDecision: { timedOut: false },
+      approvedByAsk: true,
+      deniedReason: null,
+    });
+    const result = await runGatewayAllowlist({
+      command: "pwd && df -h",
+      turnSourceChannel: "telegram",
+      sessionKey: "agent:developer:subagent:11111111-2222-4333-8444-555555555555",
+      runId: "run-subagent-approval",
+      toolCallId: "tool-subagent-approval",
+    });
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    // The turn ends with the pending tool result (slot released); the decision is
+    // resolved by the existing fire-and-forget follow-up path, not inline.
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+    expect(result.allowWithoutEnforcedCommand).toBeUndefined();
+    expect(runExecProcessMock).not.toHaveBeenCalled();
+  });
+
   it("waits inline for webchat approval so the exec tool can return real output to the model", async () => {
     resolveApprovalDecisionOrUndefinedMock.mockResolvedValue("allow-once");
     createExecApprovalDecisionStateMock.mockReturnValue({

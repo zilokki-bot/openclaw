@@ -46,6 +46,7 @@ import {
   GatewayDrainingError,
   runWithGatewayIndependentRootWorkAdmission,
 } from "../process/gateway-work-admission.js";
+import { isSubagentSessionKey } from "../sessions/session-key-utils.js";
 import { isNativeApprovalChannel, normalizeMessageChannel } from "../utils/message-channel.js";
 import { markBackgrounded, tail } from "./bash-process-registry.js";
 import {
@@ -417,8 +418,19 @@ function buildGatewayExecApprovalFollowupSummary(params: {
 function shouldAwaitGatewayApprovalInline(params: {
   turnSourceChannel?: string;
   approvalFollowupMode?: "agent" | "direct";
+  sessionKey?: string;
+  trigger?: string;
 }): boolean {
   if (params.approvalFollowupMode !== undefined) {
+    return false;
+  }
+  // Background subagent runs (spawned children, plugin/runtime "overflow" work)
+  // must never park a lane slot for the whole approval timeout waiting for a
+  // human who may not be online: that is how a burst of children starves the
+  // subagent lane and the foreground line behind it. They take the existing
+  // approval-pending tool result instead; the turn ends, the slot is released,
+  // and the approval follow-up resumes the session if a decision arrives.
+  if (params.trigger === "overflow" || isSubagentSessionKey(params.sessionKey)) {
     return false;
   }
   // Native chat approval clients (Telegram /approve, Discord buttons,
