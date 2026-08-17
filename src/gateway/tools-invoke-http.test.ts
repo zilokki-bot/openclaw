@@ -9,6 +9,7 @@ import {
   GATEWAY_CLIENT_NAMES,
 } from "../../packages/gateway-protocol/src/client-info.js";
 import type { runBeforeToolCallHook as runBeforeToolCallHookType } from "../agents/agent-tools.before-tool-call.js";
+import { GatewayTransportError } from "./call.js";
 
 type RunBeforeToolCallHook = typeof runBeforeToolCallHookType;
 type RunBeforeToolCallHookArgs = Parameters<RunBeforeToolCallHook>[0];
@@ -195,6 +196,18 @@ vi.mock("../agents/openclaw-tools.js", () => {
         }
         if (mode === "crash") {
           throw new Error("boom");
+        }
+        if (mode === "transport-timeout") {
+          throw new GatewayTransportError({
+            kind: "timeout",
+            message:
+              "gateway timeout after 10000ms\nGateway target: ws://127.0.0.1:18789\nConfig: /root/.openclaw/gateway-config-file\nBind: loopback",
+            connectionDetails: {
+              message:
+                "Gateway target: ws://127.0.0.1:18789\nConfig: /root/.openclaw/gateway-config-file",
+            } as never,
+            timeoutMs: 10_000,
+          });
         }
         return { ok: true };
       },
@@ -965,6 +978,29 @@ describe("POST /tools/invoke", () => {
     expect(crashBody.ok).toBe(false);
     expect(crashBody.error?.type).toBe("tool_error");
     expect(crashBody.error?.message).toBe("tool execution failed");
+  });
+
+  it("maps gateway transport timeouts to a structured 503 instead of a generic 500", async () => {
+    setMainAllowedTools({ allow: ["tools_invoke_test"] });
+
+    const res = await invokeToolAuthed({
+      tool: "tools_invoke_test",
+      args: { mode: "transport-timeout" },
+      sessionKey: "main",
+    });
+    // A loopback gateway RPC that timed out is backpressure, not a tool bug:
+    // the caller must see a retryable transport verdict with the real reason.
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error?.type).toBe("gateway_transport_timeout");
+    expect(body.error?.retryable).toBe(true);
+    expect(String(body.error?.message)).toContain("gateway timeout after 10000ms");
+    // Only the transport verdict leaves the process; connection details (config
+    // path, bind, target) stay in the gateway log.
+    expect(String(body.error?.message)).not.toContain("Config:");
+    expect(String(body.error?.message)).not.toContain("Bind:");
+    expect(String(body.error?.message)).not.toContain("\n");
   });
 
   it("passes deprecated format alias through invoke payloads even when schema omits it", async () => {
