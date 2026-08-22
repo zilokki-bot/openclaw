@@ -1,6 +1,7 @@
 // Workboard plugin module implements store behavior.
 import { randomUUID } from "node:crypto";
 import type { WorkboardAttachment, WorkboardCard } from "@openclaw/workboard-contract";
+import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
 import type {
   PersistedWorkboardAttachment,
   PersistedWorkboardBoard,
@@ -302,4 +303,40 @@ export class WorkboardStore extends WorkboardNotificationStore {
       dataVersion: stores.dataVersion,
     });
   }
+
+  /**
+   * Process-wide Workboard store.
+   *
+   * `openSqlite()` opens a fresh SQLite connection on every call and nothing ever
+   * closes it. Plugin registration runs more than once per process (reloads,
+   * re-registration), so each pass leaked another connection to the same file: a
+   * live Gateway was observed holding 43 handles to `workboard.sqlite` plus 43 to
+   * its WAL. In WAL mode every extra connection keeps re-reading shared index
+   * pages to notice other writers, which showed up as ~150k read syscalls per
+   * second on an otherwise idle Gateway and as `slow SQLite transaction lock
+   * wait` warnings.
+   *
+   * Registration paths must therefore share one connection. Callers that
+   * genuinely need an isolated store (tests, one-off tooling) keep using
+   * `openSqlite()` directly.
+   */
+  static shared(): WorkboardStore {
+    const state = sharedStoreState();
+    state.store ??= WorkboardStore.openSqlite();
+    return state.store;
+  }
+
+  /** Drops the memoized process-wide store. Tests only. */
+  static resetShared(): void {
+    sharedStoreState().store = undefined;
+  }
+}
+
+// Keyed on globalThis rather than held in a module-level binding: re-evaluating
+// this module is itself one of the ways registration re-ran, and a per-instance
+// memo would hand out a second connection to the same file.
+const SHARED_WORKBOARD_STORE_KEY = Symbol.for("openclaw.workboardSharedSqliteStore");
+
+function sharedStoreState(): { store?: WorkboardStore } {
+  return resolveGlobalSingleton<{ store?: WorkboardStore }>(SHARED_WORKBOARD_STORE_KEY, () => ({}));
 }
