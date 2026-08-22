@@ -285,6 +285,8 @@ export {
   TasksGetParamsSchema,
   TasksGetResultSchema,
   TasksCancelParamsSchema,
+  TasksRedeliverParamsSchema,
+  TasksRedeliverResultSchema,
   TasksCancelResultSchema,
   ConfigGetParamsSchema,
   ConfigSetParamsSchema,

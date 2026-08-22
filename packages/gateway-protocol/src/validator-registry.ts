@@ -165,6 +165,7 @@ import {
   TasksListParamsSchema,
   TasksGetParamsSchema,
   TasksCancelParamsSchema,
+  TasksRedeliverParamsSchema,
   ConfigGetParamsSchema,
   ConfigSetParamsSchema,
   ConfigApplyParamsSchema,
@@ -542,6 +543,7 @@ export const validateTaskSuggestionsDismissParams = lazyCompile(TaskSuggestionsD
 export const validateTasksListParams = lazyCompile(TasksListParamsSchema);
 export const validateTasksGetParams = lazyCompile(TasksGetParamsSchema);
 export const validateTasksCancelParams = lazyCompile(TasksCancelParamsSchema);
+export const validateTasksRedeliverParams = lazyCompile(TasksRedeliverParamsSchema);
 export const validateConfigGetParams = lazyCompile(ConfigGetParamsSchema);
 export const validateConfigSetParams = lazyCompile(ConfigSetParamsSchema);
 export const validateConfigApplyParams = lazyCompile(ConfigApplyParamsSchema);

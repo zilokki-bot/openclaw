@@ -107,7 +107,7 @@ function createSnapshotTask(overrides: Partial<TaskRecord>): TaskRecord {
 }
 
 async function runTaskHandler(
-  method: "tasks.list" | "tasks.get" | "tasks.cancel",
+  method: "tasks.list" | "tasks.get" | "tasks.cancel" | "tasks.redeliver",
   params: Record<string, unknown>,
 ) {
   const { calls, respond } = captureRespond();
@@ -513,6 +513,81 @@ describe("tasks gateway handlers", () => {
     expect(payload?.task?.id).toBe(task.taskId);
     expect(payload?.task?.status).toBe("cancelled");
     expect(payload?.task?.error).toBe("user stopped task");
+  });
+
+  it("resumes a suspended delivery inside this process, not in the caller's", async () => {
+    const { addSubagentRunForTests, resetSubagentRegistryForTests } =
+      await import("../../agents/subagent-registry.test-helpers.js");
+    resetSubagentRegistryForTests();
+    const task = createTaskRecord({
+      runtime: "cli",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
+      runId: "run-redeliver",
+      task: "Task with a suspended delivery",
+      status: "ended",
+      deliveryStatus: "pending",
+    });
+    // The registry seeded here belongs to THIS process. That is the whole point
+    // of the gateway route: a CLI process holds its own empty copy, so a resume
+    // performed there could never reach this held payload.
+    addSubagentRunForTests({
+      runId: "run-redeliver",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "agent:main:main",
+      controllerSessionKey: "agent:main:main",
+      task: "Task with a suspended delivery",
+      cleanup: "keep",
+      spawnMode: "run",
+      createdAt: 100,
+      startedAt: 100,
+      endedAt: 200,
+      expectsCompletionMessage: true,
+      execution: { status: "ended", startedAt: 100 },
+      completion: { required: true },
+      delivery: {
+        status: "suspended",
+        suspendedAt: 150,
+        suspendedReason: "retry-limit",
+        attemptCount: 4,
+        lastError: "completion agent did not produce a visible reply",
+      },
+    } as Parameters<typeof addSubagentRunForTests>[0]);
+
+    const { calls, payload } = await runTaskHandler("tasks.redeliver", {
+      taskId: task.taskId,
+    });
+
+    expect(calls[0]?.[0]).toBe(true);
+    expect(payload?.found).toBe(true);
+    expect(payload?.resumed).toBe(true);
+    expect(payload?.runId).toBe("run-redeliver");
+
+    // A second call is a genuine no-op and must say so rather than report success.
+    const repeat = await runTaskHandler("tasks.redeliver", { taskId: task.taskId });
+    expect(repeat.payload?.found).toBe(true);
+    expect(repeat.payload?.resumed).toBe(false);
+    resetSubagentRegistryForTests();
+  });
+
+  it("refuses to redeliver a task that carries no run id", async () => {
+    const task = createTaskRecord({
+      runtime: "cli",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
+      task: "Task without a run",
+      status: "ended",
+      deliveryStatus: "pending",
+    });
+
+    const { payload } = await runTaskHandler("tasks.redeliver", { taskId: task.taskId });
+
+    expect(payload?.found).toBe(false);
+    expect(payload?.resumed).toBe(false);
+    expect(payload?.reason).toContain("no run id");
   });
 
   it("cancels ACP tasks through the live Gateway handler and control runtime", async () => {

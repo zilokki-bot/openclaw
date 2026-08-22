@@ -144,6 +144,7 @@ const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "tasks.list", scope: "operator.read", since: "<=2026.7" },
   { name: "tasks.get", scope: "operator.read", since: "<=2026.7" },
   { name: "tasks.cancel", scope: "operator.write", since: "<=2026.7" },
+  { name: "tasks.redeliver", scope: "operator.write", since: "2026.8" },
   { name: "taskSuggestions.list", scope: "operator.read", since: "<=2026.7" },
   { name: "taskSuggestions.create", scope: "operator.write", since: "<=2026.7" },
   { name: "taskSuggestions.accept", scope: "operator.admin", since: "<=2026.7" },

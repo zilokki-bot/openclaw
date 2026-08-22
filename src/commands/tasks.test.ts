@@ -363,6 +363,12 @@ describe("tasks commands", () => {
         deliveryStatus: "not_applicable",
         notifyPolicy: "silent",
       });
+      mocks.callGateway.mockResolvedValueOnce({
+        found: true,
+        resumed: false,
+        runId: task.runId,
+        suspendedWaiting: 0,
+      });
       const runtime = createRuntime();
 
       await tasksRedeliverCommand({ lookup: task.taskId }, runtime);
@@ -371,6 +377,44 @@ describe("tasks commands", () => {
       expect(runtime.log).not.toHaveBeenCalled();
       expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("nothing was resumed"));
       expect(runtime.exit).toHaveBeenCalledWith(1);
+    });
+  });
+
+  it("routes redeliver through the live gateway so the running process resumes the delivery", async () => {
+    await withTaskCommandStateDir(async () => {
+      const task = createTaskRecord({
+        runtime: "cli",
+        ownerKey: "agent:analyst:subagent:route",
+        scopeKind: "session",
+        childSessionKey: "agent:analyst:subagent:route",
+        runId: "redeliver-run-route",
+        task: "Resume a suspended delivery",
+        status: "ended",
+        deliveryStatus: "not_applicable",
+        notifyPolicy: "silent",
+      });
+      mocks.callGateway.mockResolvedValueOnce({
+        found: true,
+        resumed: true,
+        runId: task.runId,
+      });
+      const runtime = createRuntime();
+
+      await tasksRedeliverCommand({ lookup: task.taskId }, runtime);
+
+      // The suspended delivery lives in the Gateway process memory. Flipping the
+      // record from this CLI process would persist a resumed flag that the
+      // running Gateway never reads, so the result would sit until a restart.
+      expect(mocks.callGateway).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "tasks.redeliver",
+          params: { taskId: task.taskId },
+          timeoutMs: 5_000,
+        }),
+      );
+      expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("Resumed"));
+      expect(runtime.error).not.toHaveBeenCalled();
+      expect(runtime.exit).not.toHaveBeenCalled();
     });
   });
 

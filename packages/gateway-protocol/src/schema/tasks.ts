@@ -90,6 +90,20 @@ export const TasksCancelResultSchema = closedObject({
   task: Type.Optional(TaskSummarySchema),
 });
 
+/** Redeliver request for one task id whose final delivery is suspended. */
+export const TasksRedeliverParamsSchema = closedObject({
+  taskId: NonEmptyString,
+});
+
+/** Redeliver result: whether the run was found and whether it was resumed. */
+export const TasksRedeliverResultSchema = closedObject({
+  found: Type.Boolean(),
+  resumed: Type.Boolean(),
+  reason: Type.Optional(Type.String()),
+  runId: Type.Optional(Type.String()),
+  suspendedWaiting: Type.Optional(Type.Number()),
+});
+
 // Wire types derive directly from local schema consts so public d.ts graphs never
 // pull in the ProtocolSchemas registry.
 export type TaskSummary = Static<typeof TaskSummarySchema>;
@@ -99,3 +113,5 @@ export type TasksGetParams = Static<typeof TasksGetParamsSchema>;
 export type TasksGetResult = Static<typeof TasksGetResultSchema>;
 export type TasksCancelParams = Static<typeof TasksCancelParamsSchema>;
 export type TasksCancelResult = Static<typeof TasksCancelResultSchema>;
+export type TasksRedeliverParams = Static<typeof TasksRedeliverParamsSchema>;
+export type TasksRedeliverResult = Static<typeof TasksRedeliverResultSchema>;

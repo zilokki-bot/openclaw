@@ -117,6 +117,28 @@ async function tryCancelGatewayOwnedTaskViaGateway(
   }
 }
 
+type GatewayTaskRedeliverResult = {
+  found?: boolean;
+  resumed?: boolean;
+  reason?: string;
+  runId?: string;
+  suspendedWaiting?: number;
+};
+
+// The suspended delivery lives in the Gateway process registry, so the resume has
+// to run there. Doing it locally would persist a resumed flag into a record the
+// running Gateway never re-reads, and the stored result would wait for a restart.
+async function resumeSuspendedDeliveryViaGateway(
+  taskId: string,
+): Promise<GatewayTaskRedeliverResult> {
+  const { callGateway } = await import("../gateway/call.js");
+  return await callGateway<GatewayTaskRedeliverResult>({
+    method: "tasks.redeliver",
+    params: { taskId },
+    timeoutMs: 5_000,
+  });
+}
+
 function configureTaskMaintenanceFromConfig(): void {
   configureTaskRegistryMaintenance();
 }
@@ -481,9 +503,23 @@ export async function tasksRedeliverCommand(
     runtime.exit(1);
     return;
   }
-  const { listSuspendedSubagentDeliveries, resumeSuspendedSubagentDelivery } =
-    await import("../agents/subagent-registry.js");
-  const resumed = resumeSuspendedSubagentDelivery(runId);
+  let result: GatewayTaskRedeliverResult;
+  try {
+    result = await resumeSuspendedDeliveryViaGateway(task.taskId);
+  } catch (error) {
+    // No local fallback here on purpose: unlike cancellation, a local resume
+    // cannot reach the held payload at all, so a fallback would print success
+    // while the requester still waits.
+    const detail = error instanceof Error ? error.message : String(error);
+    runtime.error(
+      `Resuming a suspended delivery requires the live Gateway tasks.redeliver path: ${detail}`,
+    );
+    runtime.exit(1);
+    return;
+  }
+  // A malformed or empty reply must not crash the operator command; treat it as
+  // "not resumed" so the caller still learns the delivery is still waiting.
+  const resumed = Boolean(result?.resumed);
   if (opts.json) {
     runtime.log(JSON.stringify({ taskId: task.taskId, runId, resumed }, null, 2));
     return;
@@ -492,9 +528,10 @@ export async function tasksRedeliverCommand(
     // Separate "nothing to resume" from "resumed": a silent success on a no-op
     // reads as a delivery that never happened. Showing what is still waiting
     // gives the operator somewhere to go next.
-    const waiting = listSuspendedSubagentDeliveries().length;
+    const waiting = result?.suspendedWaiting ?? 0;
     runtime.error(
-      `No suspended delivery for run ${runId}; nothing was resumed. Delivery status: ${task.deliveryStatus}. Suspended deliveries waiting: ${waiting}.`,
+      result?.reason ??
+        `No suspended delivery for run ${runId}; nothing was resumed. Delivery status: ${task.deliveryStatus}. Suspended deliveries waiting: ${waiting}.`,
     );
     runtime.exit(1);
     return;

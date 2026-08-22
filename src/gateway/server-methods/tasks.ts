@@ -8,6 +8,7 @@ import {
   type TasksListParams,
   validateTasksCancelParams,
   validateTasksGetParams,
+  validateTasksRedeliverParams,
   validateTasksListParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
@@ -118,6 +119,42 @@ export const tasksHandlers: GatewayRequestHandlers = {
     // The potentially longer task input is lookup-only. List and event payloads
     // stay compact while detail views can show the operator what was requested.
     respond(true, { task: mapTaskSummary(task, { includePrompt: true }) });
+  },
+  // The suspended delivery is held in this process's subagent registry, so the
+  // resume has to happen here. A CLI process flipping its own copy would persist
+  // a resumed flag the running Gateway never reads.
+  "tasks.redeliver": async ({ params, respond }) => {
+    if (!assertValidParams(params, validateTasksRedeliverParams, "tasks.redeliver", respond)) {
+      return;
+    }
+    const taskId = params.taskId;
+    const task = getTaskById(taskId);
+    if (!task) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `task not found: ${taskId}`),
+      );
+      return;
+    }
+    const runId = normalizeOptionalString(task.runId);
+    if (!runId) {
+      respond(true, {
+        found: false,
+        resumed: false,
+        reason: `Task ${taskId} has no run id, so there is no suspended delivery to resume.`,
+      });
+      return;
+    }
+    const { listSuspendedSubagentDeliveries, resumeSuspendedSubagentDelivery } =
+      await import("../../agents/subagent-registry.js");
+    const resumed = resumeSuspendedSubagentDelivery(runId);
+    respond(true, {
+      found: true,
+      resumed,
+      runId,
+      ...(resumed ? {} : { suspendedWaiting: listSuspendedSubagentDeliveries().length }),
+    });
   },
   "tasks.cancel": async ({ params, respond, context }) => {
     if (!assertValidParams(params, validateTasksCancelParams, "tasks.cancel", respond)) {
