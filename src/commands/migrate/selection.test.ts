@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { MigrationItem, MigrationPlan } from "../../plugins/types.js";
 import { applyMigrationItemSelection } from "./item-selection.js";
 import {
+  applyExplicitMigrationSelectionBoundary,
   applyMigrationPluginSelection,
   applyMigrationSelectedPluginItemIds,
   applyMigrationSelectedSkillItemIds,
@@ -592,6 +593,103 @@ describe("applyMigrationPluginSelection", () => {
       ),
     ).toThrow(
       'No migratable plugin matched "calendar". Available plugins: gmail, google-calendar.',
+    );
+  });
+});
+
+describe("applyExplicitMigrationSelectionBoundary", () => {
+  const OUTSIDE = "outside explicit migration selection";
+
+  function agentItem(id: string): MigrationItem {
+    return {
+      id,
+      kind: "agent",
+      action: "copy",
+      status: "planned",
+      source: `/tmp/codex/agents/${id}`,
+      target: `/tmp/openclaw/agents/${id}`,
+      details: {},
+    };
+  }
+
+  it("leaves the plan untouched when no explicit selection was given", () => {
+    const input = plan([skillItem({ id: "skill:a", name: "a" }), agentItem("agent:a")]);
+
+    const result = applyExplicitMigrationSelectionBoundary(input, {});
+
+    expect(result).toBe(input);
+  });
+
+  it("skips other kinds once --skill narrows the migration", () => {
+    const input = plan([
+      skillItem({ id: "skill:a", name: "a" }),
+      agentItem("agent:a"),
+      pluginItem({ id: "plugin:a", name: "a" }),
+    ]);
+
+    const result = applyExplicitMigrationSelectionBoundary(input, { skills: ["a"] });
+
+    const byId = new Map(result.items.map((item) => [item.id, item]));
+    // Asking for one skill must not quietly carry unrelated work along.
+    expect(expectDefined(byId.get("skill:a"), "skill item").status).toBe("planned");
+    expect(expectDefined(byId.get("agent:a"), "agent item").status).toBe("skipped");
+    expect(expectDefined(byId.get("agent:a"), "agent item").reason).toBe(OUTSIDE);
+    expect(expectDefined(byId.get("plugin:a"), "plugin item").status).toBe("skipped");
+    expect(result.summary.planned).toBe(1);
+  });
+
+  it("keeps the codex plugin config item when --plugin is given", () => {
+    const input = plan([
+      pluginItem({ id: "plugin:a", name: "a" }),
+      codexPluginConfigItem(["a"]),
+      agentItem("agent:a"),
+    ]);
+
+    const result = applyExplicitMigrationSelectionBoundary(input, { plugins: ["a"] });
+
+    const byId = new Map(result.items.map((item) => [item.id, item]));
+    // The plugin entries are useless without the config item that declares them.
+    expect(expectDefined(byId.get("config:codex-plugins"), "config item").status).toBe("planned");
+    expect(expectDefined(byId.get("agent:a"), "agent item").status).toBe("skipped");
+  });
+
+  it("does not revive or re-skip items that were already settled", () => {
+    const input = plan([
+      skillItem({ id: "skill:done", name: "done", status: "skipped", reason: "already there" }),
+      agentItem("agent:a"),
+    ]);
+
+    const result = applyExplicitMigrationSelectionBoundary(input, { skills: ["done"] });
+
+    const settled = expectDefined(
+      result.items.find((item) => item.id === "skill:done"),
+      "settled item",
+    );
+    expect(settled.status).toBe("skipped");
+    expect(settled.reason).toBe("already there");
+  });
+
+  it("composes after an exact item-id selection without invalidating those ids", () => {
+    const input = plan([
+      skillItem({ id: "skill:a", name: "a" }),
+      skillItem({ id: "skill:b", name: "b" }),
+      agentItem("agent:a"),
+    ]);
+
+    // Order matters: the id selection validates against still-selectable items, so
+    // running the boundary first would make a legitimate --item id look unknown.
+    const selected = applyMigrationItemSelection(input, ["skill:a"]);
+    const result = applyExplicitMigrationSelectionBoundary(selected, { skills: ["a", "b"] });
+
+    const byId = new Map(result.items.map((item) => [item.id, item]));
+    expect(expectDefined(byId.get("skill:a"), "kept skill").status).toBe("planned");
+    expect(expectDefined(byId.get("skill:b"), "deselected skill").reason).toBe(
+      MIGRATION_NOT_SELECTED_REASON,
+    );
+    // An exact id selection already settles every other item, so the boundary finds
+    // nothing left to trim and must not relabel what the id selection decided.
+    expect(expectDefined(byId.get("agent:a"), "agent item").reason).toBe(
+      MIGRATION_NOT_SELECTED_REASON,
     );
   });
 });

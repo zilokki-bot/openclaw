@@ -22,6 +22,7 @@ import { formatMigrationPreview } from "./migrate/output.js";
 import { createMigrationPlan, resolveMigrationProvider } from "./migrate/providers.js";
 import {
   applyMigrationPluginSelection,
+  applyExplicitMigrationSelectionBoundary,
   applyMigrationSelectedPluginItemIds,
   applyMigrationSelectedSkillItemIds,
   applyMigrationSkillSelection,
@@ -49,9 +50,9 @@ import type {
 } from "./migrate/types.js";
 
 function selectMigrationItems(plan: MigrationPlan, opts: MigrateCommonOptions): MigrationPlan {
-  return applyMigrationPluginSelection(
-    applyMigrationSkillSelection(plan, opts.skills),
-    opts.plugins,
+  return applyExplicitMigrationSelectionBoundary(
+    applyMigrationPluginSelection(applyMigrationSkillSelection(plan, opts.skills), opts.plugins),
+    opts,
   );
 }
 
@@ -297,7 +298,7 @@ function hasSelectedCodexMigrationWork(plan: MigrationPlan): boolean {
       item.status === "planned" &&
       (item.kind === "auth" ||
         item.kind === "secret" ||
-        (item.kind === "skill" && item.action === "copy") ||
+        (item.kind === "skill" && (item.action === "copy" || item.action === "create")) ||
         (item.kind === "plugin" && item.action === "install")),
   );
 }
@@ -380,12 +381,15 @@ export async function migratePlanCommand(
     ...resolvedOpts,
     provider: providerId,
   });
+  // A dry run has to show what would actually happen: the unselected plan would
+  // list work the flags already ruled out.
+  const selectedPlan = selectMigrationItems(plan, resolvedOpts);
   if (resolvedOpts.json) {
-    writeRuntimeJson(runtime, redactMigrationPlan(plan));
+    writeRuntimeJson(runtime, redactMigrationPlan(selectedPlan));
   } else if (resolvedOpts.suppressPlanLog !== true) {
-    log.message(formatMigrationPreview(plan).join("\n"));
+    log.message(formatMigrationPreview(selectedPlan).join("\n"));
   }
-  return plan;
+  return selectedPlan;
 }
 
 /** Applies a migration non-interactively when `yes` is true. */

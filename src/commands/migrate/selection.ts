@@ -10,6 +10,7 @@ import { MIGRATION_CONFLICT_REASON_PHRASES } from "./output.js";
 
 // Selection tokens are shared with the command and prompt implementations.
 const MIGRATION_NOT_SELECTED_REASON = "not selected for migration";
+const MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON = "outside explicit migration selection";
 export const MIGRATION_SELECTION_ACCEPT = "__openclaw_migrate_accept_recommended__";
 export const MIGRATION_SELECTION_TOGGLE_ALL_ON = "__openclaw_migrate_toggle_all_on__";
 export const MIGRATION_SELECTION_TOGGLE_ALL_OFF = "__openclaw_migrate_toggle_all_off__";
@@ -290,6 +291,59 @@ export function applyMigrationSkillSelection(
   const selectable = getSelectableMigrationSkillItems(plan);
   const selectedIds = resolveSelectedSkillItemIds(selectable, selectedSkillRefs);
   return applyMigrationSelectedSkillItemIds(plan, selectedIds);
+}
+
+type ExplicitMigrationSelectionOptions = {
+  skills?: readonly string[];
+  plugins?: readonly string[];
+};
+
+function shouldKeepItemInExplicitMigrationSelection(
+  item: MigrationItem,
+  opts: ExplicitMigrationSelectionOptions,
+): boolean {
+  if (opts.skills !== undefined && item.kind === "skill") {
+    return true;
+  }
+  if (opts.plugins !== undefined && item.kind === "plugin") {
+    return true;
+  }
+  // The plugin entries are inert without the config item that declares them, so a
+  // --plugin selection has to carry it along.
+  if (opts.plugins !== undefined && isCodexPluginConfigItem(item)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Skips planned items outside explicit --skill/--plugin selections.
+ *
+ * Composes with `applyMigrationItemSelection` rather than duplicating it: that one
+ * narrows by exact item id, this one by kind. Run this one last — it settles items,
+ * and an id selection run afterwards would reject their ids as unavailable.
+ */
+export function applyExplicitMigrationSelectionBoundary(
+  plan: MigrationPlan,
+  opts: ExplicitMigrationSelectionOptions,
+): MigrationPlan {
+  if (opts.skills === undefined && opts.plugins === undefined) {
+    return plan;
+  }
+  const items = plan.items.map((item) => {
+    if (item.status !== "planned" && item.status !== "conflict") {
+      return item;
+    }
+    if (shouldKeepItemInExplicitMigrationSelection(item, opts)) {
+      return item;
+    }
+    return markMigrationItemSkipped(item, MIGRATION_ITEM_OUTSIDE_EXPLICIT_SELECTION_REASON);
+  });
+  return {
+    ...plan,
+    items,
+    summary: summarizeMigrationItems(items),
+  };
 }
 
 /** Applies plugin refs passed by CLI flags to a migration plan. */
