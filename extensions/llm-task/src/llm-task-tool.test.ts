@@ -455,10 +455,66 @@ describe("llm-task tool (json-only)", () => {
 });
 
 describe("llm task trajectory recording", () => {
+  // These blocks sit outside the main describe, so they need their own reset:
+  // firstEmbeddedRunCall reads call[0], which would otherwise be another test's.
+  beforeEach(() => {
+    resetRunnerMocks();
+  });
+
   it("disables trajectory recording for a one-shot completion", async () => {
     // Nothing reads a trajectory for a single non-agentic call, so recording one
     // per invocation is pure overhead on a hot path.
     const call = await executeEmbeddedRun({ prompt: "summarize this" });
     expect(call.disableTrajectory).toBe(true);
+  });
+});
+
+describe("llm task embedded run shape", () => {
+  // These blocks sit outside the main describe, so they need their own reset:
+  // firstEmbeddedRunCall reads call[0], which would otherwise be another test's.
+  beforeEach(() => {
+    resetRunnerMocks();
+  });
+
+  it("leaves the model route to the runtime when nobody authored one", async () => {
+    mockEmbeddedRunJson({ ok: true });
+    const tool = createLlmTaskTool(
+      fakeApi({ config: { agents: { defaults: { workspace: "/tmp" } } } }),
+    );
+
+    await tool.execute("id", { prompt: "x" });
+
+    // Passing a derived provider/model here pins the run to a guess. With no
+    // authored route the runtime must choose, exactly as it would for any agent.
+    const call = firstEmbeddedRunCall();
+    expect(call.provider).toBeUndefined();
+    expect(call.model).toBeUndefined();
+  });
+
+  it("passes an explicitly requested route through", async () => {
+    const call = await executeEmbeddedRun({ prompt: "x", provider: "openai", model: "gpt-5.5" });
+
+    expect(call.provider).toBe("openai");
+    expect(call.model).toBe("gpt-5.5");
+  });
+
+  it("omits streamParams entirely when neither knob was set", async () => {
+    // An object of undefined values is not the same as no override: downstream
+    // treats a present key as an authored value.
+    const call = await executeEmbeddedRun({ prompt: "x" });
+
+    expect(call.streamParams).toBeUndefined();
+  });
+
+  it("keeps only the stream knobs that were actually set", async () => {
+    const call = await executeEmbeddedRun({ prompt: "x", temperature: 0.25 });
+
+    expect(call.streamParams).toEqual({ temperature: 0.25 });
+  });
+
+  it("runs under the main agent", async () => {
+    const call = await executeEmbeddedRun({ prompt: "x" });
+
+    expect(call.agentId).toBe("main");
   });
 });
