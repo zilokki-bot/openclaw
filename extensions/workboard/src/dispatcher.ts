@@ -219,6 +219,11 @@ function buildWorkerPrompt(params: {
     "If you called workboard_proof separately, pass its returned proofId to workboard_complete.",
     "If blocked, call workboard_block with the card id, token, and reason.",
     "",
+    "Your card's full context is included below. To re-read this one card, call",
+    "workboard_read with the card id. Do NOT call workboard_list to work your own",
+    "card: it loads the entire board and is never required when you already have",
+    "your card id.",
+    "",
     params.context,
   ].join("\n");
 }
@@ -458,7 +463,9 @@ async function runWorkboardDispatch(
       // Racing card changes never reached a worker and must not consume the
       // provider-outage budget or starve a later healthy candidate.
       attemptedStarts += 1;
-      const context = await params.store.buildWorkerContext(card.id);
+      // Reuse the board already loaded for this dispatch pass instead of
+      // re-listing the whole board once per started worker.
+      const context = await params.store.buildWorkerContext(card.id, cards);
       const materialized = await materializeWorkspace({
         card: claimed.card,
         worktrees: params.worktrees,

@@ -293,6 +293,9 @@ export function createLlmTaskTool(api: OpenClawPluginApi) {
             thinkLevel,
             streamParams,
             disableTools: true,
+            // A one-shot completion has no trajectory worth recording, and writing
+            // one per call is pure overhead on a hot path.
+            disableTrajectory: true,
           });
 
           const text = collectText(

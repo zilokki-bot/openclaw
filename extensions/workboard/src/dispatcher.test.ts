@@ -1081,3 +1081,27 @@ describe("dispatchAndStartWorkboardCards", () => {
     expect((await store.get(card.id))?.metadata?.claim).toBeUndefined();
   });
 });
+
+describe("worker prompt board-read guidance", () => {
+  it("steers the worker to a card-scoped read instead of a full board load", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    await store.create({
+      title: "Scoped read worker",
+      status: "ready",
+      workspaceAccess: { unrestricted: true },
+    });
+    const run = vi.fn().mockResolvedValue({ runId: "run-scoped" });
+
+    await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run },
+      options: { now: 10, maxStarts: 1 },
+    });
+
+    // Worker is steered to card-scoped reads: workboard_read for its own card,
+    // never workboard_list, which loads the entire board on a single-core loop.
+    const message = run.mock.calls[0]?.[0]?.message;
+    expect(message).toContain("workboard_read with the card id");
+    expect(message).toContain("Do NOT call workboard_list");
+  });
+});

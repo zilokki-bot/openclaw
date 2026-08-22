@@ -453,3 +453,12 @@ describe("llm-task tool (json-only)", () => {
     });
   });
 });
+
+describe("llm task trajectory recording", () => {
+  it("disables trajectory recording for a one-shot completion", async () => {
+    // Nothing reads a trajectory for a single non-agentic call, so recording one
+    // per invocation is pure overhead on a hot path.
+    const call = await executeEmbeddedRun({ prompt: "summarize this" });
+    expect(call.disableTrajectory).toBe(true);
+  });
+});

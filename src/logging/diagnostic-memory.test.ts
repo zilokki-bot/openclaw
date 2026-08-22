@@ -545,3 +545,77 @@ describe("diagnostic memory", () => {
     }
   });
 });
+
+const DIAGNOSTIC_THRESHOLD_ENV_KEYS = [
+  "OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES",
+  "OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES",
+  "OPENCLAW_DIAGNOSTIC_HEAP_WARNING_BYTES",
+  "OPENCLAW_DIAGNOSTIC_HEAP_CRITICAL_BYTES",
+  "OPENCLAW_DIAGNOSTIC_RSS_GROWTH_WARNING_BYTES",
+  "OPENCLAW_DIAGNOSTIC_RSS_GROWTH_CRITICAL_BYTES",
+  "OPENCLAW_DIAGNOSTIC_GROWTH_WINDOW_MS",
+  "OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS",
+] as const;
+
+describe("diagnostic memory threshold env overrides", () => {
+  beforeEach(() => {
+    resetDiagnosticEventsForTest();
+    resetDiagnosticMemoryForTest();
+    for (const key of DIAGNOSTIC_THRESHOLD_ENV_KEYS) {
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of DIAGNOSTIC_THRESHOLD_ENV_KEYS) {
+      delete process.env[key];
+    }
+    resetDiagnosticMemoryForTest();
+    resetDiagnosticEventsForTest();
+  });
+
+  it("applies RSS pressure thresholds from env vars when no explicit thresholds are given", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "1000";
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_CRITICAL_BYTES = "3000";
+    process.env.OPENCLAW_DIAGNOSTIC_PRESSURE_REPEAT_MS = "60000";
+
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
+    emitDiagnosticMemorySample({ now: 1000, uptimeMs: 0, memoryUsage: memoryUsage({ rss: 2000 }) });
+    stop();
+
+    expect(events.filter((event) => event.type === "diagnostic.memory.pressure")).toMatchObject([
+      { type: "diagnostic.memory.pressure", level: "warning", thresholdBytes: 1000 },
+    ]);
+  });
+
+  it("ignores an invalid env threshold and keeps the default, raising no false pressure", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "abc";
+
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
+    // Far below the built-in warning level: an unusable env value must fall
+    // through to the default rather than being read as zero.
+    emitDiagnosticMemorySample({ now: 1000, uptimeMs: 0, memoryUsage: memoryUsage({ rss: 2000 }) });
+    stop();
+
+    expect(events.filter((event) => event.type === "diagnostic.memory.pressure")).toEqual([]);
+  });
+
+  it("lets an explicit threshold argument win over the env var", () => {
+    process.env.OPENCLAW_DIAGNOSTIC_RSS_WARNING_BYTES = "1000";
+
+    const events: DiagnosticEventPayload[] = [];
+    const stop = onDiagnosticEvent((event) => events.push(event));
+    emitDiagnosticMemorySample({
+      now: 1000,
+      uptimeMs: 0,
+      memoryUsage: memoryUsage({ rss: 2000 }),
+      thresholds: { rssWarningBytes: 5000 },
+    });
+    stop();
+
+    // 2000 is over the env value but under the explicit one, so nothing fires.
+    expect(events.filter((event) => event.type === "diagnostic.memory.pressure")).toEqual([]);
+  });
+});
