@@ -776,7 +776,9 @@ export function runAgentAttempt(params: {
             sessionKey: params.sessionKey,
             sessionEntry: params.sessionEntry,
             agentId: params.sessionAgentId,
-            trigger: "user",
+            // Trusted gateway/runtime callers label their own internal runs;
+            // everything else is a user turn.
+            trigger: params.opts.trigger ?? "user",
             sessionFile: params.sessionFile,
             storePath: params.storePath,
             workspaceDir: params.workspaceDir,
@@ -970,7 +972,7 @@ export function runAgentAttempt(params: {
     sessionTarget: params.sessionTarget,
     sandboxSessionKey: params.sessionKey,
     agentId: params.sessionAgentId,
-    trigger: "user",
+    trigger: params.opts.trigger ?? "user",
     messageChannel: params.messageChannel,
     messageProvider: params.opts.messageProvider ?? params.messageChannel,
     agentAccountId: params.runContext.accountId,
